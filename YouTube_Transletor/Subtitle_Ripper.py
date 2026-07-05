@@ -2,6 +2,9 @@ import subprocess
 import os
 import sys
 
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
 def download_and_split(url, lang_code, max_chars=150000):
     """
     Главная функция без зависимости от Chrome cookies
@@ -88,21 +91,25 @@ def download_and_split(url, lang_code, max_chars=150000):
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
+        # Если запустили из интерфейса — берем ссылку из аргументов,
+        # а язык по умолчанию ставим русский (скрипт сам переключится на 'en', если 'ru' не найдется)
         video_url = sys.argv[1]
+        lang_code = 'ru'
     else:
+        # Если запустили вручную в консоли — гоняем старые добрые input()
         video_url = input("Ссылка на YouTube: ").strip()
-
-    while True:
-        lang_choice = input("Язык субтитров (1 - Русский, 2 - Английский): ").strip()
-        if lang_choice == '1':
-            lang_code = 'ru'
-            break
-        elif lang_choice == '2':
-            lang_code = 'en'
-            break
-        else:
-            print("Неверный выбор. Введи 1 или 2.")
+        while True:
+            lang_choice = input("Язык субтитров (1 - Русский, 2 - Английский): ").strip()
+            if lang_choice == '1':
+                lang_code = 'ru'
+                break
+            elif lang_choice == '2':
+                lang_code = 'en'
+                break
+            else:
+                print("Неверный выбор. Введи 1 или 2.")
     
+    # Дальше твоя стандартная логика запуска
     if not download_and_split(video_url, lang_code):
         if lang_code != 'en':
             print("🔄 Пробую английские субтитры...")

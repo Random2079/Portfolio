@@ -1,85 +1,73 @@
-# Импортируем модули
-import sys                       # sys нужен для sys.executable (путь к питону) и sys.exit
+import sys 
 import os
-import subprocess                # subprocess позволяет запускать внешние скрипты
-from PyQt5.QtWidgets import (    # Из библиотеки интерфейсов берём:
-    QApplication,                #   - само приложение
-    QMainWindow,                 #   - главное окно
-    QPushButton,                 #   - кнопка
-    QLabel,                      #   - текстовая метка
-    QLineEdit,                   #   - поле ввода в одну строку
-    QVBoxLayout,                 #   - вертикальное расположение элементов
-    QWidget                      #   - пустой контейнер (виджет)
+from PyQt5.QtWidgets import ( 
+    QApplication, QMainWindow, QPushButton, QLabel, QLineEdit, QVBoxLayout, QWidget
 )
+# Импортируем QProcess для фонового запуска
+from PyQt5.QtCore import QProcess
 
 class SubtitleWindow(QMainWindow):
     def __init__(self):
-        super().__init__()  # Обязательно вызываем конструктор родителя (QMainWindow)
+        super().__init__()
 
-        # Заголовок окна
         self.setWindowTitle("Subtitle Ripper")
-
-        # Положение и размер окна: x=100, y=100, ширина=500, высота=200
         self.setGeometry(100, 100, 500, 200)
 
-        # Центральный виджет — контейнер, в который всё складываем
         central_widget = QWidget()
-        self.setCentralWidget(central_widget)  # Назначаем его главным в окне
-
-        # Вертикальная раскладка: все элементы будут идти столбиком
+        self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        # Поле ввода для ссылки
-        self.url_input = QLineEdit(self)                # Создаём поле
-        self.url_input.setPlaceholderText("Вставь ссылку на YouTube...")  # Подсказка внутри
-        layout.addWidget(self.url_input)                # Добавляем в раскладку
+        self.url_input = QLineEdit(self)
+        self.url_input.setPlaceholderText("Вставь ссылку на YouTube...")
+        layout.addWidget(self.url_input)
 
-        # Кнопка «Скачать»
-        self.download_button = QPushButton("Скачать субтитры", self)  # Создаём кнопку
-        # Связываем сигнал нажатия (clicked) с методом, который будем выполнять
+        self.download_button = QPushButton("Скачать субтитры", self)
         self.download_button.clicked.connect(self.on_download_clicked)
-        layout.addWidget(self.download_button)          # Добавляем кнопку
+        layout.addWidget(self.download_button)
 
-        # Текстовая метка для статуса
-        self.status_label = QLabel("Ожидание ссылки...", self)  # Начальный текст
-        layout.addWidget(self.status_label)             # Тоже в раскладку
+        self.status_label = QLabel("Ожидание ссылки...", self)
+        layout.addWidget(self.status_label)
+
+        # Создаем один фоновый процесс для этого окна
+        self.process = QProcess()
+        # Говорим ему: "Когда закончишь работу, вызови метод on_process_finished"
+        self.process.finished.connect(self.on_process_finished)
 
     def on_download_clicked(self):
-        # Метод вызывается, когда нажали кнопку
-
-        # Берём текст из поля и обрезаем пробелы по краям
         url = self.url_input.text().strip()
 
-        # Если ничего не ввели — показываем ошибку и выходим
         if not url:
             self.status_label.setText("Ошибка: введи ссылку!")
             return
 
-        # 1. ГДЕ ЛЕЖИТ ЭТОТ ФАЙЛ (GUI)
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # 2. СОБИРАЕМ ПУТЬ К РИППЕРУ (склеиваем папку + имя файла)
         ripper_path = os.path.join(base_dir, "Subtitle_Ripper.py")
 
-        self.status_label.setText("Скачиваю субтитры...")
+        self.status_label.setText("Скачиваю субтитры (в фоне, окно не виснет)...")
+        # Выключаем кнопку, чтобы нельзя было спамить кликами во время закачки
+        self.download_button.setEnabled(False)
 
-        # 3. ЗАПУСКАЕМ ЧЕРЕЗ ПОЛНЫЙ ПУТЬ (передаем ripper_path)
-        result = subprocess.run(
-            [sys.executable, ripper_path, url],
-            capture_output=True,
-            text=True
-        )
+        # ЗАПУСК В ФОНЕ: передаем интерпретатор питона, путь к скрипту и ссылку
+        self.process.start(sys.executable, [ripper_path, url])
 
-        # Проверяем код возврата: 0 — всё хорошо
-        if result.returncode == 0:
+    def on_process_finished(self, exit_code):
+        # Этот метод сработает сам, как только фоновый скрипт завершится
+        self.download_button.setEnabled(True) # Включаем кнопку обратно
+
+        if exit_code == 0:
             self.status_label.setText("Готово! Субтитры скачаны.")
         else:
-            # Если ошибка — выводим текст ошибки (stderr)
-            self.status_label.setText(f"Ошибка при скачивании:\n{result.stderr}")
+            # Если код не 0, значит была ошибка. Достаем ее текст из потока ошибок
+            err_bytes = self.process.readAllStandardError()
+            try:
+                error_text = err_bytes.data().decode('utf-8')
+            except:
+                error_text = err_bytes.data().decode('cp1251', errors='ignore') # для Windows
+            
+            self.status_label.setText(f"Ошибка при скачивании:\n{error_text}")
 
-# Точка входа: выполняется только при прямом запуске файла
 if __name__ == '__main__':
-    app = QApplication(sys.argv)   # Создаём приложение PyQt
-    window = SubtitleWindow()      # Создаём экземпляр нашего окна
-    window.show()                  # Показываем окно на экране
-    sys.exit(app.exec_())          # Запускаем бесконечный цикл событий и выходим, когда окно закроется
+    app = QApplication(sys.argv) 
+    window = SubtitleWindow() 
+    window.show() 
+    sys.exit(app.exec_())
