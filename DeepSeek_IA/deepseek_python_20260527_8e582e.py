@@ -1,12 +1,24 @@
 import asyncio
+import os
 import random
+from pathlib import Path
 from openai import OpenAI
+from dotenv import load_dotenv
+
+# .env лежит в корне DS_Projects (уже в .gitignore)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 MODEL = "deepseek-v4-pro"
-API_KEY = "sk-d9fb696f569c4e09989deba684ca425b"
 BASE_URL = "https://api.deepseek.com"
+API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
-# Инициализация клиента
+if not API_KEY:
+    raise RuntimeError(
+        "Не найден DEEPSEEK_API_KEY.\n"
+        "Создай файл .env в корне DS_Projects и добавь строку:\n"
+        "DEEPSEEK_API_KEY=твой_ключ"
+    )
+
 client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
 async def resilient_query(prompt: str) -> str:
