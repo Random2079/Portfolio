@@ -3,7 +3,8 @@ import os
 import subprocess
 import re
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QPushButton, QLabel, QLineEdit, QVBoxLayout, QWidget, QDesktopWidget
+    QApplication, QMainWindow, QPushButton, QLabel, QLineEdit, QVBoxLayout,
+    QHBoxLayout, QWidget, QDesktopWidget, QRadioButton, QButtonGroup
 )
 from PyQt5.QtCore import QProcess
 
@@ -116,6 +117,22 @@ class SubtitleWindow(QMainWindow):
         self.url_input.setPlaceholderText("Вставь ссылку на YouTube...")
         layout.addWidget(self.url_input)
 
+        language_layout = QHBoxLayout()
+        language_label = QLabel("Язык субтитров:", self)
+        self.ru_button = QRadioButton("Русский (RU)", self)
+        self.en_button = QRadioButton("English (EN)", self)
+        self.ru_button.setChecked(True)
+
+        self.language_group = QButtonGroup(self)
+        self.language_group.addButton(self.ru_button)
+        self.language_group.addButton(self.en_button)
+
+        language_layout.addWidget(language_label)
+        language_layout.addWidget(self.ru_button)
+        language_layout.addWidget(self.en_button)
+        language_layout.addStretch()
+        layout.addLayout(language_layout)
+
         self.download_button = QPushButton("Скачать субтитры", self)
         self.download_button.clicked.connect(self.on_download_clicked)
         layout.addWidget(self.download_button)
@@ -139,19 +156,24 @@ class SubtitleWindow(QMainWindow):
             self.status_label.setText("Ошибка: введи ссылку!")
             return
 
-        self.status_label.setText("Скачиваю субтитры...")
+        lang_code = "en" if self.en_button.isChecked() else "ru"
+        self.status_label.setText(f"Скачиваю субтитры ({lang_code.upper()})...")
         self.download_button.setEnabled(False)
+        self.ru_button.setEnabled(False)
+        self.en_button.setEnabled(False)
         
         # Простой и надежный запуск. QProcess сам правильно расставит все кавычки.
         if getattr(sys, 'frozen', False):
             # Запуск внутри готового .exe
-            self.process.start(sys.executable, [url])
+            self.process.start(sys.executable, [url, lang_code])
         else:
             # Запуск из VS Code
-            self.process.start(sys.executable, [os.path.abspath(__file__), url])
+            self.process.start(sys.executable, [os.path.abspath(__file__), url, lang_code])
 
     def on_process_finished(self, exit_code):
         self.download_button.setEnabled(True)
+        self.ru_button.setEnabled(True)
+        self.en_button.setEnabled(True)
         
         if exit_code == 0:
             url = self.url_input.text().strip()
@@ -204,13 +226,8 @@ if __name__ == '__main__':
 
     if len(sys.argv) > 1:
         video_url = sys.argv[1]
-        
-        if download_and_split(video_url, 'ru'):
-            sys.exit(0)
-        elif download_and_split(video_url, 'en'):
-            sys.exit(0)
-        else:
-            sys.exit(1)
+        lang_code = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] in ('ru', 'en') else 'ru'
+        sys.exit(0 if download_and_split(video_url, lang_code) else 1)
         
     else:
         app = QApplication(sys.argv) 
