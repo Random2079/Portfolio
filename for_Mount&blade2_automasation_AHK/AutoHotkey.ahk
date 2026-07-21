@@ -1,4 +1,4 @@
-﻿#NoEnv
+#NoEnv
 #SingleInstance Force
 SetWorkingDir %A_ScriptDir%
 
@@ -6,11 +6,15 @@ SetWorkingDir %A_ScriptDir%
 CoordMode, Mouse, Client
 
 isForging := false
+isClicking := false
 
 ; --- СТАРТ / ПАУЗА (Первая боковая кнопка мыши) ---
 XButton1::
     isForging := !isForging
     if (isForging) {
+        ; Одновременно должен работать только один режим
+        isClicking := false
+        SetTimer, DoClick, Off
         ToolTip, 🔨 КРАФТ ЗАПУЩЕН, 10, 10
         SetTimer, ForgeLoop, 10 ; Включаем бесконечный цикл
     } else {
@@ -37,6 +41,26 @@ ForgeLoop:
     
     ; Ждем 0.8 секунды, пока закроется плашка с созданным оружием
     Sleep, 50 
+return
+
+; --- АВТОКЛИК (Клавиша 1) ---
+1::
+    isClicking := !isClicking
+    if (isClicking) {
+        ; Одновременно должен работать только один режим
+        isForging := false
+        SetTimer, ForgeLoop, Off
+        ToolTip, 🖱️ АВТОКЛИК ВКЛЮЧЕН, 10, 10
+        SetTimer, DoClick, 10
+    } else {
+        ToolTip, 🛑 АВТОКЛИК ВЫКЛЮЧЕН, 10, 10
+        SetTimer, DoClick, Off
+    }
+    SetTimer, RemoveToolTip, -2000
+return
+
+DoClick:
+    Click
 return
 
 ; --- ПОЛНОЕ ЗАКРЫТИЕ СКРИПТА (Вторая боковая кнопка мыши) ---
