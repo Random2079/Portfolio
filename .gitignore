@@ -17,3 +17,13 @@ dist/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Cursor TTS runtime / debug (не исходники)
+Cursor_TTS/tts_debug.log
+Cursor_TTS/tts_last_clean.txt
+Cursor_TTS/tts_daemon.pid
+Cursor_TTS/tts_speech.pid
+Cursor_TTS/TTS_OFF
+Cursor_TTS/ahk_err.txt
+Cursor_TTS/__pycache__/
+debug-*.log

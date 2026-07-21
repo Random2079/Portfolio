@@ -1,0 +1,8 @@
+{
+  "engine": "local",
+  "voice": "ru-RU-DmitryNeural",
+  "local_speaker": "xenia",
+  "volume": 50,
+  "interrupt_on_new": false,
+  "pause_ms": 300
+}

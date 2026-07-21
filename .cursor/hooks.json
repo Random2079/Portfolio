@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterAgentResponse": [
+      {
+        "command": "cmd /c python .cursor/hooks/tts_after_response.py",
+        "timeout": 15
+      }
+    ]
+  }
+}
