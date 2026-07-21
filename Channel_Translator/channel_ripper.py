@@ -1,4 +1,4 @@
-import subprocess                     # запуск внешних программ (yt-dlp и т.п.)
+﻿import subprocess                     # запуск внешних программ (yt-dlp и т.п.)
 import os                              # работа с файловой системой и путями
 import time                            # время для логов
 import sys                             # доступ к sys.path и аргументам
@@ -9,7 +9,7 @@ import re                              # регулярные выражения
 # ===== НАСТРОЙКА ПУТИ =====
 current_dir = os.path.dirname(os.path.abspath(__file__))  # полный путь к текущему файлу
 parent_dir = os.path.dirname(current_dir)                 # родительская папка
-youtube_dir = os.path.join(parent_dir, "YouTube_Transletor")  # ожидаемая папка с модулем
+youtube_dir = os.path.join(parent_dir, "YouTube_Translator")  # ожидаемая папка с модулем
 if youtube_dir not in sys.path:                           # если папки нет в путях импорта
     sys.path.insert(0, youtube_dir)                       # — добавляем её в начало sys.path
 
