@@ -16,6 +16,40 @@ def get_video_id(url):
     return match.group(1) if match else None
 
 
+def sanitize_filename(name):
+    """Убирает из названия символы, запрещённые Windows."""
+    name = re.sub(r'[\\/*?:"<>|\x00-\x1f]', "", name)
+    name = re.sub(r'\s+', " ", name).strip(" .")
+    return name[:120] or "Без названия"
+
+
+def get_video_title(url, creation_flags):
+    """Получает название ролика через yt-dlp."""
+    result = subprocess.run(
+        ["yt-dlp", "--get-title", url],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+        creationflags=creation_flags,
+    )
+    return sanitize_filename(result.stdout.strip())
+
+
+def find_output_folder(video_id):
+    """Находит созданную папку по уникальному ID видео."""
+    suffix = f" [{video_id}]"
+    folders = [
+        entry.path
+        for entry in os.scandir(".")
+        if entry.is_dir()
+        and entry.name.startswith("субтитры_")
+        and entry.name.endswith(suffix)
+    ]
+    return max(folders, key=os.path.getmtime) if folders else None
+
+
 # =====================================================================
 # 2. ЛОГИКА СКАЧИВАНИЯ И ОБРАБОТКИ
 # =====================================================================
@@ -25,7 +59,20 @@ def download_and_split(url, lang_code, max_chars=150000):
         sys.stderr.write("Ошибка: Введена неверная ссылка! Не могу распознать ID видео YouTube.\n")
         return False
 
-    folder_name = f"субтитры_{video_id}"
+    # На Windows запрещаем вспомогательному процессу yt-dlp показывать чёрное окно.
+    creation_flags = 0x08000000 if os.name == 'nt' else 0
+
+    try:
+        video_title = get_video_title(url, creation_flags)
+    except FileNotFoundError:
+        sys.stderr.write("Ошибка: yt-dlp не установлен или не найден в PATH.\n")
+        return False
+    except subprocess.CalledProcessError as error:
+        details = (error.stderr or "").strip()
+        sys.stderr.write(f"Ошибка: не удалось получить название видео.\n{details}\n")
+        return False
+
+    folder_name = f"субтитры_{video_title} [{video_id}]"
     os.makedirs(folder_name, exist_ok=True)
     
     old_cwd = os.getcwd()
@@ -34,9 +81,6 @@ def download_and_split(url, lang_code, max_chars=150000):
     try:
         print(f"🎯 Ищу авто {lang_code}-субтитры: {url}")
         
-        # Магический флаг для Windows, который полностью запрещает рисовать черное окно консоли
-        creation_flags = 0x08000000 if os.name == 'nt' else 0
-
         cmd_auto = [
             "yt-dlp", "--write-auto-subs", "--sub-lang", lang_code,
             "--convert-subs", "srt", "--skip-download", "-o", "temp_subtitles", url
@@ -178,11 +222,14 @@ class SubtitleWindow(QMainWindow):
         if exit_code == 0:
             url = self.url_input.text().strip()
             video_id = get_video_id(url)
-            folder_name = f"субтитры_{video_id}"
-            full_text_path = os.path.join(folder_name, "0_весь_текст_для_буфера.txt")
+            folder_name = find_output_folder(video_id)
+            full_text_path = (
+                os.path.join(folder_name, "0_весь_текст_для_буфера.txt")
+                if folder_name else None
+            )
             
             clipboard_msg = ""
-            if os.path.exists(full_text_path):
+            if full_text_path and os.path.exists(full_text_path):
                 try:
                     with open(full_text_path, 'r', encoding='utf-8') as f:
                         text_for_buffer = f.read()
@@ -191,7 +238,8 @@ class SubtitleWindow(QMainWindow):
                 except Exception as e:
                     clipboard_msg = f"\n(Не удалось скопировать в буфер: {e})"
 
-            self.status_label.setText(f"Готово! Создана папка: {folder_name}{clipboard_msg}")
+            shown_folder = folder_name or "папка с субтитрами"
+            self.status_label.setText(f"Готово! Создана папка: {shown_folder}{clipboard_msg}")
         else:
             err_bytes = self.process.readAllStandardError()
             out_bytes = self.process.readAllStandardOutput()
