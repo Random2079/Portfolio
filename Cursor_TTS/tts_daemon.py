@@ -509,6 +509,31 @@ def handle_client(conn: socket.socket) -> None:
         if cmd == "ping":
             conn.sendall(b'{"ok":true,"pong":true}\n')
             return
+        if cmd == "warmup":
+            cfg = load_config()
+            engine = str(cfg.get("engine", DEFAULT_ENGINE))
+            if engine == "local":
+                try:
+                    from speak_local import warmup as warmup_local
+
+                    debug_log("WARMUP local begin")
+                    warmup_local()
+                    debug_log("WARMUP local done")
+                    conn.sendall(b'{"ok":true,"warmed":true,"engine":"local"}\n')
+                except Exception as error:
+                    debug_log(f"WARMUP fail: {error}")
+                    conn.sendall(
+                        json.dumps(
+                            {"ok": False, "error": str(error)},
+                            ensure_ascii=False,
+                        ).encode("utf-8")
+                        + b"\n"
+                    )
+            else:
+                # Edge не грузит модель в демон — достаточно живого процесса
+                debug_log("WARMUP edge skip (daemon already warm)")
+                conn.sendall(b'{"ok":true,"warmed":true,"engine":"edge"}\n')
+            return
         if cmd == "stop":
             cleared = clear_speech_queue()
             stop_playback()
@@ -570,6 +595,26 @@ def already_running() -> bool:
         return False
 
 
+def warmup_engine_background() -> None:
+    """Не блокирует accept: local Silero грузится в фоне после старта."""
+
+    def run() -> None:
+        cfg = load_config()
+        if cfg.get("engine") != "local":
+            debug_log("WARMUP bg skip (engine!=local)")
+            return
+        try:
+            from speak_local import warmup as warmup_local
+
+            debug_log("WARMUP bg local begin")
+            warmup_local()
+            debug_log("WARMUP bg local done")
+        except Exception as error:
+            debug_log(f"WARMUP bg fail: {error}")
+
+    threading.Thread(target=run, name="tts-warmup", daemon=True).start()
+
+
 def main() -> int:
     if already_running():
         return 0
@@ -577,6 +622,7 @@ def main() -> int:
     PID_FILE.write_text(str(os.getpid()), encoding="ascii")
     ensure_mixer()
     ensure_worker()
+    warmup_engine_background()
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

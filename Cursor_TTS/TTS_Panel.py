@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -222,6 +223,27 @@ def stop_speech() -> None:
             stderr=subprocess.DEVNULL,
             creationflags=flags,
         )
+
+
+def warmup_tts_backend() -> None:
+    """Поднять демон + прогреть Silero в фоне (не блокирует окно панели)."""
+    if not SPEAK_EDGE.is_file():
+        return
+    flags = 0x08000000 if sys.platform == "win32" else 0
+
+    def run() -> None:
+        try:
+            subprocess.run(
+                [sys.executable, str(SPEAK_EDGE), "--warmup"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=flags,
+                timeout=200,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    threading.Thread(target=run, name="tts-panel-warmup", daemon=True).start()
     if PID_FILE.is_file():
         try:
             pid = PID_FILE.read_text(encoding="ascii").strip()
@@ -339,6 +361,10 @@ class TTSPanel(QMainWindow):
                 self,
             )
         )
+
+        # OFF через TTS_OFF не должен переживать рестарт панели (дефолт = авто ON).
+        if OFF_FLAG.exists():
+            set_auto_on(True)
 
         self._reload_from_disk()
         self._refresh_status()
@@ -540,6 +566,13 @@ class TTSPanel(QMainWindow):
         stop_speech()
         self.status_label.setText("Остановлено.")
 
+    def closeEvent(self, event) -> None:  # noqa: N802
+        # Закрытие панели не должно оставлять TTS_OFF навсегда:
+        # авто по умолчанию снова ON (иначе хук молчит до ручного включения).
+        if OFF_FLAG.exists():
+            set_auto_on(True)
+        super().closeEvent(event)
+
 
 def main() -> int:
     app = QApplication(sys.argv)
@@ -571,6 +604,8 @@ def main() -> int:
     window.show()
     window.raise_()
     window.activateWindow()
+    # Холодный старт Silero — в фоне, чтобы первая фраза из чата не ждала torch
+    QTimer.singleShot(300, warmup_tts_backend)
     return app.exec_()
 
 

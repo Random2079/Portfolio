@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 import subprocess
 import re
 from PyQt5.QtWidgets import (
@@ -17,24 +18,25 @@ def get_video_id(url):
 
 
 def sanitize_filename(name):
-    """Убирает из названия символы, запрещённые Windows."""
+    """Убирает из названия символы, запрещённые Windows, и мусор кодировки."""
+    name = name.replace("\ufffd", "")
     name = re.sub(r'[\\/*?:"<>|\x00-\x1f]', "", name)
     name = re.sub(r'\s+', " ", name).strip(" .")
     return name[:120] or "Без названия"
 
 
 def get_video_title(url, creation_flags):
-    """Получает название ролика через yt-dlp."""
+    """Получает название ролика через yt-dlp (JSON → UTF-8, без сюрпризов консоли)."""
     result = subprocess.run(
-        ["yt-dlp", "--get-title", url],
+        ["yt-dlp", "--dump-single-json", "--skip-download", "--no-warnings", url],
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         check=True,
         creationflags=creation_flags,
     )
-    return sanitize_filename(result.stdout.strip())
+    # JSON у yt-dlp всегда в UTF-8; stdout консоли Windows иначе часто ломает кириллицу.
+    payload = json.loads(result.stdout.decode("utf-8"))
+    title = (payload.get("title") or "").strip()
+    return sanitize_filename(title)
 
 
 def find_output_folder(video_id):

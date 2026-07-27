@@ -2,6 +2,7 @@
 Клиент озвучки: шлёт текст в tts_daemon (тёплый процесс).
 Запуск: python speak_edge.py путь.txt
          python speak_edge.py --stop
+         python speak_edge.py --warmup
 Если демон не запущен — поднимает его сам.
 """
 from __future__ import annotations
@@ -24,6 +25,7 @@ PORT = 47391
 def send_command(payload: dict, timeout: float = 2.0) -> dict:
     raw = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
     with socket.create_connection((HOST, PORT), timeout=timeout) as sock:
+        sock.settimeout(timeout)
         sock.sendall(raw)
         data = b""
         while not data.endswith(b"\n"):
@@ -74,13 +76,32 @@ def ensure_daemon() -> None:
     raise RuntimeError("TTS daemon did not start")
 
 
+def warmup_backend(timeout: float = 180.0) -> dict:
+    """Поднять демон и прогреть Silero (local) / убедиться что демон жив (edge)."""
+    ensure_daemon()
+    return send_command({"cmd": "warmup"}, timeout=timeout)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("text_file", nargs="?", help="UTF-8 file with text to speak")
     parser.add_argument("--stop", action="store_true", help="Stop current speech")
+    parser.add_argument(
+        "--warmup",
+        action="store_true",
+        help="Start daemon and preload local TTS model",
+    )
     parser.add_argument("--voice", help="Ignored here; set in tts_config.json / panel")
     parser.add_argument("--volume", type=int, help="Ignored here; set in tts_config.json / panel")
     args = parser.parse_args()
+
+    if args.warmup:
+        try:
+            reply = warmup_backend()
+        except (OSError, RuntimeError) as exc:
+            print(f"warmup failed: {exc}", file=sys.stderr)
+            return 1
+        return 0 if reply.get("ok") else 1
 
     ensure_daemon()
 

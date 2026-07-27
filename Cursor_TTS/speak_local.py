@@ -29,28 +29,29 @@ def _get_synth_lock():
     if _synth_lock is None:
         import threading
 
-        _synth_lock = threading.Lock()
+        _synth_lock = threading.RLock()
     return _synth_lock
 
 
 def get_model():
     """Ленивая загрузка Silero. Первый раз нужен интернет (скачать модель)."""
     global _model, _device
-    if _model is not None:
+    with _get_synth_lock():
+        if _model is not None:
+            return _model
+
+        import torch
+
+        _device = torch.device("cpu")
+        _model, _example = torch.hub.load(
+            repo_or_dir="snakers4/silero-models",
+            model="silero_tts",
+            language="ru",
+            speaker="v4_ru",
+            trust_repo=True,
+        )
+        _model.to(_device)
         return _model
-
-    import torch
-
-    _device = torch.device("cpu")
-    _model, _example = torch.hub.load(
-        repo_or_dir="snakers4/silero-models",
-        model="silero_tts",
-        language="ru",
-        speaker="v4_ru",
-        trust_repo=True,
-    )
-    _model.to(_device)
-    return _model
 
 
 def synthesize_wav(text: str, speaker: str, wav_path: Path) -> None:
@@ -83,5 +84,5 @@ def synthesize_wav(text: str, speaker: str, wav_path: Path) -> None:
 
 
 def warmup() -> None:
-    """Прогрев модели при старте демона (опционально)."""
+    """Прогрев модели (torch + Silero) — чтобы первая фраза не ждала загрузку."""
     get_model()
