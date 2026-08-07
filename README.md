@@ -12,6 +12,7 @@
 
 Подробная инструкция по озвучке Cursor: [`Cursor_TTS/README.md`](Cursor_TTS/README.md).  
 У каждой папки проекта тоже есть короткий `README.md`.  
+Карта «что где»: [`PROJECTS.md`](PROJECTS.md).  
 Список идей / бэклог: [`IDEAS.md`](IDEAS.md) (для себя и для ИИ в Cursor, не гайд «для гостей»).
 
 ---
@@ -21,20 +22,23 @@
 ```
 DS_Projects/
 ├── README.md                 ← ты здесь
+├── PROJECTS.md               ← короткая карта проектов + статусы
 ├── IDEAS.md                  ← памятка идей
 ├── .env                      ← секреты (локально, не в git)
 ├── .gitignore
-├── .cursor/                  ← хуки и правила Cursor
+├── .cursor/                  ← хуки, правила, планы IDEA
 │   ├── hooks.json
 │   ├── hooks/tts_after_response.py
+│   ├── plans/
 │   └── rules/
-├── Cursor_TTS/               ← озвучка ответов Agent
-├── YouTube_Translator/       ← субтитры YouTube (GUI)
+├── Cursor_TTS/               ← озвучка ответов (Edge / Silero / Piper)
+├── YouTube_Translator/       ← субтитры YouTube (CustomTkinter)
 ├── Channel_Translator/       ← массовый рип канала (зависит от YouTube_*)
+├── MountBlade2_AHK/          ← макросы AutoHotkey для M&B II
 ├── Epub2txt/                 ← EPUB → TXT
 ├── Book_Parter/              ← мелочи для текста книг
 ├── DeepSeek_IA/              ← примеры запросов к DeepSeek API
-└── for_Mount&blade2_…/       ← макросы AutoHotkey для игры
+└── sandbox_ui/               ← UI-песочница
 ```
 
 ---
@@ -43,13 +47,13 @@ DS_Projects/
 
 | Папка | Зачем | Как запустить | Зависимости |
 |-------|--------|---------------|-------------|
-| **Cursor_TTS** | Озвучка ответов в Cursor (Edge / Silero), панель, хоткеи | Ярлык / `Start_TTS_Panel.vbs` или см. README внутри | `pip install -r Cursor_TTS/requirements.txt` → edge-tts, pygame, PyQt5, numpy, soundfile, omegaconf, ru-normalizr, torch. Плюс **AutoHotkey v1** для хоткеев. Хук Cursor: `.cursor/hooks.json` |
-| **YouTube_Translator** | GUI: ссылка на ролик → субтитры (yt-dlp) | `python YouTube_Translator/Subtitle_App.py` | **PyQt5**, системный **yt-dlp** в PATH. Опционально: `faster-whisper` для `whisper_transcribe.py` |
+| **Cursor_TTS** | Озвучка ответов в Cursor (Edge / Silero / **Piper**), панель, хоткеи | Ярлык / `Start_TTS_Panel.vbs` или см. README внутри | `pip install -r Cursor_TTS/requirements.txt` → edge-tts, pygame, PyQt5, piper-tts, numpy, soundfile, omegaconf, ru-normalizr, torch. Голоса Piper: `download_piper_voice.py` (ONNX не в git). **AutoHotkey v1** для хоткеев. Хук: `.cursor/hooks.json` |
+| **YouTube_Translator** | GUI: ссылка → субтитры + фразовые таймкоды (yt-dlp) | `python YouTube_Translator/Subtitle_App.py` | **customtkinter**, системный **yt-dlp** в PATH. Опционально: `faster-whisper` для `whisper_transcribe.py` |
 | **Channel_Translator** | Список видео канала → пакетная обработка | `python Channel_Translator/channel_ripper.py` | **yt-dlp**; импортирует модуль из `YouTube_Translator` (пути завязаны) |
+| **MountBlade2_AHK** | Макросы AHK (крафт / автоклик) | Открыть `AutoHotkey.ahk` в **AutoHotkey v1** | AutoHotkey, без Python |
 | **Epub2txt** | Книга EPUB → чистый TXT | `python Epub2txt/epub2txt.py` | `pip install ebooklib` |
 | **Book_Parter** | Убрать пустые строки из TXT и т.п. | `python Book_Parter/remove_empty_lines.py` | Стандартная библиотека Python |
 | **DeepSeek_IA** | Скрипт запросов к DeepSeek | `python DeepSeek_IA/deepseek_python_….py` | `pip install openai python-dotenv`; ключ `DEEPSEEK_API_KEY` в `.env` |
-| **for_Mount&blade2_…** | Макросы AHK (клики / автоматизация) | Открыть `.ahk` в **AutoHotkey v1** | AutoHotkey, без Python |
 
 ---
 
