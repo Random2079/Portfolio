@@ -150,7 +150,6 @@ _SRT_TIME = re.compile(
     r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*"
     r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})"
 )
-_SENTENCE_END = re.compile(r"[.?!…][\"»”']?\s*$")
 _MERGE_GAP_SEC = 1.5
 _MERGE_MAX_CHARS = 120
 
@@ -203,43 +202,97 @@ def parse_srt_segments(content: str) -> list[dict]:
     return segments
 
 
+def _word_overlap_merge(prev: str, nxt: str) -> str | None:
+    """
+    Склеивает частично перекрывающиеся куски без дубля хвоста/головы.
+    «Каждый из нас хоть раз» + «хоть раз в жизни сталкивался»
+    → «Каждый из нас хоть раз в жизни сталкивался».
+    None — перекрытия слов нет (это разные фразы).
+    """
+    prev_w = prev.split()
+    nxt_w = nxt.split()
+    if not prev_w or not nxt_w:
+        return None
+    max_k = min(len(prev_w), len(nxt_w))
+    best = 0
+    for k in range(1, max_k + 1):
+        if prev_w[-k:] == nxt_w[:k]:
+            best = k
+    if best == 0:
+        return None
+    return " ".join(prev_w + nxt_w[best:])
+
+
+def extend_caption_text(prev: str, nxt: str) -> str | None:
+    """
+    YouTube auto-subs: «катящееся окно» — соседние cue часто уточняют одну фразу.
+    Вернуть итоговый текст, если nxt продолжает/уточняет prev.
+    None — независимые фразы (можно клеить пробелом или начать новый сегмент).
+
+    Не трогает намеренный повтор внутри одной строки («нет, нет, нет»).
+    """
+    if not prev:
+        return nxt
+    if not nxt:
+        return prev
+    if prev == nxt:
+        return prev
+    # nxt — удлинённая версия той же фразы
+    if nxt.startswith(prev):
+        return nxt
+    # prev уже содержит nxt (короткое окно внутри длинного)
+    if prev.startswith(nxt):
+        return prev
+    overlapped = _word_overlap_merge(prev, nxt)
+    if overlapped is not None:
+        return overlapped
+    return None
+
+
 def merge_segments(
     segments: list[dict],
     gap_sec: float = _MERGE_GAP_SEC,
     max_chars: int = _MERGE_MAX_CHARS,
 ) -> list[dict]:
     """
-    Склеивает соседние куски SRT:
-    - пауза < gap_sec и длина < max_chars;
-    - не клеим дальше, если фраза уже заканчивается на . ? ! …
+    Склеивает только «ту же речь» (YouTube rolling / overlap слов).
+
+    Не склеиваем слепо пробелом любые соседние cue при малой паузе —
+    у auto-ASR куски часто мусорные и без точек; склейка даёт кашу
+    («воняет мусор надо вым … шашлык …»).
     """
     if not segments:
         return []
 
     merged: list[dict] = []
-    cur = dict(segments[0])
+    cur = {
+        "start": segments[0]["start"],
+        "end": segments[0]["end"],
+        "text": segments[0]["text"],
+    }
 
     for nxt in segments[1:]:
-        gap = nxt["start"] - cur["end"]
-        joined = f"{cur['text']} {nxt['text']}".strip()
-        ends_sentence = bool(_SENTENCE_END.search(cur["text"]))
-        can_merge = (
-            gap < gap_sec
-            and not ends_sentence
-            and len(joined) <= max_chars
-            # авто-субы часто дублируют одну фразу — не раздуваем
-            and nxt["text"] != cur["text"]
-        )
-        if can_merge:
-            cur["end"] = max(cur["end"], nxt["end"])
-            cur["text"] = joined
-        else:
-            merged.append(cur)
-            cur = dict(nxt)
+        gap = nxt["start"] - cur["end"]  # < 0 при перекрытии по времени
+        near = gap < gap_sec
+
+        if near:
+            extended = extend_caption_text(cur["text"], nxt["text"])
+            if extended is not None:
+                if len(extended) <= max_chars or extended.startswith(cur["text"]):
+                    cur["text"] = extended
+                    cur["end"] = max(cur["end"], nxt["end"])
+                    continue
+
+        merged.append(cur)
+        cur = {
+            "start": nxt["start"],
+            "end": nxt["end"],
+            "text": nxt["text"],
+        }
 
     merged.append(cur)
 
-    # если фраза всё же раздулась — режем по концу предложения
+    # длинные фразы с точками — режем по предложениям
     result: list[dict] = []
     for seg in merged:
         text = seg["text"]
@@ -247,7 +300,6 @@ def merge_segments(
             result.append(seg)
             continue
         parts = re.split(r"(?<=[.?!…])\s+", text)
-        # время равномерно по кускам внутри исходного окна (грубо, но для прыжка ок)
         span = max(seg["end"] - seg["start"], 0.01)
         t = seg["start"]
         usable = [p.strip() for p in parts if p.strip()]
@@ -259,7 +311,7 @@ def merge_segments(
 
 
 def segments_to_plain_text(segments: list[dict]) -> str:
-    """Чистый текст без таймкодов (с дедупом подряд идущих фраз)."""
+    """Чистый текст: только соседние полные дубли режем (не set() по всему файлу)."""
     lines: list[str] = []
     prev = None
     for seg in segments:
@@ -272,7 +324,7 @@ def segments_to_plain_text(segments: list[dict]) -> str:
 
 
 def segments_to_timed_text(segments: list[dict]) -> str:
-    """Строки вида [mm:ss] фраза."""
+    """Строки вида [mm:ss] фраза (соседние полные дубли пропускаем)."""
     lines = []
     prev = None
     for seg in segments:
@@ -282,6 +334,16 @@ def segments_to_timed_text(segments: list[dict]) -> str:
         lines.append(f"[{format_mmss(seg['start'])}] {text}")
         prev = text
     return "\n".join(lines)
+
+
+def build_texts_from_srt(content: str) -> tuple[str, str, list[dict]]:
+    """
+    Единая сборка итогов из SRT (для пайплайна и тестов).
+    Возвращает (plain, timed, phrases).
+    """
+    raw = parse_srt_segments(content)
+    phrases = merge_segments(raw)
+    return segments_to_plain_text(phrases), segments_to_timed_text(phrases), phrases
 
 
 # =====================================================================
@@ -381,16 +443,14 @@ def download_and_split(
         with open(srt_file, "r", encoding="utf-8") as f:
             content = f.read()
 
-        raw_segments = parse_srt_segments(content)
-        if not raw_segments:
+        clean_text, timed_text, phrases = build_texts_from_srt(content)
+        if not phrases:
             sys.stderr.write("Ошибка: в SRT не найдено текстовых сегментов.\n")
             return False
 
-        phrases = merge_segments(raw_segments)
-        clean_text = segments_to_plain_text(phrases)
-        timed_text = segments_to_timed_text(phrases)
         os.remove(srt_file)
 
+        # "w" — перезапись, не append (повторный запуск не удваивает файл)
         with open("0_весь_текст_для_буфера.txt", "w", encoding="utf-8") as f:
             f.write(clean_text)
 
