@@ -3,7 +3,11 @@
 Команды (одна JSON-строка):
   {"cmd":"speak","text":"..."}
   {"cmd":"stop"}
+  {"cmd":"pause"}
+  {"cmd":"resume"}
+  {"cmd":"pause_toggle"}
   {"cmd":"ping"}
+  {"cmd":"warmup"}
 """
 from __future__ import annotations
 
@@ -28,8 +32,10 @@ PORT = 47391
 DEFAULT_VOICE = "ru-RU-DmitryNeural"
 DEFAULT_LOCAL_SPEAKER = "xenia"
 DEFAULT_VOLUME = 45
-DEFAULT_ENGINE = "edge"  # edge | local
+DEFAULT_ENGINE = "edge"  # edge | local | piper
 DEFAULT_PAUSE_MS = 350  # пауза между кусками (реф: ~300–500ms между предложениями)
+DEFAULT_PIPER_MODEL = "models/ru_RU-dmitri-medium.onnx"
+_ENGINES = {"edge", "local", "piper"}
 
 try:
     from tts_debug import (
@@ -60,6 +66,8 @@ except ImportError:
         return None
 
 _stop_event = threading.Event()
+_paused = False  # pause/resume: не чистит очередь, ждёт resume
+_pause_lock = threading.Lock()
 _speak_lock = threading.Lock()
 _mixer_ready = False
 _speech_queue: queue.Queue[str | None] = queue.Queue()
@@ -72,6 +80,7 @@ def load_config() -> dict:
         "engine": DEFAULT_ENGINE,
         "voice": DEFAULT_VOICE,
         "local_speaker": DEFAULT_LOCAL_SPEAKER,
+        "piper_model": DEFAULT_PIPER_MODEL,
         "volume": DEFAULT_VOLUME / 100.0,
         "interrupt_on_new": False,
     }
@@ -79,12 +88,14 @@ def load_config() -> dict:
         try:
             raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             engine = str(raw.get("engine", DEFAULT_ENGINE)).strip().lower()
-            data["engine"] = engine if engine in {"edge", "local"} else DEFAULT_ENGINE
+            data["engine"] = engine if engine in _ENGINES else DEFAULT_ENGINE
             data["voice"] = str(raw.get("voice", DEFAULT_VOICE)).strip() or DEFAULT_VOICE
             data["local_speaker"] = (
                 str(raw.get("local_speaker", DEFAULT_LOCAL_SPEAKER)).strip()
                 or DEFAULT_LOCAL_SPEAKER
             )
+            piper_model = str(raw.get("piper_model", DEFAULT_PIPER_MODEL)).strip()
+            data["piper_model"] = piper_model or DEFAULT_PIPER_MODEL
             data["volume"] = max(10, min(100, int(raw.get("volume", DEFAULT_VOLUME)))) / 100.0
             data["interrupt_on_new"] = bool(raw.get("interrupt_on_new", False))
             try:
@@ -100,9 +111,29 @@ def load_config() -> dict:
     return data
 
 
+def is_paused() -> bool:
+    with _pause_lock:
+        return _paused
+
+
+def set_paused(value: bool) -> None:
+    global _paused
+    with _pause_lock:
+        _paused = value
+
+
+def wait_while_paused() -> bool:
+    """Ждёт resume. True = можно продолжать, False = stop."""
+    while is_paused():
+        if _stop_event.is_set():
+            return False
+        time.sleep(0.05)
+    return not _stop_event.is_set()
+
+
 def pause_after_chunk(part: str, base_ms: int) -> None:
-    """Пауза между кусками: дольше после .!? , короче после запятой, 0 если стоп."""
-    if base_ms <= 0 or _stop_event.is_set():
+    """Пауза между кусками: дольше после .!? , короче после запятой, 0 если стоп/pause."""
+    if base_ms <= 0 or _stop_event.is_set() or is_paused():
         return
     stripped = part.rstrip()
     if not stripped:
@@ -115,10 +146,9 @@ def pause_after_chunk(part: str, base_ms: int) -> None:
     else:
         delay = base_ms
     delay = max(80, min(2000, delay))
-    # Режем паузу, если нажали стоп
     end_at = time.monotonic() + delay / 1000.0
     while time.monotonic() < end_at:
-        if _stop_event.is_set():
+        if _stop_event.is_set() or is_paused():
             return
         time.sleep(0.05)
 
@@ -133,6 +163,8 @@ def ensure_mixer() -> None:
 
 
 def stop_playback() -> None:
+    """Полный stop: обрыв текущего play. Очередь чистит вызывающий."""
+    set_paused(False)
     _stop_event.set()
     try:
         import pygame
@@ -141,6 +173,22 @@ def stop_playback() -> None:
             pygame.mixer.music.stop()
     except Exception:
         pass
+
+
+def pause_playback() -> None:
+    """Pause: остановить звук, очередь и позицию кусков не сбрасывать."""
+    set_paused(True)
+    try:
+        import pygame
+
+        if _mixer_ready:
+            pygame.mixer.music.stop()
+    except Exception:
+        pass
+
+
+def resume_playback() -> None:
+    set_paused(False)
 
 
 def clear_speech_queue() -> int:
@@ -299,14 +347,14 @@ def play_file(mp3_path: Path, volume: float) -> None:
     import pygame
 
     ensure_mixer()
-    if _stop_event.is_set() or mp3_path.stat().st_size < 64:
+    if _stop_event.is_set() or is_paused() or mp3_path.stat().st_size < 64:
         return
     try:
         pygame.mixer.music.load(str(mp3_path))
         pygame.mixer.music.set_volume(volume)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
-            if _stop_event.is_set():
+            if _stop_event.is_set() or is_paused():
                 pygame.mixer.music.stop()
                 break
             pygame.time.wait(40)
@@ -326,26 +374,34 @@ def _safe_unlink(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         try:
-            import time
-
             time.sleep(0.05)
             path.unlink(missing_ok=True)
         except OSError:
             debug_log(f"UNLINK_FAIL path={path}")
 
 
+def _audio_suffix(engine: str) -> str:
+    return ".mp3" if engine == "edge" else ".wav"
+
+
 def render_audio(part: str, cfg: dict, out_path: Path) -> None:
-    """edge → mp3, local → wav. out_path суффикс задаёт вызывающий."""
-    if cfg["engine"] == "local":
+    """edge → mp3, local/piper → wav."""
+    engine = cfg["engine"]
+    if engine == "local":
         from speak_local import synthesize_wav
 
         synthesize_wav(part, cfg["local_speaker"], out_path)
+        return
+    if engine == "piper":
+        from speak_piper import synthesize_wav as synthesize_piper
+
+        synthesize_piper(part, cfg.get("piper_model", DEFAULT_PIPER_MODEL), out_path)
         return
     download_mp3_retry(part, cfg["voice"], out_path)
 
 
 def _prefetch_part(part: str, cfg: dict, out_holder: list) -> None:
-    suffix = ".wav" if cfg["engine"] == "local" else ".mp3"
+    suffix = _audio_suffix(cfg["engine"])
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         audio_path = Path(tmp.name)
     try:
@@ -356,9 +412,30 @@ def _prefetch_part(part: str, cfg: dict, out_holder: list) -> None:
         out_holder[0] = error
 
 
+def _looks_like_table_speech(text: str) -> bool:
+    head = text.lstrip()[:120]
+    if head.startswith("Столбцы:"):
+        return True
+    # Много коротких предложений подряд — типичные строки таблицы
+    dots = text.count(". ")
+    return dots >= 4 and (len(text) / max(dots, 1)) < 90
+
+
+def _parts_for_engine(text: str, engine: str) -> list[str]:
+    table_like = _looks_like_table_speech(text)
+    if engine == "local":
+        return split_into_chunks(text, target=160 if table_like else 500)
+    if engine == "piper":
+        return split_into_chunks(text, target=160 if table_like else 400)
+    if table_like:
+        return split_into_chunks(text, target=180)
+    return split_for_speech(text)
+
+
 def speak_text(text: str) -> None:
     with _speak_lock:
         _stop_event.clear()
+        set_paused(False)
         try:
             from text_prep import finalize_speech_text
 
@@ -367,25 +444,33 @@ def speak_text(text: str) -> None:
             debug_log(f"text_prep skipped: {error}")
 
         cfg = load_config()
-        # Local: ровные куски; без prefetch (Silero + потоки = зависания).
-        if cfg["engine"] == "local":
-            parts = split_into_chunks(text, target=500)
-        else:
-            parts = split_for_speech(text)
+        parts = _parts_for_engine(text, cfg["engine"])
         if not parts:
             return
         debug_log(f"ENGINE={cfg['engine']}")
         log_speak_start(len(text), len(parts))
         ok_parts = 0
         fail_parts = 0
-        suffix = ".wav" if cfg["engine"] == "local" else ".mp3"
+        suffix = _audio_suffix(cfg["engine"])
+        pause_ms = int(cfg.get("pause_ms", DEFAULT_PAUSE_MS))
 
-        if cfg["engine"] == "local":
-            for index, part in enumerate(parts, start=1):
-                if _stop_event.is_set() or len(part) < 2:
+        # local / piper: без prefetch (модель в одном процессе)
+        if cfg["engine"] in {"local", "piper"}:
+            index = 0
+            while index < len(parts):
+                if _stop_event.is_set():
                     break
+                if is_paused():
+                    # MVP: прерванный кусок не добиваем — продолжаем со следующего
+                    if not wait_while_paused():
+                        break
+                    continue
+                part = parts[index]
+                if len(part) < 2:
+                    index += 1
+                    continue
                 debug_log(
-                    f"CHUNK_BEGIN {index}/{len(parts)} chars={len(part)} "
+                    f"CHUNK_BEGIN {index + 1}/{len(parts)} chars={len(part)} "
                     f"preview={part[:80]!r}"
                 )
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -395,23 +480,36 @@ def speak_text(text: str) -> None:
                         render_audio(part, cfg, audio_path)
                     except Exception as error:
                         fail_parts += 1
-                        log_chunk_fail(index, len(parts), part, error)
+                        log_chunk_fail(index + 1, len(parts), part, error)
+                        index += 1
                         continue
                     if audio_path.stat().st_size < 64:
                         fail_parts += 1
                         log_chunk_fail(
-                            index,
+                            index + 1,
                             len(parts),
                             part,
                             RuntimeError("empty audio"),
                         )
+                        index += 1
                         continue
-                    if not _stop_event.is_set():
+                    if not _stop_event.is_set() and not is_paused():
                         play_file(audio_path, cfg["volume"])
-                        ok_parts += 1
-                        log_chunk_ok(index, len(parts), part)
-                        if index < len(parts):
-                            pause_after_chunk(part, int(cfg.get("pause_ms", DEFAULT_PAUSE_MS)))
+                    if _stop_event.is_set():
+                        break
+                    if is_paused():
+                        # со следующего целого куска
+                        index += 1
+                        if not wait_while_paused():
+                            break
+                        continue
+                    ok_parts += 1
+                    log_chunk_ok(index + 1, len(parts), part)
+                    index += 1
+                    if index < len(parts):
+                        pause_after_chunk(part, pause_ms)
+                        if is_paused() and not wait_while_paused():
+                            break
                 finally:
                     _safe_unlink(audio_path)
             log_speak_done(ok_parts, fail_parts, len(parts))
@@ -439,43 +537,60 @@ def speak_text(text: str) -> None:
             log_chunk_fail(1, len(parts), parts[0], error)
             current_path = None
 
-        for index, part in enumerate(parts, start=1):
+        index = 0
+        while index < len(parts):
             if _stop_event.is_set():
                 break
+            if is_paused():
+                if not wait_while_paused():
+                    break
+                continue
 
-            if index > 1:
+            part = parts[index]
+            if index > 0:
                 if next_thread is not None:
                     next_thread.join(timeout=120)
                     result = getattr(next_thread, "_holder", [None])[0]
                     next_thread = None
                     if isinstance(result, Exception):
                         fail_parts += 1
-                        log_chunk_fail(index, len(parts), part, result)
+                        log_chunk_fail(index + 1, len(parts), part, result)
                         current_path = None
                     elif isinstance(result, Path):
                         current_path = result
                     else:
                         fail_parts += 1
                         log_chunk_fail(
-                            index,
+                            index + 1,
                             len(parts),
                             part,
                             RuntimeError("prefetch returned nothing"),
                         )
                         current_path = None
 
-            if index < len(parts) and not _stop_event.is_set():
-                next_thread = start_prefetch(parts[index])
+            if index + 1 < len(parts) and not _stop_event.is_set() and not is_paused():
+                next_thread = start_prefetch(parts[index + 1])
 
             if current_path is None:
+                index += 1
                 continue
             try:
-                if not _stop_event.is_set():
+                if not _stop_event.is_set() and not is_paused():
                     play_file(current_path, cfg["volume"])
-                    ok_parts += 1
-                    log_chunk_ok(index, len(parts), part)
-                    if index < len(parts):
-                        pause_after_chunk(part, int(cfg.get("pause_ms", DEFAULT_PAUSE_MS)))
+                if _stop_event.is_set():
+                    break
+                if is_paused():
+                    index += 1
+                    if not wait_while_paused():
+                        break
+                    continue
+                ok_parts += 1
+                log_chunk_ok(index + 1, len(parts), part)
+                index += 1
+                if index < len(parts):
+                    pause_after_chunk(part, pause_ms)
+                    if is_paused() and not wait_while_paused():
+                        break
             finally:
                 _safe_unlink(current_path)
                 current_path = None
@@ -529,10 +644,46 @@ def handle_client(conn: socket.socket) -> None:
                         ).encode("utf-8")
                         + b"\n"
                     )
+            elif engine == "piper":
+                try:
+                    from speak_piper import warmup as warmup_piper
+
+                    debug_log("WARMUP piper begin")
+                    warmup_piper(cfg.get("piper_model", DEFAULT_PIPER_MODEL))
+                    debug_log("WARMUP piper done")
+                    conn.sendall(b'{"ok":true,"warmed":true,"engine":"piper"}\n')
+                except Exception as error:
+                    debug_log(f"WARMUP piper fail: {error}")
+                    conn.sendall(
+                        json.dumps(
+                            {"ok": False, "error": str(error)},
+                            ensure_ascii=False,
+                        ).encode("utf-8")
+                        + b"\n"
+                    )
             else:
-                # Edge не грузит модель в демон — достаточно живого процесса
                 debug_log("WARMUP edge skip (daemon already warm)")
                 conn.sendall(b'{"ok":true,"warmed":true,"engine":"edge"}\n')
+            return
+        if cmd == "pause":
+            pause_playback()
+            debug_log("PAUSE")
+            conn.sendall(b'{"ok":true,"paused":true}\n')
+            return
+        if cmd == "resume":
+            resume_playback()
+            debug_log("RESUME")
+            conn.sendall(b'{"ok":true,"paused":false}\n')
+            return
+        if cmd == "pause_toggle":
+            if is_paused():
+                resume_playback()
+                debug_log("PAUSE_TOGGLE -> resume")
+                conn.sendall(b'{"ok":true,"paused":false}\n')
+            else:
+                pause_playback()
+                debug_log("PAUSE_TOGGLE -> pause")
+                conn.sendall(b'{"ok":true,"paused":true}\n')
             return
         if cmd == "stop":
             cleared = clear_speech_queue()
@@ -596,21 +747,31 @@ def already_running() -> bool:
 
 
 def warmup_engine_background() -> None:
-    """Не блокирует accept: local Silero грузится в фоне после старта."""
+    """Не блокирует accept: local/piper грузятся в фоне после старта."""
 
     def run() -> None:
         cfg = load_config()
-        if cfg.get("engine") != "local":
-            debug_log("WARMUP bg skip (engine!=local)")
-            return
-        try:
-            from speak_local import warmup as warmup_local
+        engine = cfg.get("engine")
+        if engine == "local":
+            try:
+                from speak_local import warmup as warmup_local
 
-            debug_log("WARMUP bg local begin")
-            warmup_local()
-            debug_log("WARMUP bg local done")
-        except Exception as error:
-            debug_log(f"WARMUP bg fail: {error}")
+                debug_log("WARMUP bg local begin")
+                warmup_local()
+                debug_log("WARMUP bg local done")
+            except Exception as error:
+                debug_log(f"WARMUP bg fail: {error}")
+        elif engine == "piper":
+            try:
+                from speak_piper import warmup as warmup_piper
+
+                debug_log("WARMUP bg piper begin")
+                warmup_piper(cfg.get("piper_model", DEFAULT_PIPER_MODEL))
+                debug_log("WARMUP bg piper done")
+            except Exception as error:
+                debug_log(f"WARMUP bg piper fail: {error}")
+        else:
+            debug_log("WARMUP bg skip (engine!=local/piper)")
 
     threading.Thread(target=run, name="tts-warmup", daemon=True).start()
 

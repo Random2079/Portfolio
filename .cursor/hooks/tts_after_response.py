@@ -134,10 +134,10 @@ def soften_for_speech(text: str) -> str:
     # Литералы \n \t из кода в чате
     text = text.replace("\\n", " ").replace("\\t", " ").replace("\\r", " ")
 
-    # Стрелки: -> => → — говорим «потом»
-    text = re.sub(r"-+>+", " потом ", text)
-    text = re.sub(r"=+>+", " потом ", text)
-    text = re.sub(r"[→⇒➔➜⟶»›]+", " потом ", text)
+    # Стрелки: -> => → — говорим «затем»
+    text = re.sub(r"-+>+", " затем ", text)
+    text = re.sub(r"=+>+", " затем ", text)
+    text = re.sub(r"[→⇒➔➜⟶»›]+", " затем ", text)
     text = re.sub(r"[←⇐⟵«‹]+", " ", text)
 
     # Маркеры списка в начале строки: *, -, •, ·, цифры)
@@ -183,8 +183,14 @@ def soften_for_speech(text: str) -> str:
 
 
 def clean_for_speech(text: str) -> str:
-    # Сначала код — чтобы таблицы внутри ``` не разворачивались
-    text = re.sub(r"```[\s\S]*?```", " блок кода ", text)
+    # Схемы/код до таблиц — иначе | внутри fences ломает tables_to_speech
+    text = re.sub(
+        r"```mermaid[\s\S]*?```",
+        " Есть схема, смотри в чате. ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"```[\s\S]*?```", " Блок кода, смотри в чате. ", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
 

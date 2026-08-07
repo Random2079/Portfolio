@@ -11,6 +11,7 @@ _CUSTOM = {
     "AHK": "авто хот кей",
     "Cursor": "курсор",
     "Silero": "силеро",
+    "Piper": "пайпер",
 }
 
 # Сколько строк таблицы читать вслух (остальное — «и ещё N»)
@@ -36,11 +37,23 @@ def _clean_cell(value: str) -> str:
     return value
 
 
+def strip_code_and_diagrams(text: str) -> str:
+    """Mermaid/схемы и code fences — не читать содержимое вслух."""
+    text = re.sub(
+        r"```mermaid[\s\S]*?```",
+        " Есть схема, смотри в чате. ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"```[\s\S]*?```", " Блок кода, смотри в чате. ", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    return text
+
+
 def tables_to_speech(text: str) -> str:
     """
     Markdown-таблицы → короткие фразы.
-    Было: «Таблица. Строка 1. Колонка: значение. …» (кринж и долго).
-    Стало: «Piper: локально, хорошо. RHVoice: локально, средне.»
+    Каждая строка — отдельное предложение (граница для пауз/нарезки кусков).
     """
     lines = text.splitlines()
     result: list[str] = []
@@ -83,10 +96,10 @@ def _table_rows_to_speech(headers: list[str], body: list[list[str]]) -> str:
         joined = ", ".join(header_names)
         return f"Столбцы: {joined}." if joined else ""
 
-    # Один раз названия колонок, дальше только значения по строкам
-    parts: list[str] = []
+    # Одна строка = одно предложение. Между ними явная точка для нарезки кусков.
+    sentences: list[str] = []
     if header_names:
-        parts.append("Столбцы: " + ", ".join(header_names))
+        sentences.append("Столбцы: " + ", ".join(header_names) + ".")
 
     extra = 0
     for row_index, row in enumerate(body):
@@ -94,23 +107,22 @@ def _table_rows_to_speech(headers: list[str], body: list[list[str]]) -> str:
             extra = len(body) - _MAX_TABLE_ROWS
             break
         cells = [(row[j] if j < len(row) else "").strip() for j in range(len(headers))]
-        cells = [_clean_cell(c) for c in cells if True]
+        cells = [_clean_cell(c) for c in cells]
         values = [c for c in cells if c]
         if not values:
             continue
-        # первая ячейка — тема, остальные через запятую
         if len(values) == 1:
-            parts.append(values[0])
+            sentences.append(values[0].rstrip(".") + ".")
         else:
-            parts.append(f"{values[0]}: {', '.join(values[1:])}")
+            sentences.append(
+                f"{values[0]}: {', '.join(values[1:])}".rstrip(".") + "."
+            )
 
-    if len(parts) <= (1 if header_names else 0):
-        return (parts[0] + ".") if parts else ""
-
-    text = ". ".join(parts) + "."
     if extra > 0:
-        text += f" И ещё {extra}."
-    return text
+        sentences.append(f"И ещё {extra}.")
+
+    # Пустая строка между предложениями → демон легче режет; finalize сохранит точки
+    return "\n".join(sentences)
 
 
 def soften_symbols(text: str) -> str:
@@ -120,9 +132,10 @@ def soften_symbols(text: str) -> str:
 
     text = text.replace("\\n", " ").replace("\\t", " ").replace("\\r", " ")
 
-    text = re.sub(r"-+>+", " потом ", text)
-    text = re.sub(r"=+>+", " потом ", text)
-    text = re.sub(r"[→⇒➔➜⟶]+", " потом ", text)
+    # Стрелки: не «потом» (кринж), а «затем»
+    text = re.sub(r"-+>+", " затем ", text)
+    text = re.sub(r"=+>+", " затем ", text)
+    text = re.sub(r"[→⇒➔➜⟶]+", " затем ", text)
     text = re.sub(r"[←⇐⟵]+", " ", text)
 
     text = re.sub(r"(?m)^\s*[-*•·▪◦●○]+\s+", "", text)
@@ -161,11 +174,15 @@ def normalize_tts(text: str) -> str:
 
 
 def finalize_speech_text(text: str) -> str:
+    text = strip_code_and_diagrams(text)
     text = tables_to_speech(text)
     text = soften_symbols(text)
     text = normalize_tts(text)
+    # Новые строки → пробел, точки предложений сохраняем для нарезки кусков
+    text = re.sub(r"\n+", " ", text)
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"\s+([,.!?])", r"\1", text)
+    text = re.sub(r"([.!?]){2,}", r"\1", text)
     text = re.sub(r"([,.]){2,}", r"\1", text)
     text = text.replace(" , ", ", ")
     return text.strip()

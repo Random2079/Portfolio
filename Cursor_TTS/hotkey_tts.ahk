@@ -26,7 +26,8 @@ FileAppend, % "AHK_START v1 python=" pythonExe "`n", %dbgLog%
 
 ; Ctrl+Shift — удобнее Win+Alt, реже конфликтует чем Ctrl+Alt
 ; Ctrl+Shift+T — toggle AUTO
-; Ctrl+Shift+X — STOP
+; Ctrl+Shift+X — STOP (clear queue)
+; Ctrl+Shift+P — PAUSE / RESUME
 ; Ctrl+Shift+S — speak SELECTED text
 
 ^+t::
@@ -50,6 +51,15 @@ return
     ; #endregion
     Gosub, StopSpeech
     ToolTip, TTS: STOP, 10, 10
+    SetTimer, RemoveTip, -1500
+return
+
+^+p::
+    ; #region agent log
+    FileAppend, AHK_HOTKEY Ctrl+Shift+P`n, %dbgLog%
+    ; #endregion
+    RunWait, "%pythonExe%" "%A_ScriptDir%\speak_edge.py" --pause-toggle, , Hide
+    ToolTip, TTS: PAUSE/RESUME, 10, 10
     SetTimer, RemoveTip, -1500
 return
 

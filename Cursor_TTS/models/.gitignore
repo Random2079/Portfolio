@@ -1,0 +1,4 @@
+# Piper ONNX voices (download via download_piper_voice.py)
+*.onnx
+*.onnx.json
+!.gitkeep

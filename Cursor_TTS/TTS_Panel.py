@@ -47,11 +47,20 @@ VOICES_LOCAL = [
     ("aidar", "Айдар (муж.)"),
     ("eugene", "Евгений (муж.)"),
 ]
+# code = относительный путь к .onnx от Cursor_TTS/
+VOICES_PIPER = [
+    ("models/ru_RU-dmitri-medium.onnx", "Дмитрий (medium)"),
+    ("models/ru_RU-irina-medium.onnx", "Ирина (medium)"),
+    ("models/ru_RU-ruslan-medium.onnx", "Руслан (medium)"),
+    ("models/ru_RU-denis-medium.onnx", "Денис (medium)"),
+]
 DEFAULT_VOICE = VOICES_EDGE[0][0]
 DEFAULT_LOCAL_SPEAKER = "xenia"
+DEFAULT_PIPER_MODEL = VOICES_PIPER[0][0]
 DEFAULT_VOLUME = 45
 DEFAULT_ENGINE = "edge"
 DEFAULT_PAUSE_MS = 350
+_ENGINES = {"edge", "local", "piper"}
 TEST_PHRASE = "Привет. Это проверка голоса Cursor TTS. Режим локальный или интернет."
 
 
@@ -60,6 +69,7 @@ def load_config() -> dict:
         "engine": DEFAULT_ENGINE,
         "voice": DEFAULT_VOICE,
         "local_speaker": DEFAULT_LOCAL_SPEAKER,
+        "piper_model": DEFAULT_PIPER_MODEL,
         "volume": DEFAULT_VOLUME,
         "interrupt_on_new": False,
         "pause_ms": DEFAULT_PAUSE_MS,
@@ -73,7 +83,7 @@ def load_config() -> dict:
             pass
 
     engine = str(data.get("engine", DEFAULT_ENGINE)).strip().lower()
-    data["engine"] = engine if engine in {"edge", "local"} else DEFAULT_ENGINE
+    data["engine"] = engine if engine in _ENGINES else DEFAULT_ENGINE
 
     voice = str(data.get("voice", DEFAULT_VOICE)).strip()
     known_edge = {code for code, _ in VOICES_EDGE}
@@ -86,6 +96,12 @@ def load_config() -> dict:
     if local_speaker not in known_local:
         local_speaker = DEFAULT_LOCAL_SPEAKER
     data["local_speaker"] = local_speaker
+
+    piper_model = str(data.get("piper_model", DEFAULT_PIPER_MODEL)).strip()
+    known_piper = {code for code, _ in VOICES_PIPER}
+    if piper_model not in known_piper:
+        piper_model = DEFAULT_PIPER_MODEL
+    data["piper_model"] = piper_model
 
     try:
         volume = int(data.get("volume", DEFAULT_VOLUME))
@@ -105,6 +121,7 @@ def save_config(
     engine: str | None = None,
     voice: str | None = None,
     local_speaker: str | None = None,
+    piper_model: str | None = None,
     volume: int | None = None,
     interrupt_on_new: bool | None = None,
     pause_ms: int | None = None,
@@ -116,6 +133,8 @@ def save_config(
         data["voice"] = voice
     if local_speaker is not None:
         data["local_speaker"] = local_speaker
+    if piper_model is not None:
+        data["piper_model"] = piper_model
     if volume is not None:
         data["volume"] = max(10, min(100, volume))
     if interrupt_on_new is not None:
@@ -194,31 +213,21 @@ def ensure_hotkeys() -> str:
 
 
 def stop_speech() -> None:
-    # #region agent log
-    try:
-        _dbg = ROOT.parent / "debug-45ab72.log"
-        with _dbg.open("a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "45ab72",
-                        "hypothesisId": "C",
-                        "location": "TTS_Panel.py:stop_speech",
-                        "message": "panel stop_speech called",
-                        "data": {},
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except OSError:
-        pass
-    # #endregion
     flags = 0x08000000 if sys.platform == "win32" else 0
     if SPEAK_EDGE.is_file():
         subprocess.run(
             [sys.executable, str(SPEAK_EDGE), "--stop"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+        )
+
+
+def pause_toggle_speech() -> None:
+    flags = 0x08000000 if sys.platform == "win32" else 0
+    if SPEAK_EDGE.is_file():
+        subprocess.run(
+            [sys.executable, str(SPEAK_EDGE), "--pause-toggle"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=flags,
@@ -306,6 +315,7 @@ class TTSPanel(QMainWindow):
         self.engine_combo = QComboBox(self)
         self.engine_combo.addItem("Интернет (edge)", "edge")
         self.engine_combo.addItem("Локальный (Silero)", "local")
+        self.engine_combo.addItem("Локальный (Piper)", "piper")
         self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         engine_row.addWidget(self.engine_combo, stretch=1)
         layout.addLayout(engine_row)
@@ -345,9 +355,12 @@ class TTSPanel(QMainWindow):
         buttons = QHBoxLayout()
         self.test_button = QPushButton("Прослушать", self)
         self.test_button.clicked.connect(self._on_test)
+        self.pause_button = QPushButton("Пауза", self)
+        self.pause_button.clicked.connect(self._on_pause_toggle)
         self.stop_button = QPushButton("Стоп", self)
         self.stop_button.clicked.connect(self._on_stop)
         buttons.addWidget(self.test_button)
+        buttons.addWidget(self.pause_button)
         buttons.addWidget(self.stop_button)
         layout.addLayout(buttons)
 
@@ -357,7 +370,7 @@ class TTSPanel(QMainWindow):
 
         layout.addWidget(
             QLabel(
-                "Хоткеи: Ctrl+Shift+T авто · Ctrl+Shift+X стоп · Ctrl+Shift+S выделение",
+                "Хоткеи: Ctrl+Shift+T авто · P пауза · X стоп · S выделение",
                 self,
             )
         )
@@ -420,7 +433,12 @@ class TTSPanel(QMainWindow):
     def _fill_voices(self, engine: str, selected: str | None = None) -> None:
         self.voice_combo.blockSignals(True)
         self.voice_combo.clear()
-        items = VOICES_LOCAL if engine == "local" else VOICES_EDGE
+        if engine == "local":
+            items = VOICES_LOCAL
+        elif engine == "piper":
+            items = VOICES_PIPER
+        else:
+            items = VOICES_EDGE
         for code, label in items:
             self.voice_combo.addItem(label, code)
         if selected:
@@ -428,6 +446,14 @@ class TTSPanel(QMainWindow):
             if index >= 0:
                 self.voice_combo.setCurrentIndex(index)
         self.voice_combo.blockSignals(False)
+
+    @staticmethod
+    def _selected_voice_for_engine(cfg: dict, engine: str) -> str:
+        if engine == "local":
+            return cfg["local_speaker"]
+        if engine == "piper":
+            return cfg.get("piper_model", DEFAULT_PIPER_MODEL)
+        return cfg["voice"]
 
     def _reload_from_disk(self) -> None:
         self._updating = True
@@ -437,9 +463,7 @@ class TTSPanel(QMainWindow):
         engine_index = self.engine_combo.findData(cfg["engine"])
         if engine_index >= 0:
             self.engine_combo.setCurrentIndex(engine_index)
-        selected = (
-            cfg["local_speaker"] if cfg["engine"] == "local" else cfg["voice"]
-        )
+        selected = self._selected_voice_for_engine(cfg, cfg["engine"])
         self._fill_voices(cfg["engine"], selected)
         self.volume_slider.setValue(cfg["volume"])
         self.volume_label.setText(f"{cfg['volume']}%")
@@ -491,17 +515,19 @@ class TTSPanel(QMainWindow):
             return
         engine = str(self.engine_combo.currentData() or "edge")
         cfg = load_config()
-        selected = (
-            cfg["local_speaker"] if engine == "local" else cfg["voice"]
-        )
+        selected = self._selected_voice_for_engine(cfg, engine)
         self._fill_voices(engine, selected)
         save_config(engine=engine)
-        # Смена движка — лучше перезапустить демон при следующем speak
-        self.status_label.setText(
-            "Движок сохранён. Первый local-запуск скачает модель (нужен интернет один раз)."
-            if engine == "local"
-            else "Движок: интернет (edge)."
-        )
+        if engine == "local":
+            msg = "Движок: Silero. Первый запуск скачает модель (нужен интернет один раз)."
+        elif engine == "piper":
+            msg = (
+                "Движок: Piper. Нужны onnx в Cursor_TTS/models/ "
+                "(см. README: download_piper_voice)."
+            )
+        else:
+            msg = "Движок: интернет (edge)."
+        self.status_label.setText(msg)
         self._refresh_status()
 
     def _on_voice_changed(self, _index: int) -> None:
@@ -513,6 +539,8 @@ class TTSPanel(QMainWindow):
         engine = str(self.engine_combo.currentData() or "edge")
         if engine == "local":
             save_config(local_speaker=str(code))
+        elif engine == "piper":
+            save_config(piper_model=str(code))
         else:
             save_config(voice=str(code))
         self._refresh_status()
@@ -556,11 +584,18 @@ class TTSPanel(QMainWindow):
             stderr=subprocess.DEVNULL,
             creationflags=flags,
         )
-        self.status_label.setText(
-            "Проигрываю тест… (local: первый раз может долго качать модель)"
-            if load_config()["engine"] == "local"
-            else "Проигрываю тестовую фразу…"
-        )
+        engine = load_config()["engine"]
+        if engine == "local":
+            tip = "Проигрываю тест… (Silero: первый раз может долго качать модель)"
+        elif engine == "piper":
+            tip = "Проигрываю тест… (Piper: нужен .onnx в models/)"
+        else:
+            tip = "Проигрываю тестовую фразу…"
+        self.status_label.setText(tip)
+
+    def _on_pause_toggle(self) -> None:
+        pause_toggle_speech()
+        self.status_label.setText("Пауза / продолжить.")
 
     def _on_stop(self) -> None:
         stop_speech()

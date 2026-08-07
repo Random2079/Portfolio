@@ -2,6 +2,7 @@
 Клиент озвучки: шлёт текст в tts_daemon (тёплый процесс).
 Запуск: python speak_edge.py путь.txt
          python speak_edge.py --stop
+         python speak_edge.py --pause / --resume / --pause-toggle
          python speak_edge.py --warmup
 Если демон не запущен — поднимает его сам.
 """
@@ -77,7 +78,7 @@ def ensure_daemon() -> None:
 
 
 def warmup_backend(timeout: float = 180.0) -> dict:
-    """Поднять демон и прогреть Silero (local) / убедиться что демон жив (edge)."""
+    """Поднять демон и прогреть Silero/Piper / убедиться что демон жив (edge)."""
     ensure_daemon()
     return send_command({"cmd": "warmup"}, timeout=timeout)
 
@@ -85,7 +86,14 @@ def warmup_backend(timeout: float = 180.0) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("text_file", nargs="?", help="UTF-8 file with text to speak")
-    parser.add_argument("--stop", action="store_true", help="Stop current speech")
+    parser.add_argument("--stop", action="store_true", help="Stop current speech and clear queue")
+    parser.add_argument("--pause", action="store_true", help="Pause playback (keep queue)")
+    parser.add_argument("--resume", action="store_true", help="Resume after pause")
+    parser.add_argument(
+        "--pause-toggle",
+        action="store_true",
+        help="Toggle pause/resume",
+    )
     parser.add_argument(
         "--warmup",
         action="store_true",
@@ -106,51 +114,31 @@ def main() -> int:
     ensure_daemon()
 
     if args.stop:
-        # #region agent log
-        try:
-            _dbg = Path(__file__).resolve().parent.parent / "debug-45ab72.log"
-            with _dbg.open("a", encoding="utf-8") as _f:
-                _f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "45ab72",
-                            "hypothesisId": "C",
-                            "location": "speak_edge.py:stop",
-                            "message": "client --stop before send",
-                            "data": {},
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except OSError:
-            pass
-        # #endregion
         try:
             reply = send_command({"cmd": "stop"})
         except OSError as exc:
             reply = {"ok": False, "error": str(exc)}
-        # #region agent log
+        return 0 if reply.get("ok") else 1
+
+    if args.pause:
         try:
-            with _dbg.open("a", encoding="utf-8") as _f:
-                _f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "45ab72",
-                            "hypothesisId": "C",
-                            "location": "speak_edge.py:stop",
-                            "message": "client --stop reply",
-                            "data": {"reply": reply},
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except OSError:
-            pass
-        # #endregion
+            reply = send_command({"cmd": "pause"})
+        except OSError as exc:
+            reply = {"ok": False, "error": str(exc)}
+        return 0 if reply.get("ok") else 1
+
+    if args.resume:
+        try:
+            reply = send_command({"cmd": "resume"})
+        except OSError as exc:
+            reply = {"ok": False, "error": str(exc)}
+        return 0 if reply.get("ok") else 1
+
+    if args.pause_toggle:
+        try:
+            reply = send_command({"cmd": "pause_toggle"})
+        except OSError as exc:
+            reply = {"ok": False, "error": str(exc)}
         return 0 if reply.get("ok") else 1
 
     if not args.text_file:
