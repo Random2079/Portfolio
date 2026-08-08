@@ -1,27 +1,17 @@
 # Карта проектов
 
-Короткая ориентация: **что где лежит** и как связано с [`IDEAS.md`](IDEAS.md).  
-Установка и детали — в `README` каждой папки; корневой обзор — [`README.md`](README.md).
+Короткая ориентация для себя и для тех, кто открыл репо.  
+Установка — в `README` каждой папки; витрина для найма — корневой [`README.md`](README.md).
 
-| Папка | Что это | Статус / IDEA |
-|-------|---------|---------------|
-| [`Cursor_TTS/`](Cursor_TTS/) | Озвучка ответов Cursor: Edge / Silero / **Piper**, панель, демон, хоткеи | **В работе** — IDEA-002; **запланировано** — IDEA-013 (micro wife) |
-| [`YouTube_Translator/`](YouTube_Translator/) | GUI субтитров (CustomTkinter) + фразовые таймкоды | **Готово** — IDEA-010, IDEA-011 |
-| [`Channel_Translator/`](Channel_Translator/) | Массовый рип канала (тянет хелперы из YouTube_*) | Рабочий сырой риппер; промпт анализа в папке |
-| [`MountBlade2_AHK/`](MountBlade2_AHK/) | Макросы AutoHotkey для Mount & Blade II | IDEA-004 (скрипты уже здесь) |
-| [`Epub2txt/`](Epub2txt/) | EPUB → TXT | Стабильная мелочь |
-| [`Book_Parter/`](Book_Parter/) | Мелкие правки TXT книг | Стабильная мелочь |
-| [`DeepSeek_IA/`](DeepSeek_IA/) | Примеры запросов к DeepSeek API | Учебный / черновик |
-| [`sandbox_ui/`](sandbox_ui/) | Песочница UI-демо | Не боевой код |
-| [`.cursor/`](.cursor/) | Хуки TTS, правила, [планы IDEA](.cursor/plans/) | Служебное |
+| Папка | Что это | Для резюме / HH |
+|-------|---------|-----------------|
+| [`YouTube_Translator/`](YouTube_Translator/) | GUI субтитров YouTube (CustomTkinter) + таймкоды | **★ Герой** — показывать первым |
+| [`Cursor_TTS/`](Cursor_TTS/) | Озвучка Cursor: Edge / Silero / Piper, панель, хоткеи | Второй пример (автоматизация + GUI) |
+| [`Channel_Translator/`](Channel_Translator/) | Пакетный обход канала (на базе YouTube_*) | Опционально |
+| [`DeepSeek_IA/`](DeepSeek_IA/) | Клиент LLM API | Короткий пример API |
+| [`Epub2txt/`](Epub2txt/) · [`Book_Parter/`](Book_Parter/) | Текстовые мелочи | Не акцентировать |
+| [`MountBlade2_AHK/`](MountBlade2_AHK/) | Макросы игр | Не для HH |
+| [`sandbox_ui/`](sandbox_ui/) · черновики | Песочницы | Не для HH |
+| [`HH_SNIPPET.md`](HH_SNIPPET.md) | Готовый текст отклика | Копипаст на площадки |
 
-## Бэклог без отдельной папки (пока)
-
-| IDEA | Тема |
-|------|------|
-| 001 | AI-агент с TTS |
-| 003 | Новостник портфеля |
-| 005 | Discord авто-мут |
-| 006–009, 012 | Kali, Discord tracker, монитор ПК, GGUF, голосовой макрос SS14 |
-
-Полные описания и шаги — только в `IDEAS.md`. Оглавление планов — [`.cursor/plans/памятка-идей.md`](.cursor/plans/памятка-идей.md).
+Служебное: [`.cursor/`](.cursor/), бэклог [`IDEAS.md`](IDEAS.md).

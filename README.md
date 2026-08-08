@@ -1,45 +1,61 @@
-# DS_Projects
+# Portfolio — Тё Ян (Python / automation)
 
-Личный портфель мелких утилит и экспериментов (Python, AutoHotkey, Cursor).  
-Это не один большой продукт — **каждая папка = отдельный мини-проект**.
+**Ищу:** junior / стажировку / remote или гибрид — Python, автоматизация, утилиты, работа с API и данными.  
+**Стек:** Python 3.11+, CustomTkinter / PyQt, yt-dlp, REST API, AutoHotkey, git.  
+**Локация:** Сургут · готов к удалёнке · англ. C1.
 
-## С чего начать
+Это репозиторий pet-проектов: небольшие рабочие утилиты «под себя», не учебный hello-world.
 
-1. Поставь **Python 3.11+** (лучше 3.13) и при необходимости **Git**.
-2. Открой нужную папку по таблице ниже.
-3. Поставь зависимости **только для этого проекта** (не обязательно всё сразу).
-4. Секреты (API-ключи) — только в корневом `.env` (файл в `.gitignore`, в репо не класть).
+---
 
-Подробная инструкция по озвучке Cursor: [`Cursor_TTS/README.md`](Cursor_TTS/README.md).  
-У каждой папки проекта тоже есть короткий `README.md`.  
-Карта «что где»: [`PROJECTS.md`](PROJECTS.md).  
-Список идей / бэклог: [`IDEAS.md`](IDEAS.md) (для себя и для ИИ в Cursor, не гайд «для гостей»).
+## С чего смотреть (для рекрутера / тимлида)
+
+| Приоритет | Проект | За 15 секунд |
+|-----------|--------|----------------|
+| **1. Герой** | [**YouTube_Translator**](YouTube_Translator/) | GUI: ссылка на YouTube → субтитры + текст + таймкоды (`yt-dlp`, CustomTkinter). Есть fallback через Whisper. |
+| **2** | [**Cursor_TTS**](Cursor_TTS/) | Озвучка ответов IDE: очередь, панель, Edge / Silero / Piper, хоткеи. |
+| **3** | [**DeepSeek_IA**](DeepSeek_IA/) | Пример клиента к LLM API (OpenAI-совместимый). |
+
+Остальное — вспомогательные скрипты (EPUB→TXT, макросы игр) и черновики.
+
+**Прямая ссылка на героя:**  
+https://github.com/Random2079/Portfolio/tree/main/YouTube_Translator
+
+---
+
+## Коротко обо мне
+
+- Пишу утилиты, чтобы не кликать руками: парсинг, GUI, API, локальные пайплайны.  
+- Довожу до рабочего состояния у себя на машине (запуск, README, зависимости по папкам).  
+- Без коммерческого опыта в штате — есть законченные pet-проекты и готовность разбирать чужой код / чинить по симптомам.
+
+---
+
+## Как запустить любой проект
+
+1. Python **3.11+** (лучше 3.13), Git.  
+2. Открой папку проекта → `pip install -r requirements.txt` (если есть).  
+3. Секреты только в корневом `.env` (в git не попадает).
 
 ---
 
 ## Структура репозитория
 
 ```
-DS_Projects/
+Portfolio/
 ├── README.md                 ← ты здесь
-├── PROJECTS.md               ← короткая карта проектов + статусы
-├── IDEAS.md                  ← памятка идей
-├── .env                      ← секреты (локально, не в git)
-├── .gitignore
-├── .cursor/                  ← хуки, правила, планы IDEA
-│   ├── hooks.json
-│   ├── hooks/tts_after_response.py
-│   ├── plans/
-│   └── rules/
-├── Cursor_TTS/               ← озвучка ответов (Edge / Silero / Piper)
-├── YouTube_Translator/       ← субтитры YouTube (CustomTkinter)
-├── Channel_Translator/       ← массовый рип канала (зависит от YouTube_*)
-├── MountBlade2_AHK/          ← макросы AutoHotkey для M&B II
-├── Epub2txt/                 ← EPUB → TXT
-├── Book_Parter/              ← мелочи для текста книг
-├── DeepSeek_IA/              ← примеры запросов к DeepSeek API
-└── sandbox_ui/               ← UI-песочница
+├── PROJECTS.md               ← карта проектов
+├── HH_SNIPPET.md             ← текст для отклика на HH (копипаст)
+├── YouTube_Translator/       ← ★ герой: субтитры YouTube
+├── Cursor_TTS/               ← озвучка Cursor
+├── Channel_Translator/       ← пакетный обход канала
+├── DeepSeek_IA/              ← пример LLM API
+├── Epub2txt/ · Book_Parter/  ← мелкие текстовые утилиты
+├── MountBlade2_AHK/          ← макросы AHK (не для резюме)
+└── …
 ```
+
+Полная таблица «что / зачем / зависимости» — ниже и в [`PROJECTS.md`](PROJECTS.md).
 
 ---
 
@@ -47,41 +63,20 @@ DS_Projects/
 
 | Папка | Зачем | Как запустить | Зависимости |
 |-------|--------|---------------|-------------|
-| **Cursor_TTS** | Озвучка ответов в Cursor (Edge / Silero / **Piper**), панель, хоткеи | Ярлык / `Start_TTS_Panel.vbs` или см. README внутри | `pip install -r Cursor_TTS/requirements.txt` → edge-tts, pygame, PyQt5, piper-tts, numpy, soundfile, omegaconf, ru-normalizr, torch. Голоса Piper: `download_piper_voice.py` (ONNX не в git). **AutoHotkey v1** для хоткеев. Хук: `.cursor/hooks.json` |
-| **YouTube_Translator** | GUI: ссылка → субтитры + фразовые таймкоды (yt-dlp) | `python YouTube_Translator/Subtitle_App.py` | **customtkinter**, системный **yt-dlp** в PATH. Опционально: `faster-whisper` для `whisper_transcribe.py` |
-| **Channel_Translator** | Список видео канала → пакетная обработка | `python Channel_Translator/channel_ripper.py` | **yt-dlp**; импортирует модуль из `YouTube_Translator` (пути завязаны) |
-| **MountBlade2_AHK** | Макросы AHK (крафт / автоклик) | Открыть `AutoHotkey.ahk` в **AutoHotkey v1** | AutoHotkey, без Python |
-| **Epub2txt** | Книга EPUB → чистый TXT | `python Epub2txt/epub2txt.py` | `pip install ebooklib` |
-| **Book_Parter** | Убрать пустые строки из TXT и т.п. | `python Book_Parter/remove_empty_lines.py` | Стандартная библиотека Python |
-| **DeepSeek_IA** | Скрипт запросов к DeepSeek | `python DeepSeek_IA/deepseek_python_….py` | `pip install openai python-dotenv`; ключ `DEEPSEEK_API_KEY` в `.env` |
+| **YouTube_Translator** | GUI: ссылка → субтитры + таймкоды | `python YouTube_Translator/Subtitle_App.py` | customtkinter, **yt-dlp** в PATH; опц. faster-whisper |
+| **Cursor_TTS** | Озвучка ответов Cursor (Edge / Silero / Piper) | `Start_TTS_Panel.vbs` / см. README | см. `Cursor_TTS/requirements.txt`, AutoHotkey v1 |
+| **Channel_Translator** | Список видео канала → пакетная обработка | `python Channel_Translator/channel_ripper.py` | yt-dlp + модули YouTube_Translator |
+| **DeepSeek_IA** | Запросы к DeepSeek API | см. README в папке | openai, python-dotenv |
+| **Epub2txt** | EPUB → TXT | `python Epub2txt/epub2txt.py` | ebooklib |
+| **Book_Parter** | Мелкие правки TXT | см. папку | stdlib |
+| **MountBlade2_AHK** | Макросы M&B II | AutoHotkey v1 | без Python |
 
 ---
 
-## Общее окружение
+## Заметки по репозиторию
 
-- Один Python на машину обычно хватает; для тяжёлого (torch / whisper) можно завести venv в папке проекта.
-- **Не коммить:** `.env`, `__pycache__`, `*.exe`, логи (`tts_debug.log`, `debug-*.log`), pid-файлы, флаг `TTS_OFF`.
-- Корневого `requirements.txt` на всё репо нет намеренно: проекты разные, зависимости ставятся точечно.
+- Учебный / pet-портфель: код разного возраста; витрина для найма — **YouTube_Translator** и **Cursor_TTS**.  
+- Корневого `requirements.txt` нет намеренно: зависимости ставятся точечно по папкам.  
+- Не коммитить: `.env`, `__pycache__`, `*.exe`, логи, pid-файлы.
 
----
-
-## Бэкап: git vs папка «архив» на рабочем столе
-
-**Источник правды — этот репозиторий + `git commit` / `git push`.**  
-Копия `DS_Projects - архив` на рабочем столе быстро устаревает: день поработал — архив уже не тот, а обновлять руками лень (и правильно).
-
-Практичный режим:
-
-1. Закончил фичу → **коммит** (и при желании push на GitHub).
-2. Архив на рабочем столе — **редко** (раз в месяц / перед большим риском), не каждый вечер.
-3. Или вообще убрать архив и жить на git: откат = старый коммит, а не «какая копия свежее?».
-
-ZIP имеет смысл только как разовый снимок «на флешку / перед сносом Windows».
-
----
-
-## Для людей, которые смотрят репо
-
-- Это учебный / pet-портфель, код разного возраста и аккуратности.
-- Самый «собранный» кусок с нормальной шпаргалкой сейчас — **Cursor_TTS**.
-- Вопросы по идеям и планам — смотри `IDEAS.md`, не жди там install-инструкций.
+Бэклог идей для себя: [`IDEAS.md`](IDEAS.md) (не обязательно читать при оценке кандидата).

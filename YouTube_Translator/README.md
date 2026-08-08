@@ -1,29 +1,55 @@
 # YouTube Translator
 
-GUI: вставил ссылку на ролик YouTube → скачал/достал субтитры (через **yt-dlp**).
+**Статус:** рабочий pet-проект (GUI + пайплайн субтитров).  
+**Стек:** Python · CustomTkinter · yt-dlp · (опционально) faster-whisper.
 
-Интерфейс: **CustomTkinter** (старый PyQt — `Subtitle_App_qt_backup.py`).
+---
+
+## Задача
+
+Нужен текст ролика YouTube без ручного копирования субтитров:  
+вставил ссылку → получил чистый текст и фразы с таймкодами для буфера / дальнейшей обработки.
+
+## Что делает
+
+1. Принимает URL ролика YouTube.  
+2. Тянет субтитры через **yt-dlp** (авто / ручные).  
+3. Собирает:
+   - цельный текст для буфера;
+   - текст с таймкодами `[mm:ss]`;
+   - при необходимости — куски по размеру.  
+4. Если субтитров нет — можно прогнать аудио через **Whisper** (`whisper_transcribe.py`).
+
+## Стек и навыки, которые здесь видны
+
+| Область | Как проявлено |
+|---------|----------------|
+| GUI | CustomTkinter (есть бэкап на PyQt) |
+| Внешние CLI / API-подобные тулзы | yt-dlp, PATH, обработка ошибок |
+| Файлы и кодировки | UTF-8, структура папок на ролик |
+| Опционально ML | faster-whisper для расшифровки |
+| Упаковка | PyInstaller spec → exe |
 
 ## Запуск
 
 ```powershell
 cd YouTube_Translator
 pip install -r requirements.txt
-# yt-dlp должен быть в PATH (уже в requirements) или: winget install yt-dlp
+# yt-dlp в PATH (или: winget install yt-dlp / pip ставит пакет)
 python Subtitle_App.py
 ```
 
-Опционально сборка exe: `pyinstaller --noconfirm Subtitle_App.spec`
+Опционально exe: `pyinstaller --noconfirm Subtitle_App.spec`
 
-## Что получается в папке ролика
+## Результат в папке ролика
 
 | Файл | Зачем |
 |------|--------|
-| `0_весь_текст_для_буфера.txt` | Чистый текст (и в буфер Ctrl+V) |
-| `1_текст_с_таймкодами.txt` | Фразы вида `[mm:ss] текст` — прыжок к моменту на видео |
-| `часть_ru_1.txt` … | Куски чистого текста, если очень длинно |
+| `0_весь_текст_для_буфера.txt` | Чистый текст (удобно Ctrl+V) |
+| `1_текст_с_таймкодами.txt` | Фразы `[mm:ss] текст` |
+| `часть_ru_1.txt` … | Куски, если текст очень длинный |
 
-Склейка таймкодов: соседние куски SRT объединяются при паузе &lt; 1.5 с и длине фразы ≲ 120 символов (не word-level).
+Склейка таймкодов: соседние куски SRT объединяются при короткой паузе и разумной длине фразы (не word-level).
 
 ## Файлы проекта
 
@@ -31,11 +57,15 @@ python Subtitle_App.py
 |------|--------|
 | `Subtitle_App.py` | Окно CTk, валидация ссылки, вызов yt-dlp |
 | `Subtitle_App_qt_backup.py` | Старый GUI на PyQt5 (бэкап) |
-| `whisper_transcribe.py` | Локальная расшифровка аудио → `.srt` / `.txt` (**faster-whisper**) |
+| `whisper_transcribe.py` | Локальная расшифровка → `.srt` / `.txt` |
 | `Subtitle_App.spec` | Сборка в exe |
 | `requirements.txt` | customtkinter, yt-dlp |
 
 ## Зависимости
 
 - Обязательно: **customtkinter**, **yt-dlp**
-- Для Whisper-скрипта: `pip install faster-whisper`
+- Для Whisper: `pip install faster-whisper`
+
+---
+
+Родительский обзор портфеля: [README.md](../README.md)
