@@ -5,6 +5,7 @@
   python download_piper_voice.py
   python download_piper_voice.py ru_RU-dmitri-medium
   python download_piper_voice.py ru_RU-irina-medium
+  python download_piper_voice.py en_US-ryan-medium
 """
 from __future__ import annotations
 
@@ -34,6 +35,10 @@ _VOICES: dict[str, tuple[str, str]] = {
         "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx",
         "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/ru/ru_RU/denis/medium/ru_RU-denis-medium.onnx.json",
     ),
+    "en_US-ryan-medium": (
+        "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ryan/medium/en_US-ryan-medium.onnx",
+        "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ryan/medium/en_US-ryan-medium.onnx.json",
+    ),
 }
 
 
@@ -45,7 +50,7 @@ def _download(url: str, dest: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Download Piper ru_RU voice models")
+    parser = argparse.ArgumentParser(description="Download Piper voice models (RU / EN)")
     parser.add_argument(
         "voice",
         nargs="?",

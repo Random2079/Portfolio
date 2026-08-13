@@ -35,7 +35,11 @@ DEFAULT_VOLUME = 45
 DEFAULT_ENGINE = "edge"  # edge | local | piper
 DEFAULT_PAUSE_MS = 350  # пауза между кусками (реф: ~300–500ms между предложениями)
 DEFAULT_PIPER_MODEL = "models/ru_RU-dmitri-medium.onnx"
+DEFAULT_PIPER_MODEL_EN = "models/en_US-ryan-medium.onnx"
+DEFAULT_HYBRID_MODE = "dict_only"
+DEFAULT_LANG_SWITCH_PAUSE_MS = 80
 _ENGINES = {"edge", "local", "piper"}
+_HYBRID_MODES = {"off", "dict_only", "dict_and_en"}
 
 try:
     from tts_debug import (
@@ -81,6 +85,9 @@ def load_config() -> dict:
         "voice": DEFAULT_VOICE,
         "local_speaker": DEFAULT_LOCAL_SPEAKER,
         "piper_model": DEFAULT_PIPER_MODEL,
+        "piper_model_en": DEFAULT_PIPER_MODEL_EN,
+        "hybrid_mode": DEFAULT_HYBRID_MODE,
+        "lang_switch_pause_ms": DEFAULT_LANG_SWITCH_PAUSE_MS,
         "volume": DEFAULT_VOLUME / 100.0,
         "interrupt_on_new": False,
     }
@@ -96,6 +103,17 @@ def load_config() -> dict:
             )
             piper_model = str(raw.get("piper_model", DEFAULT_PIPER_MODEL)).strip()
             data["piper_model"] = piper_model or DEFAULT_PIPER_MODEL
+            piper_en = str(raw.get("piper_model_en", DEFAULT_PIPER_MODEL_EN)).strip()
+            data["piper_model_en"] = piper_en or DEFAULT_PIPER_MODEL_EN
+            hybrid = str(raw.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
+            data["hybrid_mode"] = hybrid if hybrid in _HYBRID_MODES else DEFAULT_HYBRID_MODE
+            try:
+                data["lang_switch_pause_ms"] = max(
+                    0,
+                    min(400, int(raw.get("lang_switch_pause_ms", DEFAULT_LANG_SWITCH_PAUSE_MS))),
+                )
+            except (TypeError, ValueError):
+                data["lang_switch_pause_ms"] = DEFAULT_LANG_SWITCH_PAUSE_MS
             data["volume"] = max(10, min(100, int(raw.get("volume", DEFAULT_VOLUME)))) / 100.0
             data["interrupt_on_new"] = bool(raw.get("interrupt_on_new", False))
             try:
@@ -108,7 +126,27 @@ def load_config() -> dict:
             pass
     if "pause_ms" not in data:
         data["pause_ms"] = DEFAULT_PAUSE_MS
+    if "piper_model_en" not in data:
+        data["piper_model_en"] = DEFAULT_PIPER_MODEL_EN
+    if "hybrid_mode" not in data:
+        data["hybrid_mode"] = DEFAULT_HYBRID_MODE
+    if "lang_switch_pause_ms" not in data:
+        data["lang_switch_pause_ms"] = DEFAULT_LANG_SWITCH_PAUSE_MS
     return data
+
+
+PAUSE_FLAG = ROOT / "TTS_PAUSED"
+
+
+def _sync_pause_flag(paused: bool) -> None:
+    """Файл-индикатор для панели/AHK: есть = на паузе, нет = играет/готово."""
+    try:
+        if paused:
+            PAUSE_FLAG.write_text("1", encoding="ascii")
+        else:
+            PAUSE_FLAG.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def is_paused() -> bool:
@@ -120,6 +158,7 @@ def set_paused(value: bool) -> None:
     global _paused
     with _pause_lock:
         _paused = value
+    _sync_pause_flag(value)
 
 
 def wait_while_paused() -> bool:
@@ -176,19 +215,26 @@ def stop_playback() -> None:
 
 
 def pause_playback() -> None:
-    """Pause: остановить звук, очередь и позицию кусков не сбрасывать."""
+    """Pause: pygame pause(), очередь и текущий кусок не сбрасывать."""
     set_paused(True)
     try:
         import pygame
 
         if _mixer_ready:
-            pygame.mixer.music.stop()
+            pygame.mixer.music.pause()
     except Exception:
         pass
 
 
 def resume_playback() -> None:
     set_paused(False)
+    try:
+        import pygame
+
+        if _mixer_ready:
+            pygame.mixer.music.unpause()
+    except Exception:
+        pass
 
 
 def clear_speech_queue() -> int:
@@ -343,23 +389,45 @@ def download_mp3_retry(text: str, voice: str, mp3_path: Path, tries: int = 3) ->
         raise last_error
 
 
-def play_file(mp3_path: Path, volume: float) -> None:
+def play_file(mp3_path: Path, volume: float) -> bool:
+    """Играть до конца. True = дослушали, False = hard stop.
+    get_busy() на паузе False — не считать это концом файла.
+    """
     import pygame
 
     ensure_mixer()
-    if _stop_event.is_set() or is_paused() or mp3_path.stat().st_size < 64:
-        return
+    if mp3_path.stat().st_size < 64:
+        return False
+    if _stop_event.is_set():
+        return False
+    if is_paused() and not wait_while_paused():
+        return False
     try:
         pygame.mixer.music.load(str(mp3_path))
         pygame.mixer.music.set_volume(volume)
         pygame.mixer.music.play()
-        while pygame.mixer.music.get_busy():
-            if _stop_event.is_set() or is_paused():
+        mixer_paused = False
+        while True:
+            if _stop_event.is_set():
                 pygame.mixer.music.stop()
-                break
-            pygame.time.wait(40)
+                return False
+            if is_paused():
+                if not mixer_paused:
+                    pygame.mixer.music.pause()
+                    mixer_paused = True
+                pygame.time.wait(40)
+                continue
+            if mixer_paused:
+                pygame.mixer.music.unpause()
+                mixer_paused = False
+            if pygame.mixer.music.get_busy():
+                pygame.time.wait(40)
+                continue
+            pygame.time.wait(20)
+            if is_paused() or pygame.mixer.music.get_busy():
+                continue
+            return True
     finally:
-        # Windows: пока файл в music — unlink зависает / ломает следующий кусок.
         try:
             pygame.mixer.music.unload()
         except Exception:
@@ -384,8 +452,8 @@ def _audio_suffix(engine: str) -> str:
     return ".mp3" if engine == "edge" else ".wav"
 
 
-def render_audio(part: str, cfg: dict, out_path: Path) -> None:
-    """edge → mp3, local/piper → wav."""
+def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None:
+    """edge → mp3, local/piper → wav. lang=en только для Piper hybrid."""
     engine = cfg["engine"]
     if engine == "local":
         from speak_local import synthesize_wav
@@ -395,17 +463,20 @@ def render_audio(part: str, cfg: dict, out_path: Path) -> None:
     if engine == "piper":
         from speak_piper import synthesize_wav as synthesize_piper
 
-        synthesize_piper(part, cfg.get("piper_model", DEFAULT_PIPER_MODEL), out_path)
+        model = cfg.get("piper_model", DEFAULT_PIPER_MODEL)
+        if lang == "en":
+            model = cfg.get("piper_model_en", DEFAULT_PIPER_MODEL_EN)
+        synthesize_piper(part, model, out_path)
         return
     download_mp3_retry(part, cfg["voice"], out_path)
 
 
-def _prefetch_part(part: str, cfg: dict, out_holder: list) -> None:
+def _prefetch_part(part: str, cfg: dict, out_holder: list, lang: str = "ru") -> None:
     suffix = _audio_suffix(cfg["engine"])
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         audio_path = Path(tmp.name)
     try:
-        render_audio(part, cfg, audio_path)
+        render_audio(part, cfg, audio_path, lang)
         out_holder[0] = audio_path
     except Exception as error:
         audio_path.unlink(missing_ok=True)
@@ -432,176 +503,186 @@ def _parts_for_engine(text: str, engine: str) -> list[str]:
     return split_for_speech(text)
 
 
+def _effective_hybrid(cfg: dict) -> str:
+    """dict_and_en только если Piper и EN-модель на диске, иначе dict_only."""
+    mode = str(cfg.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
+    if mode not in _HYBRID_MODES:
+        mode = DEFAULT_HYBRID_MODE
+    if cfg.get("engine") != "piper":
+        return "off" if mode == "off" else "dict_only"
+    if mode != "dict_and_en":
+        return mode
+    try:
+        from speak_piper import model_exists
+
+        if model_exists(cfg.get("piper_model_en", DEFAULT_PIPER_MODEL_EN)):
+            return "dict_and_en"
+    except Exception:
+        pass
+    return "dict_only"
+
+
+def _speech_units(text: str, cfg: dict) -> list[tuple[str, str]]:
+    """Куски [(текст, lang)]. EN-сегменты только в режиме dict_and_en."""
+    hybrid = _effective_hybrid(cfg)
+    engine = str(cfg.get("engine", DEFAULT_ENGINE))
+    if engine == "piper" and hybrid == "dict_and_en":
+        try:
+            from text_prep import finalize_speech_segments
+
+            segments = finalize_speech_segments(text)
+        except Exception as error:
+            debug_log(f"text_prep segments skipped: {error}")
+            segments = []
+        if segments:
+            units: list[tuple[str, str]] = []
+            for seg in segments:
+                for chunk in _parts_for_engine(seg.text, engine):
+                    if chunk:
+                        units.append((chunk, seg.lang))
+            return units
+    prepared = text
+    try:
+        from text_prep import finalize_speech_text
+
+        prepared = finalize_speech_text(text, apply_dict=hybrid != "off")
+    except Exception as error:
+        debug_log(f"text_prep skipped: {error}")
+    return [(chunk, "ru") for chunk in _parts_for_engine(prepared, engine) if chunk]
+
+
 def speak_text(text: str) -> None:
     with _speak_lock:
         _stop_event.clear()
         set_paused(False)
-        try:
-            from text_prep import finalize_speech_text
-
-            text = finalize_speech_text(text)
-        except Exception as error:
-            debug_log(f"text_prep skipped: {error}")
-
         cfg = load_config()
-        parts = _parts_for_engine(text, cfg["engine"])
-        if not parts:
+        units = _speech_units(text, cfg)
+        if not units:
             return
-        debug_log(f"ENGINE={cfg['engine']}")
-        log_speak_start(len(text), len(parts))
+        hybrid = _effective_hybrid(cfg)
+        debug_log(f"ENGINE={cfg['engine']} hybrid={hybrid} units={len(units)}")
+        log_speak_start(len(text), len(units))
         ok_parts = 0
         fail_parts = 0
         suffix = _audio_suffix(cfg["engine"])
         pause_ms = int(cfg.get("pause_ms", DEFAULT_PAUSE_MS))
-
-        # local / piper: без prefetch (модель в одном процессе)
-        if cfg["engine"] in {"local", "piper"}:
-            index = 0
-            while index < len(parts):
-                if _stop_event.is_set():
-                    break
-                if is_paused():
-                    # MVP: прерванный кусок не добиваем — продолжаем со следующего
-                    if not wait_while_paused():
-                        break
-                    continue
-                part = parts[index]
-                if len(part) < 2:
-                    index += 1
-                    continue
-                debug_log(
-                    f"CHUNK_BEGIN {index + 1}/{len(parts)} chars={len(part)} "
-                    f"preview={part[:80]!r}"
-                )
-                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                    audio_path = Path(tmp.name)
-                try:
-                    try:
-                        render_audio(part, cfg, audio_path)
-                    except Exception as error:
-                        fail_parts += 1
-                        log_chunk_fail(index + 1, len(parts), part, error)
-                        index += 1
-                        continue
-                    if audio_path.stat().st_size < 64:
-                        fail_parts += 1
-                        log_chunk_fail(
-                            index + 1,
-                            len(parts),
-                            part,
-                            RuntimeError("empty audio"),
-                        )
-                        index += 1
-                        continue
-                    if not _stop_event.is_set() and not is_paused():
-                        play_file(audio_path, cfg["volume"])
-                    if _stop_event.is_set():
-                        break
-                    if is_paused():
-                        # со следующего целого куска
-                        index += 1
-                        if not wait_while_paused():
-                            break
-                        continue
-                    ok_parts += 1
-                    log_chunk_ok(index + 1, len(parts), part)
-                    index += 1
-                    if index < len(parts):
-                        pause_after_chunk(part, pause_ms)
-                        if is_paused() and not wait_while_paused():
-                            break
-                finally:
-                    _safe_unlink(audio_path)
-            log_speak_done(ok_parts, fail_parts, len(parts))
-            return
-
-        # Edge: prefetch следующего куска, пока играет текущий.
+        switch_ms = int(cfg.get("lang_switch_pause_ms", DEFAULT_LANG_SWITCH_PAUSE_MS))
+        use_prefetch = cfg["engine"] == "edge"
         next_thread: threading.Thread | None = None
+        current_path: Path | None = None
 
-        def start_prefetch(part: str) -> threading.Thread:
+        def start_prefetch(part: str, lang: str) -> threading.Thread:
             holder: list = [None]
             thread = threading.Thread(
-                target=_prefetch_part, args=(part, cfg, holder), daemon=True
+                target=_prefetch_part, args=(part, cfg, holder, lang), daemon=True
             )
             thread.start()
             thread._holder = holder  # type: ignore[attr-defined]
             return thread
 
-        current_path: Path | None = None
         try:
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                current_path = Path(tmp.name)
-            render_audio(parts[0], cfg, current_path)
-        except Exception as error:
-            fail_parts += 1
-            log_chunk_fail(1, len(parts), parts[0], error)
-            current_path = None
-
-        index = 0
-        while index < len(parts):
-            if _stop_event.is_set():
-                break
-            if is_paused():
-                if not wait_while_paused():
-                    break
-                continue
-
-            part = parts[index]
-            if index > 0:
-                if next_thread is not None:
-                    next_thread.join(timeout=120)
-                    result = getattr(next_thread, "_holder", [None])[0]
-                    next_thread = None
-                    if isinstance(result, Exception):
-                        fail_parts += 1
-                        log_chunk_fail(index + 1, len(parts), part, result)
-                        current_path = None
-                    elif isinstance(result, Path):
-                        current_path = result
-                    else:
-                        fail_parts += 1
-                        log_chunk_fail(
-                            index + 1,
-                            len(parts),
-                            part,
-                            RuntimeError("prefetch returned nothing"),
-                        )
-                        current_path = None
-
-            if index + 1 < len(parts) and not _stop_event.is_set() and not is_paused():
-                next_thread = start_prefetch(parts[index + 1])
-
-            if current_path is None:
-                index += 1
-                continue
-            try:
-                if not _stop_event.is_set() and not is_paused():
-                    play_file(current_path, cfg["volume"])
+            index = 0
+            while index < len(units):
                 if _stop_event.is_set():
                     break
                 if is_paused():
-                    index += 1
                     if not wait_while_paused():
                         break
                     continue
-                ok_parts += 1
-                log_chunk_ok(index + 1, len(parts), part)
-                index += 1
-                if index < len(parts):
-                    pause_after_chunk(part, pause_ms)
-                    if is_paused() and not wait_while_paused():
-                        break
-            finally:
+
+                part, lang = units[index]
+                if len(part) < 2:
+                    index += 1
+                    continue
+                debug_log(
+                    f"CHUNK_BEGIN {index + 1}/{len(units)} lang={lang} "
+                    f"chars={len(part)} preview={part[:80]!r}"
+                )
+
+                if current_path is None:
+                    if use_prefetch and next_thread is not None:
+                        next_thread.join(timeout=120)
+                        result = getattr(next_thread, "_holder", [None])[0]
+                        next_thread = None
+                        if isinstance(result, Path):
+                            current_path = result
+                        else:
+                            err = (
+                                result
+                                if isinstance(result, Exception)
+                                else RuntimeError("prefetch returned nothing")
+                            )
+                            fail_parts += 1
+                            log_chunk_fail(index + 1, len(units), part, err)
+                            index += 1
+                            continue
+                    else:
+                        with tempfile.NamedTemporaryFile(
+                            suffix=suffix, delete=False
+                        ) as tmp:
+                            current_path = Path(tmp.name)
+                        try:
+                            render_audio(part, cfg, current_path, lang)
+                        except Exception as error:
+                            fail_parts += 1
+                            log_chunk_fail(index + 1, len(units), part, error)
+                            _safe_unlink(current_path)
+                            current_path = None
+                            index += 1
+                            continue
+
+                if current_path.stat().st_size < 64:
+                    fail_parts += 1
+                    log_chunk_fail(
+                        index + 1,
+                        len(units),
+                        part,
+                        RuntimeError("empty audio"),
+                    )
+                    _safe_unlink(current_path)
+                    current_path = None
+                    index += 1
+                    continue
+
+                if (
+                    use_prefetch
+                    and next_thread is None
+                    and index + 1 < len(units)
+                    and not _stop_event.is_set()
+                ):
+                    npart, nlang = units[index + 1]
+                    if len(npart) >= 2:
+                        next_thread = start_prefetch(npart, nlang)
+
+                finished = play_file(current_path, cfg["volume"])
                 _safe_unlink(current_path)
                 current_path = None
+                if not finished or _stop_event.is_set():
+                    break
+                ok_parts += 1
+                log_chunk_ok(index + 1, len(units), part)
+                index += 1
+                if index >= len(units):
+                    break
+                pause_after_chunk(part, pause_ms)
+                if units[index][1] != lang and switch_ms > 0:
+                    end_at = time.monotonic() + switch_ms / 1000.0
+                    while time.monotonic() < end_at:
+                        if _stop_event.is_set() or is_paused():
+                            break
+                        time.sleep(0.02)
+                if is_paused() and not wait_while_paused():
+                    break
+        finally:
+            if current_path is not None:
+                _safe_unlink(current_path)
+            if next_thread is not None:
+                next_thread.join(timeout=1)
+                result = getattr(next_thread, "_holder", [None])[0]
+                if isinstance(result, Path):
+                    _safe_unlink(result)
 
-        if next_thread is not None:
-            next_thread.join(timeout=1)
-            result = getattr(next_thread, "_holder", [None])[0]
-            if isinstance(result, Path):
-                _safe_unlink(result)
-
-        log_speak_done(ok_parts, fail_parts, len(parts))
+        log_speak_done(ok_parts, fail_parts, len(units))
 
 
 def handle_client(conn: socket.socket) -> None:
@@ -623,6 +704,15 @@ def handle_client(conn: socket.socket) -> None:
         cmd = str(data.get("cmd", "")).lower()
         if cmd == "ping":
             conn.sendall(b'{"ok":true,"pong":true}\n')
+            return
+        if cmd == "status":
+            conn.sendall(
+                json.dumps(
+                    {"ok": True, "paused": is_paused(), "queue": _speech_queue.qsize()},
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                + b"\n"
+            )
             return
         if cmd == "warmup":
             cfg = load_config()
@@ -646,10 +736,13 @@ def handle_client(conn: socket.socket) -> None:
                     )
             elif engine == "piper":
                 try:
-                    from speak_piper import warmup as warmup_piper
+                    from speak_piper import warmup_many
 
                     debug_log("WARMUP piper begin")
-                    warmup_piper(cfg.get("piper_model", DEFAULT_PIPER_MODEL))
+                    models = [cfg.get("piper_model", DEFAULT_PIPER_MODEL)]
+                    if _effective_hybrid(cfg) == "dict_and_en":
+                        models.append(cfg.get("piper_model_en", DEFAULT_PIPER_MODEL_EN))
+                    warmup_many(models)
                     debug_log("WARMUP piper done")
                     conn.sendall(b'{"ok":true,"warmed":true,"engine":"piper"}\n')
                 except Exception as error:
@@ -689,30 +782,6 @@ def handle_client(conn: socket.socket) -> None:
             cleared = clear_speech_queue()
             stop_playback()
             debug_log(f"STOP cleared_queue={cleared}")
-            # #region agent log
-            try:
-                _dbg = ROOT.parent / "debug-45ab72.log"
-                with _dbg.open("a", encoding="utf-8") as _f:
-                    _f.write(
-                        json.dumps(
-                            {
-                                "sessionId": "45ab72",
-                                "hypothesisId": "C",
-                                "location": "tts_daemon.py:stop",
-                                "message": "daemon stop handled",
-                                "data": {
-                                    "cleared_queue": cleared,
-                                    "stop_event": _stop_event.is_set(),
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
-            except OSError:
-                pass
-            # #endregion
             conn.sendall(b'{"ok":true,"stopped":true}\n')
             return
         if cmd == "speak":
@@ -763,10 +832,13 @@ def warmup_engine_background() -> None:
                 debug_log(f"WARMUP bg fail: {error}")
         elif engine == "piper":
             try:
-                from speak_piper import warmup as warmup_piper
+                from speak_piper import warmup_many
 
                 debug_log("WARMUP bg piper begin")
-                warmup_piper(cfg.get("piper_model", DEFAULT_PIPER_MODEL))
+                models = [cfg.get("piper_model", DEFAULT_PIPER_MODEL)]
+                if _effective_hybrid(cfg) == "dict_and_en":
+                    models.append(cfg.get("piper_model_en", DEFAULT_PIPER_MODEL_EN))
+                warmup_many(models)
                 debug_log("WARMUP bg piper done")
             except Exception as error:
                 debug_log(f"WARMUP bg piper fail: {error}")

@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (
 
 ROOT = Path(__file__).resolve().parent
 OFF_FLAG = ROOT / "TTS_OFF"
+PAUSE_FLAG = ROOT / "TTS_PAUSED"
 CONFIG_FILE = ROOT / "tts_config.json"
 PID_FILE = ROOT / "tts_speech.pid"
 SPEAK_EDGE = ROOT / "speak_edge.py"
@@ -57,10 +58,18 @@ VOICES_PIPER = [
 DEFAULT_VOICE = VOICES_EDGE[0][0]
 DEFAULT_LOCAL_SPEAKER = "xenia"
 DEFAULT_PIPER_MODEL = VOICES_PIPER[0][0]
+DEFAULT_PIPER_MODEL_EN = "models/en_US-ryan-medium.onnx"
+DEFAULT_HYBRID_MODE = "dict_only"
 DEFAULT_VOLUME = 45
 DEFAULT_ENGINE = "edge"
 DEFAULT_PAUSE_MS = 350
 _ENGINES = {"edge", "local", "piper"}
+_HYBRID_MODES = {"off", "dict_only", "dict_and_en"}
+HYBRID_ITEMS = [
+    ("off", "Как написано (без словаря)"),
+    ("dict_only", "Словарь IT (fallback → фэлбэк)"),
+    ("dict_and_en", "Словарь + EN-голос (Piper)"),
+]
 TEST_PHRASE = "Привет. Это проверка голоса Cursor TTS. Режим локальный или интернет."
 
 
@@ -70,6 +79,8 @@ def load_config() -> dict:
         "voice": DEFAULT_VOICE,
         "local_speaker": DEFAULT_LOCAL_SPEAKER,
         "piper_model": DEFAULT_PIPER_MODEL,
+        "piper_model_en": DEFAULT_PIPER_MODEL_EN,
+        "hybrid_mode": DEFAULT_HYBRID_MODE,
         "volume": DEFAULT_VOLUME,
         "interrupt_on_new": False,
         "pause_ms": DEFAULT_PAUSE_MS,
@@ -102,6 +113,10 @@ def load_config() -> dict:
     if piper_model not in known_piper:
         piper_model = DEFAULT_PIPER_MODEL
     data["piper_model"] = piper_model
+    piper_en = str(data.get("piper_model_en", DEFAULT_PIPER_MODEL_EN)).strip()
+    data["piper_model_en"] = piper_en or DEFAULT_PIPER_MODEL_EN
+    hybrid = str(data.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
+    data["hybrid_mode"] = hybrid if hybrid in _HYBRID_MODES else DEFAULT_HYBRID_MODE
 
     try:
         volume = int(data.get("volume", DEFAULT_VOLUME))
@@ -122,6 +137,7 @@ def save_config(
     voice: str | None = None,
     local_speaker: str | None = None,
     piper_model: str | None = None,
+    hybrid_mode: str | None = None,
     volume: int | None = None,
     interrupt_on_new: bool | None = None,
     pause_ms: int | None = None,
@@ -135,6 +151,9 @@ def save_config(
         data["local_speaker"] = local_speaker
     if piper_model is not None:
         data["piper_model"] = piper_model
+    if hybrid_mode is not None:
+        mode = str(hybrid_mode).strip().lower()
+        data["hybrid_mode"] = mode if mode in _HYBRID_MODES else DEFAULT_HYBRID_MODE
     if volume is not None:
         data["volume"] = max(10, min(100, volume))
     if interrupt_on_new is not None:
@@ -223,19 +242,37 @@ def stop_speech() -> None:
         )
 
 
-def pause_toggle_speech() -> None:
+def is_paused_flag() -> bool:
+    return PAUSE_FLAG.is_file()
+
+
+def pause_toggle_speech() -> bool:
+    """Toggle pause. Возвращает True если после команды на паузе."""
     flags = 0x08000000 if sys.platform == "win32" else 0
-    if SPEAK_EDGE.is_file():
-        subprocess.run(
+    if not SPEAK_EDGE.is_file():
+        return is_paused_flag()
+    try:
+        result = subprocess.run(
             [sys.executable, str(SPEAK_EDGE), "--pause-toggle"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             creationflags=flags,
+            timeout=5,
         )
+        out = (result.stdout or "").strip().upper()
+        if "PAUSED" in out:
+            return True
+        if "PLAYING" in out:
+            return False
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return is_paused_flag()
 
 
 def warmup_tts_backend() -> None:
-    """Поднять демон + прогреть Silero в фоне (не блокирует окно панели)."""
+    """Убить старый демон (иначе код паузы не подхватится) + прогреть модель."""
     if not SPEAK_EDGE.is_file():
         return
     flags = 0x08000000 if sys.platform == "win32" else 0
@@ -243,7 +280,7 @@ def warmup_tts_backend() -> None:
     def run() -> None:
         try:
             subprocess.run(
-                [sys.executable, str(SPEAK_EDGE), "--warmup"],
+                [sys.executable, str(SPEAK_EDGE), "--restart-daemon", "--warmup"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=flags,
@@ -253,19 +290,6 @@ def warmup_tts_backend() -> None:
             pass
 
     threading.Thread(target=run, name="tts-panel-warmup", daemon=True).start()
-    if PID_FILE.is_file():
-        try:
-            pid = PID_FILE.read_text(encoding="ascii").strip()
-        except OSError:
-            pid = ""
-        if pid:
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", pid],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=flags,
-            )
-        PID_FILE.unlink(missing_ok=True)
 
 
 def is_speaking() -> bool:
@@ -327,6 +351,15 @@ class TTSPanel(QMainWindow):
         voice_row.addWidget(self.voice_combo, stretch=1)
         layout.addLayout(voice_row)
 
+        hybrid_row = QHBoxLayout()
+        hybrid_row.addWidget(QLabel("Текст:", self))
+        self.hybrid_combo = QComboBox(self)
+        for code, label in HYBRID_ITEMS:
+            self.hybrid_combo.addItem(label, code)
+        self.hybrid_combo.currentIndexChanged.connect(self._on_hybrid_changed)
+        hybrid_row.addWidget(self.hybrid_combo, stretch=1)
+        layout.addLayout(hybrid_row)
+
         volume_row = QHBoxLayout()
         volume_row.addWidget(QLabel("Громкость:", self))
         self.volume_slider = QSlider(Qt.Horizontal, self)
@@ -364,6 +397,10 @@ class TTSPanel(QMainWindow):
         buttons.addWidget(self.stop_button)
         layout.addLayout(buttons)
 
+        self.pause_state_label = QLabel("Состояние: ▶ играет / готово", self)
+        self.pause_state_label.setWordWrap(True)
+        layout.addWidget(self.pause_state_label)
+
         self.status_label = QLabel("", self)
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -381,44 +418,7 @@ class TTSPanel(QMainWindow):
 
         self._reload_from_disk()
         self._refresh_status()
-
-        # #region agent log
-        try:
-            _dbg = ROOT.parent / "debug-45ab72.log"
-            _ensure = ensure_hotkeys()
-            with _dbg.open("a", encoding="utf-8") as _f:
-                _f.write(
-                    json.dumps(
-                        {
-                            "sessionId": "45ab72",
-                            "hypothesisId": "A",
-                            "location": "TTS_Panel.py:init",
-                            "message": "panel start AHK probe",
-                            "data": {
-                                "ensure_hotkeys": _ensure,
-                                "ahk_running_after": ahk_running(),
-                                "ahk_exe": str(find_ahk_v1()),
-                                "paths_exist": {
-                                    str(p): p.is_file()
-                                    for p in [
-                                        Path(
-                                            r"C:\Program Files\AutoHotkey\AutoHotkey.exe"
-                                        ),
-                                        Path(
-                                            r"C:\Program Files\AutoHotkey\v1.1.37.02\AutoHotkeyU64.exe"
-                                        ),
-                                    ]
-                                },
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except OSError:
-            pass
-        # #endregion
+        ensure_hotkeys()
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_disk)
@@ -469,6 +469,11 @@ class TTSPanel(QMainWindow):
         self.volume_label.setText(f"{cfg['volume']}%")
         self.pause_slider.setValue(int(cfg.get("pause_ms", DEFAULT_PAUSE_MS)))
         self.pause_label.setText(f"{int(cfg.get('pause_ms', DEFAULT_PAUSE_MS))} ms")
+        hybrid_index = self.hybrid_combo.findData(
+            cfg.get("hybrid_mode", DEFAULT_HYBRID_MODE)
+        )
+        if hybrid_index >= 0:
+            self.hybrid_combo.setCurrentIndex(hybrid_index)
         self._updating = False
 
     def _poll_disk(self) -> None:
@@ -486,10 +491,31 @@ class TTSPanel(QMainWindow):
         engine = self.engine_combo.currentText()
         voice_label = self.voice_combo.currentText()
         volume = self.volume_slider.value()
+        paused = is_paused_flag()
+        pause_txt = "ПАУЗА" if paused else "играет"
         self.status_label.setText(
             f"Авто: {auto} · {engine} · {voice_label} · "
-            f"{volume}% · {speaking}"
+            f"{volume}% · {speaking} · {pause_txt}"
         )
+        self._apply_pause_ui(paused)
+
+    def _apply_pause_ui(self, paused: bool) -> None:
+        if paused:
+            self.pause_button.setText("НА ПАУЗЕ — жми = продолжить")
+            self.pause_button.setStyleSheet(
+                "background-color: #c0392b; color: white; font-weight: bold;"
+            )
+            self.pause_state_label.setText(
+                "⏸ ПАУЗА: звук заморожен на месте (тот же слог). "
+                "Кнопка или Ctrl+Shift+P = продолжить. "
+                "Стоп (X) = сбросить всё."
+            )
+            self.pause_state_label.setStyleSheet("color: #c0392b; font-weight: bold;")
+        else:
+            self.pause_button.setText("Пауза")
+            self.pause_button.setStyleSheet("")
+            self.pause_state_label.setText("Состояние: ▶ играет / готово")
+            self.pause_state_label.setStyleSheet("")
 
     def _on_auto_toggled(self, checked: bool) -> None:
         if self._updating:
@@ -527,6 +553,22 @@ class TTSPanel(QMainWindow):
             )
         else:
             msg = "Движок: интернет (edge)."
+        self.status_label.setText(msg)
+        self._refresh_status()
+
+    def _on_hybrid_changed(self, _index: int) -> None:
+        if self._updating:
+            return
+        mode = str(self.hybrid_combo.currentData() or DEFAULT_HYBRID_MODE)
+        save_config(hybrid_mode=mode)
+        if mode == "off":
+            msg = "Текст: как написано, без словаря."
+        elif mode == "dict_and_en":
+            msg = (
+                "Текст: словарь + английские фразы другим голосом (нужен Piper EN onnx)."
+            )
+        else:
+            msg = "Текст: словарь IT (fallback → фэлбэк). Пауза продолжает тот же слог."
         self.status_label.setText(msg)
         self._refresh_status()
 
@@ -594,12 +636,18 @@ class TTSPanel(QMainWindow):
         self.status_label.setText(tip)
 
     def _on_pause_toggle(self) -> None:
-        pause_toggle_speech()
-        self.status_label.setText("Пауза / продолжить.")
+        paused = pause_toggle_speech()
+        self._apply_pause_ui(paused)
+        if paused:
+            self.status_label.setText("⏸ Сейчас НА ПАУЗЕ. Ещё раз Пауза / Ctrl+Shift+P = продолжить.")
+        else:
+            self.status_label.setText("▶ Снял паузу — играет / готово.")
 
     def _on_stop(self) -> None:
         stop_speech()
-        self.status_label.setText("Остановлено.")
+        # стоп снимает паузу в демоне
+        self._apply_pause_ui(False)
+        self.status_label.setText("Остановлено (очередь сброшена, пауза снята).")
 
     def closeEvent(self, event) -> None:  # noqa: N802
         # Закрытие панели не должно оставлять TTS_OFF навсегда:

@@ -1,22 +1,33 @@
 """
-Подготовка текста к озвучке: таблицы + знаки + ru-normalizr (режим TTS).
+Подготовка текста к озвучке: таблицы + знаки + словарь + ru-normalizr.
+Языковая маршрутизация — до нормализации, иначе EN-фразы уничтожаются.
 """
 from __future__ import annotations
 
+import json
 import re
+from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
-_CUSTOM = {
-    "ИИ": "искусственный интеллект",
-    "AHK": "авто хот кей",
-    "Cursor": "курсор",
-    "Silero": "силеро",
-    "Piper": "пайпер",
-}
+ROOT = Path(__file__).resolve().parent
+PRONUNCIATIONS_FILE = ROOT / "pronunciations.json"
 
-# Сколько строк таблицы читать вслух (остальное — «и ещё N»)
 _MAX_TABLE_ROWS = 6
 _MAX_CELL_CHARS = 90
+_LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9+._-]*")
+_TOKEN = re.compile(
+    r"[A-Za-z][A-Za-z0-9+._-]*|[А-Яа-яЁё]+|\d+|[\s]+|.",
+)
+
+_pron_mtime: float | None = None
+_pron_cache: dict[str, str] = {}
+
+
+@dataclass(frozen=True)
+class SpeechSegment:
+    text: str
+    lang: str  # "ru" | "en"
 
 
 @lru_cache(maxsize=1)
@@ -27,6 +38,51 @@ def _normalizer():
         return Normalizer(NormalizeOptions.tts())
     except Exception:
         return None
+
+
+def load_pronunciations() -> dict[str, str]:
+    """Ключи в нижнем регистре. Файл перечитывается при изменении mtime."""
+    global _pron_mtime, _pron_cache
+    path = PRONUNCIATIONS_FILE
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return dict(_pron_cache)
+    if _pron_mtime == mtime and _pron_cache:
+        return dict(_pron_cache)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return dict(_pron_cache)
+    if not isinstance(raw, dict):
+        return dict(_pron_cache)
+    loaded: dict[str, str] = {}
+    for key, value in raw.items():
+        word = str(key).strip()
+        spoken = str(value).strip()
+        if word and spoken:
+            loaded[word.lower()] = spoken
+    _pron_cache = loaded
+    _pron_mtime = mtime
+    return dict(loaded)
+
+
+def apply_pronunciations(text: str, vocab: dict[str, str] | None = None) -> str:
+    """Замена целых слов без учёта регистра."""
+    mapping = vocab if vocab is not None else load_pronunciations()
+    if not mapping or not text:
+        return text
+
+    def repl(match: re.Match[str]) -> str:
+        word = match.group(0)
+        spoken = mapping.get(word.lower())
+        return spoken if spoken else word
+
+    keys = sorted(mapping.keys(), key=len, reverse=True)
+    if not keys:
+        return text
+    pattern = r"(?<!\w)(" + "|".join(re.escape(k) for k in keys) + r")(?!\w)"
+    return re.sub(pattern, repl, text, flags=re.IGNORECASE)
 
 
 def _clean_cell(value: str) -> str:
@@ -96,7 +152,6 @@ def _table_rows_to_speech(headers: list[str], body: list[list[str]]) -> str:
         joined = ", ".join(header_names)
         return f"Столбцы: {joined}." if joined else ""
 
-    # Одна строка = одно предложение. Между ними явная точка для нарезки кусков.
     sentences: list[str] = []
     if header_names:
         sentences.append("Столбцы: " + ", ".join(header_names) + ".")
@@ -121,18 +176,13 @@ def _table_rows_to_speech(headers: list[str], body: list[list[str]]) -> str:
     if extra > 0:
         sentences.append(f"И ещё {extra}.")
 
-    # Пустая строка между предложениями → демон легче режет; finalize сохранит точки
     return "\n".join(sentences)
 
 
 def soften_symbols(text: str) -> str:
-    """Стрелки, кавычки, списки — без вырезания латиницы."""
-    for src, dst in _CUSTOM.items():
-        text = re.sub(rf"(?<!\w){re.escape(src)}(?!\w)", dst, text, flags=re.IGNORECASE)
-
+    """Стрелки, кавычки, списки — без вырезания латиницы и без словаря."""
     text = text.replace("\\n", " ").replace("\\t", " ").replace("\\r", " ")
 
-    # Стрелки: не «потом» (кринж), а «затем»
     text = re.sub(r"-+>+", " затем ", text)
     text = re.sub(r"=+>+", " затем ", text)
     text = re.sub(r"[→⇒➔➜⟶]+", " затем ", text)
@@ -163,7 +213,7 @@ def soften_symbols(text: str) -> str:
 
 
 def normalize_tts(text: str) -> str:
-    """Латиница, аббревиатуры, числа — через ru-normalizr."""
+    """Латиница, аббревиатуры, числа — через ru-normalizr. Только RU-сегменты."""
     engine = _normalizer()
     if engine is None:
         return text
@@ -173,12 +223,7 @@ def normalize_tts(text: str) -> str:
         return text
 
 
-def finalize_speech_text(text: str) -> str:
-    text = strip_code_and_diagrams(text)
-    text = tables_to_speech(text)
-    text = soften_symbols(text)
-    text = normalize_tts(text)
-    # Новые строки → пробел, точки предложений сохраняем для нарезки кусков
+def _collapse_ws(text: str) -> str:
     text = re.sub(r"\n+", " ", text)
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"\s+([,.!?])", r"\1", text)
@@ -186,3 +231,143 @@ def finalize_speech_text(text: str) -> str:
     text = re.sub(r"([,.]){2,}", r"\1", text)
     text = text.replace(" , ", ", ")
     return text.strip()
+
+
+def _is_latin_word(token: str) -> bool:
+    return bool(_LATIN_WORD.fullmatch(token))
+
+
+def _latin_letter_ratio(text: str) -> float:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return 0.0
+    latin = sum(1 for ch in letters if ch.isascii())
+    return latin / len(letters)
+
+
+def _prepare_base(text: str) -> str:
+    text = strip_code_and_diagrams(text)
+    text = tables_to_speech(text)
+    return soften_symbols(text)
+
+
+def segment_languages(
+    text: str, vocab: dict[str, str] | None = None
+) -> list[SpeechSegment]:
+    """
+    RU по умолчанию. 1–2 латинских токена / слово из словаря → RU.
+    3+ подряд английских слова или ~60–70% латиницы в куске → EN.
+    Знаки остаются при соседнем сегменте.
+    """
+    mapping = vocab if vocab is not None else load_pronunciations()
+    text = text.strip()
+    if not text:
+        return []
+
+    tokens = _TOKEN.findall(text)
+    kinds: list[str] = []
+    for tok in tokens:
+        if _is_latin_word(tok):
+            if tok.lower() in mapping:
+                kinds.append("dict")
+            else:
+                kinds.append("en")
+        else:
+            kinds.append("other")
+
+    en_run_len = [0] * len(tokens)
+    i = 0
+    while i < len(tokens):
+        if kinds[i] != "en":
+            i += 1
+            continue
+        j = i
+        count = 0
+        k = i
+        while k < len(tokens):
+            if kinds[k] == "en":
+                count += 1
+                j = k
+                k += 1
+                continue
+            if tokens[k].strip() == "" or (
+                kinds[k] == "other" and not any(ch.isalpha() or ch.isdigit() for ch in tokens[k])
+            ):
+                k += 1
+                continue
+            break
+        for idx in range(i, j + 1):
+            if kinds[idx] == "en":
+                en_run_len[idx] = count
+        i = j + 1
+
+    langs: list[str] = []
+    for idx, kind in enumerate(kinds):
+        if kind == "en" and en_run_len[idx] >= 3:
+            langs.append("en")
+        else:
+            langs.append("ru")
+
+    # Кусок с высокой долей латиницы и без кириллицы → EN.
+    latin_words = sum(1 for kind in kinds if kind in {"en", "dict"})
+    has_cyr = any(
+        any(("а" <= ch.lower() <= "я") or ch.lower() == "ё" for ch in tok)
+        for tok, kind in zip(tokens, kinds)
+        if kind == "other"
+    )
+    if latin_words >= 3 and _latin_letter_ratio(text) >= 0.6 and not has_cyr:
+        langs = ["en"] * len(tokens)
+
+    merged: list[SpeechSegment] = []
+    buf = ""
+    current: str | None = None
+    for tok, lang in zip(tokens, langs):
+        if current is None:
+            current = lang
+            buf = tok
+            continue
+        if lang == current:
+            buf += tok
+            continue
+        piece = buf.strip()
+        if piece:
+            merged.append(SpeechSegment(piece, current))
+        current = lang
+        buf = tok
+    if current is not None:
+        piece = buf.strip()
+        if piece:
+            merged.append(SpeechSegment(piece, current))
+
+    if not merged:
+        return [SpeechSegment(text, "ru")]
+    return merged
+
+
+def finalize_speech_segments(text: str) -> list[SpeechSegment]:
+    """Полная подготовка с языковыми сегментами. ru-normalizr только на RU."""
+    base = _prepare_base(text)
+    vocab = load_pronunciations()
+    raw_segments = segment_languages(base, vocab)
+    out: list[SpeechSegment] = []
+    for seg in raw_segments:
+        if seg.lang == "en":
+            cleaned = _collapse_ws(seg.text)
+            if cleaned:
+                out.append(SpeechSegment(cleaned, "en"))
+            continue
+        ru = apply_pronunciations(seg.text, vocab)
+        ru = normalize_tts(ru)
+        ru = _collapse_ws(ru)
+        if ru:
+            out.append(SpeechSegment(ru, "ru"))
+    return out
+
+
+def finalize_speech_text(text: str, *, apply_dict: bool = True) -> str:
+    """Один язык (edge/Silero/Piper dict_only): словарь + нормализация."""
+    text = _prepare_base(text)
+    if apply_dict:
+        text = apply_pronunciations(text)
+    text = normalize_tts(text)
+    return _collapse_ws(text)

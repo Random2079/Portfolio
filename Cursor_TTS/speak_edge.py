@@ -4,6 +4,7 @@
          python speak_edge.py --stop
          python speak_edge.py --pause / --resume / --pause-toggle
          python speak_edge.py --warmup
+         python speak_edge.py --restart-daemon --warmup
 Если демон не запущен — поднимает его сам.
 """
 from __future__ import annotations
@@ -47,8 +48,34 @@ def daemon_alive() -> bool:
         return False
 
 
-def ensure_daemon() -> None:
-    if daemon_alive():
+def stop_daemon() -> None:
+    """Убить процесс демона, чтобы следующий ensure подхватил новый код."""
+    pid_file = ROOT / "tts_daemon.pid"
+    pid = ""
+    if pid_file.is_file():
+        try:
+            pid = pid_file.read_text(encoding="ascii").strip()
+        except OSError:
+            pid = ""
+    flags = 0x08000000 if sys.platform == "win32" else 0
+    if pid.isdigit():
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", pid],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+        )
+    for _ in range(25):
+        if not daemon_alive():
+            break
+        time.sleep(0.1)
+    pid_file.unlink(missing_ok=True)
+
+
+def ensure_daemon(*, restart: bool = False) -> None:
+    if restart:
+        stop_daemon()
+    elif daemon_alive():
         return
 
     flags = 0x08000000 if sys.platform == "win32" else 0
@@ -77,9 +104,9 @@ def ensure_daemon() -> None:
     raise RuntimeError("TTS daemon did not start")
 
 
-def warmup_backend(timeout: float = 180.0) -> dict:
+def warmup_backend(timeout: float = 180.0, *, restart: bool = False) -> dict:
     """Поднять демон и прогреть Silero/Piper / убедиться что демон жив (edge)."""
-    ensure_daemon()
+    ensure_daemon(restart=restart)
     return send_command({"cmd": "warmup"}, timeout=timeout)
 
 
@@ -99,47 +126,75 @@ def main() -> int:
         action="store_true",
         help="Start daemon and preload local TTS model",
     )
+    parser.add_argument(
+        "--restart-daemon",
+        action="store_true",
+        help="Kill running daemon so the next start loads new code",
+    )
     parser.add_argument("--voice", help="Ignored here; set in tts_config.json / panel")
     parser.add_argument("--volume", type=int, help="Ignored here; set in tts_config.json / panel")
     args = parser.parse_args()
 
     if args.warmup:
         try:
-            reply = warmup_backend()
+            reply = warmup_backend(restart=args.restart_daemon)
         except (OSError, RuntimeError) as exc:
             print(f"warmup failed: {exc}", file=sys.stderr)
             return 1
         return 0 if reply.get("ok") else 1
 
+    if args.restart_daemon:
+        stop_daemon()
+        try:
+            ensure_daemon()
+        except RuntimeError as exc:
+            print(f"restart failed: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
     ensure_daemon()
+
+    def _print_pause_state(reply: dict) -> int:
+        """Явный статус в stdout для AHK/панели: PAUSED или PLAYING."""
+        if not reply.get("ok"):
+            print("ERROR", file=sys.stderr)
+            return 1
+        paused = bool(reply.get("paused"))
+        print("PAUSED" if paused else "PLAYING")
+        return 0
 
     if args.stop:
         try:
             reply = send_command({"cmd": "stop"})
         except OSError as exc:
             reply = {"ok": False, "error": str(exc)}
-        return 0 if reply.get("ok") else 1
+        # stop снимает паузу — покажем PLAYING если ок
+        if reply.get("ok"):
+            reply = {"ok": True, "paused": False}
+            print("PLAYING")
+            return 0
+        return 1
 
     if args.pause:
         try:
             reply = send_command({"cmd": "pause"})
         except OSError as exc:
             reply = {"ok": False, "error": str(exc)}
-        return 0 if reply.get("ok") else 1
+        return _print_pause_state(reply)
 
     if args.resume:
         try:
             reply = send_command({"cmd": "resume"})
         except OSError as exc:
             reply = {"ok": False, "error": str(exc)}
-        return 0 if reply.get("ok") else 1
+        return _print_pause_state(reply)
 
     if args.pause_toggle:
         try:
             reply = send_command({"cmd": "pause_toggle"})
         except OSError as exc:
             reply = {"ok": False, "error": str(exc)}
-        return 0 if reply.get("ok") else 1
+        return _print_pause_state(reply)
 
     if not args.text_file:
         parser.print_help()

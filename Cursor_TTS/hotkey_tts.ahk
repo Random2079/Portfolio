@@ -16,13 +16,9 @@ if (!FileExist(pythonExe))
 global ttsPID := 0
 global pythonExe
 offFlag := A_ScriptDir . "\TTS_OFF"
+pauseFlag := A_ScriptDir . "\TTS_PAUSED"
 pidFile := A_ScriptDir . "\tts_speech.pid"
 selFile := A_Temp . "\cursor_tts_selection.txt"
-dbgLog := A_ScriptDir . "\..\debug-45ab72.log"
-
-; #region agent log
-FileAppend, % "AHK_START v1 python=" pythonExe "`n", %dbgLog%
-; #endregion
 
 ; Ctrl+Shift — удобнее Win+Alt, реже конфликтует чем Ctrl+Alt
 ; Ctrl+Shift+T — toggle AUTO
@@ -31,9 +27,6 @@ FileAppend, % "AHK_START v1 python=" pythonExe "`n", %dbgLog%
 ; Ctrl+Shift+S — speak SELECTED text
 
 ^+t::
-    ; #region agent log
-    FileAppend, AHK_HOTKEY Ctrl+Shift+T`n, %dbgLog%
-    ; #endregion
     if (FileExist(offFlag)) {
         FileDelete, %offFlag%
         ToolTip, TTS AUTO: ON, 10, 10
@@ -46,27 +39,24 @@ FileAppend, % "AHK_START v1 python=" pythonExe "`n", %dbgLog%
 return
 
 ^+x::
-    ; #region agent log
-    FileAppend, AHK_HOTKEY Ctrl+Shift+X`n, %dbgLog%
-    ; #endregion
     Gosub, StopSpeech
     ToolTip, TTS: STOP, 10, 10
     SetTimer, RemoveTip, -1500
 return
 
 ^+p::
-    ; #region agent log
-    FileAppend, AHK_HOTKEY Ctrl+Shift+P`n, %dbgLog%
-    ; #endregion
     RunWait, "%pythonExe%" "%A_ScriptDir%\speak_edge.py" --pause-toggle, , Hide
-    ToolTip, TTS: PAUSE/RESUME, 10, 10
-    SetTimer, RemoveTip, -1500
+    ; Файл TTS_PAUSED пишет демон: есть = пауза, нет = играет
+    if (FileExist(pauseFlag)) {
+        ToolTip, TTS: PAUSED  (Ctrl+Shift+P = resume), 10, 10
+        SetTimer, RemoveTip, -5000
+    } else {
+        ToolTip, TTS: PLAYING, 10, 10
+        SetTimer, RemoveTip, -2500
+    }
 return
 
 ^+s::
-    ; #region agent log
-    FileAppend, AHK_HOTKEY Ctrl+Shift+S`n, %dbgLog%
-    ; #endregion
     Gosub, StopSpeech
 
     clipSaved := ClipboardAll
@@ -93,17 +83,11 @@ return
 return
 
 StopSpeech:
-    ; #region agent log
-    FileAppend, AHK_STOPSPEECH`n, %dbgLog%
-    ; #endregion
     if (ttsPID) {
         Process, Close, %ttsPID%
         ttsPID := 0
     }
     RunWait, "%pythonExe%" "%A_ScriptDir%\speak_edge.py" --stop, , Hide
-    ; #region agent log
-    FileAppend, % "AHK_STOP_DONE err=" ErrorLevel "`n", %dbgLog%
-    ; #endregion
     if (FileExist(pidFile)) {
         FileRead, speechPID, %pidFile%
         speechPID := Trim(speechPID)
