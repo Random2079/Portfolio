@@ -1,0 +1,20 @@
+{
+  "my_nickname": "Ищу работу (Python Dev)",
+  "nickname_aliases": [
+    "Ищу работу",
+    "Ищу работу (Python",
+    "Ищу работу (Python Dev",
+    "Ищу работ"
+  ],
+  "roi": null,
+  "poll_interval_s": 2.0,
+  "ocr_lang": ["ru", "en"],
+  "capture_mode": "game",
+  "dry_run": true,
+  "mute_slot1": {"x": 220, "y": 320},
+  "mute_slot_dy": 40,
+  "menu_mute_offset": {"x": 90, "y": 110},
+  "menu_unmute_offset": {"x": 90, "y": 110},
+  "click_pause_s": 0.15,
+  "channel_line_regex": "^[•·.\\-]?\\s*\\d{1,3}\\s*$|^[•·]\\s*.+"
+}

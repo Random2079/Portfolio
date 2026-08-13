@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+config.json
+debug_last_capture.png
+voicemute.log
+.idea/

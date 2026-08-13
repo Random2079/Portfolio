@@ -40,6 +40,17 @@ class TestExtendCaption(unittest.TestCase):
             extend_caption_text("Привет друзья", "Сегодня поговорим о рынке")
         )
 
+    def test_single_stopword_overlap_not_merged(self) -> None:
+        """Одно общее слово («в») не должно склеивать разные фразы."""
+        self.assertIsNone(extend_caption_text("в конце", "в начале"))
+        self.assertIsNone(extend_caption_text("сказал и", "и потом ушёл"))
+
+    def test_two_word_overlap_still_merges(self) -> None:
+        self.assertEqual(
+            extend_caption_text("мы идём дальше", "идём дальше вместе"),
+            "мы идём дальше вместе",
+        )
+
 
 class TestMergePipeline(unittest.TestCase):
     def test_exact_triple_duplicate(self) -> None:
@@ -74,6 +85,16 @@ class TestMergePipeline(unittest.TestCase):
             plain.splitlines(),
             ["воняет мусор надо", "озеро шашлык", "ненавижу насекомых"],
         )
+
+    def test_nearby_single_word_overlap_not_glued(self) -> None:
+        """Близко по времени + одно общее слово — всё равно две фразы."""
+        segs = [
+            _seg(0.0, 1.0, "был в конце"),
+            _seg(1.1, 2.0, "в начале пути"),
+        ]
+        plain = segments_to_plain_text(merge_segments(segs))
+        self.assertEqual(plain.splitlines(), ["был в конце", "в начале пути"])
+        self.assertNotIn("конце начале", plain)
 
     def test_normal_neighbor_phrases(self) -> None:
         """3) нормальные соседние фразы остаются двумя строками."""

@@ -90,15 +90,77 @@ def _lang_available(tracks: dict | None, lang_code: str) -> bool:
     return any(key == lang_code or key.startswith(prefix) for key in tracks)
 
 
-def fetch_video_meta(url: str, creation_flags: int) -> dict:
-    """Один проход yt-dlp: title + список субтитров (JSON UTF-8)."""
-    result = subprocess.run(
-        ["yt-dlp", "--dump-single-json", "--skip-download", "--no-warnings", url],
-        capture_output=True,
-        check=True,
-        creationflags=creation_flags,
-    )
-    return json.loads(result.stdout.decode("utf-8"))
+def fetch_video_meta(
+    url: str,
+    creation_flags: int,
+    status_cb: StatusCb | None = None,
+) -> dict:
+    """Один проход yt-dlp: title + список субтитров (JSON UTF-8).
+
+    При ConnectionReset / сбое API — до 3 попыток с разными player_client.
+    Жёсткий timeout процесса не крутим повторно: TLS/сеть всё равно мертвы.
+    """
+    attempts: list[list[str]] = [
+        ["--socket-timeout", "20"],
+        [
+            "--socket-timeout",
+            "20",
+            "--extractor-args",
+            "youtube:player_client=android",
+        ],
+        [
+            "--socket-timeout",
+            "25",
+            "--extractor-args",
+            "youtube:player_client=android,web",
+        ],
+    ]
+    last_exc: BaseException | None = None
+    # на попытку: socket-timeout + запас; суммарно не раздувать до 5 минут
+    process_timeout = 55
+
+    for attempt_i, extra in enumerate(attempts, start=1):
+        _emit(
+            status_cb,
+            f"Статус: [1/3] метаданные — попытка {attempt_i}/{len(attempts)}…",
+        )
+        cmd = [
+            "yt-dlp",
+            "--dump-single-json",
+            "--skip-download",
+            "--no-warnings",
+            *extra,
+            "--",
+            url,
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                check=True,
+                creationflags=creation_flags,
+                timeout=process_timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # зависание handshake/API — другие player_client обычно не спасают
+            last_exc = exc
+            break
+        except (subprocess.CalledProcessError, OSError) as exc:
+            last_exc = exc
+            continue
+
+        raw = result.stdout.decode("utf-8", errors="replace").strip()
+        if not raw:
+            last_exc = ValueError("yt-dlp вернул пустой JSON метаданных")
+            continue
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            last_exc = exc
+            continue
+
+    assert last_exc is not None
+    raise last_exc
 
 
 def pick_subtitle_mode(meta: dict, lang_code: str) -> str | None:
@@ -152,6 +214,8 @@ _SRT_TIME = re.compile(
 )
 _MERGE_GAP_SEC = 1.5
 _MERGE_MAX_CHARS = 120
+# одно общее слово («в», «и», «на») — слишком часто ложная склейка
+_WORD_OVERLAP_MIN = 2
 
 
 def _hms_to_seconds(h: str, m: str, s: str, ms: str) -> float:
@@ -207,7 +271,7 @@ def _word_overlap_merge(prev: str, nxt: str) -> str | None:
     Склеивает частично перекрывающиеся куски без дубля хвоста/головы.
     «Каждый из нас хоть раз» + «хоть раз в жизни сталкивался»
     → «Каждый из нас хоть раз в жизни сталкивался».
-    None — перекрытия слов нет (это разные фразы).
+    None — перекрытия нет / слишком короткое (1 слово — часто ложь).
     """
     prev_w = prev.split()
     nxt_w = nxt.split()
@@ -215,10 +279,10 @@ def _word_overlap_merge(prev: str, nxt: str) -> str | None:
         return None
     max_k = min(len(prev_w), len(nxt_w))
     best = 0
-    for k in range(1, max_k + 1):
+    for k in range(_WORD_OVERLAP_MIN, max_k + 1):
         if prev_w[-k:] == nxt_w[:k]:
             best = k
-    if best == 0:
+    if best < _WORD_OVERLAP_MIN:
         return None
     return " ".join(prev_w + nxt_w[best:])
 
@@ -373,13 +437,43 @@ def download_and_split(
     _emit(status_cb, f"Статус: [1/3] метаданные ({lang_code.upper()})…")
     t0 = time.perf_counter()
     try:
-        meta = fetch_video_meta(url, creation_flags)
+        meta = fetch_video_meta(url, creation_flags, status_cb=status_cb)
     except FileNotFoundError:
         sys.stderr.write("Ошибка: yt-dlp не установлен или не найден в PATH.\n")
         return False
-    except subprocess.CalledProcessError as error:
-        details = (error.stderr or b"").decode("utf-8", errors="replace").strip()
-        sys.stderr.write(f"Ошибка: не удалось получить метаданные видео.\n{details}\n")
+    except subprocess.TimeoutExpired:
+        sys.stderr.write(
+            "Ошибка: yt-dlp завис на метаданных (таймаут). "
+            "Часто стратегия zapret пропускает браузер (QUIC), а CLI/TLS — нет. "
+            "Смени метод/стратегию zapret (напр. FAKE TLS AUTO) или VPN, потом повтори.\n"
+        )
+        return False
+    except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError) as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            details = (error.stderr or b"").decode("utf-8", errors="replace").strip()
+        else:
+            details = str(error)
+        hint = ""
+        low = details.lower()
+        if (
+            "connection reset" in low
+            or "10054" in details
+            or "10060" in details
+            or "connection aborted" in low
+            or "unable to download api page" in low
+            or "timed out" in low
+            or "timeout" in low
+        ):
+            hint = (
+                "\nПодсказка: до YouTube из yt-dlp/Python соединение рвут "
+                "(браузер через zapret может жить, а CLI — нет). "
+                "Не обязательно выключать zapret: смени стратегию "
+                "(FAKE TLS AUTO / ALT…), проверь что YouTube в hostlist; "
+                "или дай yt-dlp локальный SOCKS/VPN. Ретраи в приложении уже включены.\n"
+            )
+        sys.stderr.write(
+            f"Ошибка: не удалось получить метаданные видео.\n{details}\n{hint}"
+        )
         return False
     timings["meta"] = time.perf_counter() - t0
 
@@ -416,13 +510,27 @@ def download_and_split(
             "--convert-subs",
             "srt",
             "--skip-download",
+            "--socket-timeout",
+            "30",
             "-o",
             "temp_subtitles",
+            "--",
             url,
         ]
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, creationflags=creation_flags
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                creationflags=creation_flags,
+                timeout=180,
+            )
+        except subprocess.TimeoutExpired:
+            sys.stderr.write(
+                "Ошибка: yt-dlp завис на скачивании субтитров (таймаут). "
+                "Проверь сеть/стратегию zapret и повтори.\n"
+            )
+            return False
         timings["subs"] = time.perf_counter() - t1
 
         if result.returncode != 0:
