@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -94,6 +96,32 @@ class ConfigMigrationTests(unittest.TestCase):
                 self.assertEqual(data["hybrid_mode"], "dict_only")
             finally:
                 panel.CONFIG_FILE = old
+
+
+class StopCancelTests(unittest.TestCase):
+    def test_stop_worker_does_not_wait_on_request_lock(self) -> None:
+        """Stop должен убить worker, даже если synth держит _request_lock."""
+        import speak_kokoro as sk
+
+        held = threading.Event()
+        released = threading.Event()
+
+        def hold_request_lock() -> None:
+            with sk._request_lock:
+                held.set()
+                released.wait(timeout=5)
+
+        t = threading.Thread(target=hold_request_lock, daemon=True)
+        t.start()
+        self.assertTrue(held.wait(timeout=2))
+        gen_before = sk._generation
+        started = time.monotonic()
+        sk.stop_worker()
+        elapsed = time.monotonic() - started
+        released.set()
+        t.join(timeout=2)
+        self.assertLess(elapsed, 1.0, "stop_worker blocked on request lock")
+        self.assertGreater(sk._generation, gen_before)
 
 
 if __name__ == "__main__":

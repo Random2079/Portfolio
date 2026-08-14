@@ -4,6 +4,12 @@
 Env:
   KOKORO_RU_ASSETS — папка с весами (default: %USERPROFILE%\\.kokoro_ru)
   KOKORO_PYTHON    — python.exe 3.12 venv
+
+Locking:
+  _request_lock — один synth/warmup за раз (ждёт ответ).
+  _proc_lock — мутация _proc / _generation.
+  stop_worker() убивает процесс БЕЗ _request_lock, иначе Stop зависал
+  на весь synth (до 600 с).
 """
 from __future__ import annotations
 
@@ -39,7 +45,8 @@ def _default_python() -> Path:
 DEFAULT_ASSETS = _default_assets()
 DEFAULT_PY = _default_python()
 
-_lock = threading.RLock()
+_request_lock = threading.RLock()
+_proc_lock = threading.RLock()
 _proc: subprocess.Popen | None = None
 _stderr_thread: threading.Thread | None = None
 _generation = 0  # bump on kill so stale readers bail
@@ -84,7 +91,32 @@ def _readline_timeout(proc: subprocess.Popen, timeout_s: float) -> str:
     return line
 
 
+def _kill_proc(proc: subprocess.Popen | None) -> None:
+    if proc is None:
+        return
+    try:
+        if proc.poll() is None and proc.stdin is not None:
+            try:
+                proc.stdin.write(json.dumps({"cmd": "quit"}) + "\n")
+                proc.stdin.flush()
+                proc.wait(timeout=0.4)
+            except Exception:
+                pass
+        if proc.poll() is None:
+            proc.kill()
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                pass
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 def _start_worker(*, hello_timeout_s: float = 60.0) -> subprocess.Popen:
+    """Вызывать под _proc_lock."""
     global _stderr_thread, _generation
     py = _default_python()
     assets = _default_assets()
@@ -150,21 +182,23 @@ def _start_worker(*, hello_timeout_s: float = 60.0) -> subprocess.Popen:
 
 
 def _ensure_worker() -> subprocess.Popen:
+    """Вызывать под _proc_lock."""
     global _proc
-    with _lock:
-        if _proc is not None and _proc.poll() is None:
-            return _proc
-        _proc = _start_worker()
+    if _proc is not None and _proc.poll() is None:
         return _proc
+    _proc = _start_worker()
+    return _proc
 
 
 def _request(payload: dict, timeout_s: float = 600.0) -> dict:
-    with _lock:
-        proc = _ensure_worker()
-        assert proc.stdin is not None and proc.stdout is not None
-        gen = _generation
-        proc.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
-        proc.stdin.flush()
+    with _request_lock:
+        with _proc_lock:
+            proc = _ensure_worker()
+            assert proc.stdin is not None and proc.stdout is not None
+            gen = _generation
+            proc.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            proc.stdin.flush()
+        # Ждём ОТВЕТ без _proc_lock — иначе stop_worker() не сможет убить worker.
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             if gen != _generation:
@@ -173,7 +207,7 @@ def _request(payload: dict, timeout_s: float = 600.0) -> dict:
                 raise RuntimeError("kokoro worker exited during request")
             remaining = max(0.05, deadline - time.monotonic())
             try:
-                line = _readline_timeout(proc, min(remaining, 5.0))
+                line = _readline_timeout(proc, min(remaining, 0.5))
             except TimeoutError:
                 continue
             if not line:
@@ -213,33 +247,13 @@ def synthesize_wav(text: str, voice: str | None, out_path: Path) -> None:
 
 
 def stop_worker() -> None:
-    """Убить worker (отмена текущего synth + освобождение RAM)."""
+    """Убить worker сразу: не ждёт конца synth / _request_lock."""
     global _proc, _generation
-    with _lock:
+    with _proc_lock:
         _generation += 1
         proc = _proc
         _proc = None
-        if proc is None:
-            return
-        try:
-            if proc.poll() is None and proc.stdin is not None:
-                try:
-                    proc.stdin.write(json.dumps({"cmd": "quit"}) + "\n")
-                    proc.stdin.flush()
-                    proc.wait(timeout=2)
-                except Exception:
-                    pass
-            if proc.poll() is None:
-                proc.kill()
-                try:
-                    proc.wait(timeout=2)
-                except Exception:
-                    pass
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+    _kill_proc(proc)
 
 
 def cancel_current() -> None:

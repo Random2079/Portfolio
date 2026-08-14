@@ -460,10 +460,11 @@ def _audio_suffix(engine: str) -> str:
 
 
 def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None:
-    """kokoro / qwen → wav. lang оставлен для совместимости (всегда ru)."""
+    """kokoro / qwen → wav. lang оставлен для совместимости (всегда ru).
+    Смену движка (_prepare_engine) делает speak_text/warmup один раз — не на каждый chunk.
+    """
     del lang  # EN hybrid убран вместе с Piper
     engine = cfg["engine"]
-    _prepare_engine(engine)
     if engine == "kokoro":
         from speak_kokoro import synthesize_wav as synthesize_kokoro
 
@@ -492,18 +493,6 @@ def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None
         )
         return
     raise ValueError(f"unknown engine: {engine}")
-
-
-def _prefetch_part(part: str, cfg: dict, out_holder: list, lang: str = "ru") -> None:
-    suffix = _audio_suffix(cfg["engine"])
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        audio_path = Path(tmp.name)
-    try:
-        render_audio(part, cfg, audio_path, lang)
-        out_holder[0] = audio_path
-    except Exception as error:
-        audio_path.unlink(missing_ok=True)
-        out_holder[0] = error
 
 
 def _looks_like_table_speech(text: str) -> bool:
@@ -563,19 +552,9 @@ def speak_text(text: str) -> None:
         suffix = _audio_suffix(cfg["engine"])
         pause_ms = int(cfg.get("pause_ms", DEFAULT_PAUSE_MS))
         switch_ms = int(cfg.get("lang_switch_pause_ms", DEFAULT_LANG_SWITCH_PAUSE_MS))
-        use_prefetch = cfg["engine"] in ("kokoro", "qwen")
+        # Без prefetch: Kokoro/Qwen делят lock/VRAM; сирота после Stop вешала следующий Speak.
         _prepare_engine(str(cfg["engine"]))
-        next_thread: threading.Thread | None = None
         current_path: Path | None = None
-
-        def start_prefetch(part: str, lang: str) -> threading.Thread:
-            holder: list = [None]
-            thread = threading.Thread(
-                target=_prefetch_part, args=(part, cfg, holder, lang), daemon=True
-            )
-            thread.start()
-            thread._holder = holder  # type: ignore[attr-defined]
-            return thread
 
         try:
             index = 0
@@ -596,37 +575,17 @@ def speak_text(text: str) -> None:
                     f"chars={len(part)} preview={part[:80]!r}"
                 )
 
-                if current_path is None:
-                    if use_prefetch and next_thread is not None:
-                        next_thread.join(timeout=300)
-                        result = getattr(next_thread, "_holder", [None])[0]
-                        next_thread = None
-                        if isinstance(result, Path):
-                            current_path = result
-                        else:
-                            err = (
-                                result
-                                if isinstance(result, Exception)
-                                else RuntimeError("prefetch returned nothing")
-                            )
-                            fail_parts += 1
-                            log_chunk_fail(index + 1, len(units), part, err)
-                            index += 1
-                            continue
-                    else:
-                        with tempfile.NamedTemporaryFile(
-                            suffix=suffix, delete=False
-                        ) as tmp:
-                            current_path = Path(tmp.name)
-                        try:
-                            render_audio(part, cfg, current_path, lang)
-                        except Exception as error:
-                            fail_parts += 1
-                            log_chunk_fail(index + 1, len(units), part, error)
-                            _safe_unlink(current_path)
-                            current_path = None
-                            index += 1
-                            continue
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                    current_path = Path(tmp.name)
+                try:
+                    render_audio(part, cfg, current_path, lang)
+                except Exception as error:
+                    fail_parts += 1
+                    log_chunk_fail(index + 1, len(units), part, error)
+                    _safe_unlink(current_path)
+                    current_path = None
+                    index += 1
+                    continue
 
                 if current_path.stat().st_size < 64:
                     fail_parts += 1
@@ -640,16 +599,6 @@ def speak_text(text: str) -> None:
                     current_path = None
                     index += 1
                     continue
-
-                if (
-                    use_prefetch
-                    and next_thread is None
-                    and index + 1 < len(units)
-                    and not _stop_event.is_set()
-                ):
-                    npart, nlang = units[index + 1]
-                    if len(npart) >= 2:
-                        next_thread = start_prefetch(npart, nlang)
 
                 finished = play_file(current_path, cfg["volume"])
                 _safe_unlink(current_path)
@@ -673,11 +622,6 @@ def speak_text(text: str) -> None:
         finally:
             if current_path is not None:
                 _safe_unlink(current_path)
-            if next_thread is not None:
-                next_thread.join(timeout=1)
-                result = getattr(next_thread, "_holder", [None])[0]
-                if isinstance(result, Path):
-                    _safe_unlink(result)
 
         log_speak_done(ok_parts, fail_parts, len(units))
 
