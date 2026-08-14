@@ -15,6 +15,7 @@
         --border: #d5dee8;
         --equity: #1a6fd4;
         --bond: #9a6b12;
+        --fund: #0f7a5a;
         --hover: #eaf1f8;
         --card: #f8fafc;
         font-family: "Segoe UI", system-ui, sans-serif;
@@ -29,7 +30,7 @@
       .app { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
       header {
         display: flex; flex-wrap: wrap; align-items: baseline;
-        justify-content: space-between; gap: 0.75rem; margin-bottom: 1.25rem;
+        justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem;
       }
       header h1 { margin: 0; font-size: 1.5rem; }
       header p { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.9rem; }
@@ -42,6 +43,26 @@
       button.secondary {
         background: var(--panel); color: var(--text); border: 1px solid var(--border);
       }
+      button.active-filter {
+        background: var(--accent); color: #fff; border-color: var(--accent);
+      }
+      .filters {
+        display: flex; flex-wrap: wrap; gap: 0.45rem; margin-bottom: 0.65rem;
+      }
+      .filters .chip {
+        background: var(--panel); color: var(--text); border: 1px solid var(--border);
+        border-radius: 999px; padding: 0.35rem 0.85rem; font-weight: 600; font-size: 0.85rem;
+      }
+      .filters .chip.active-filter { background: var(--accent); color: #fff; border-color: var(--accent); }
+      .sectors {
+        display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 1rem;
+      }
+      .sectors .chip {
+        background: #fff; color: var(--muted); border: 1px solid var(--border);
+        border-radius: 999px; padding: 0.28rem 0.7rem; font-size: 0.78rem; font-weight: 600;
+      }
+      .sectors .chip.active-filter { background: #1a2330; color: #fff; border-color: #1a2330; }
+      .sectors[hidden] { display: none; }
       .layout {
         display: grid;
         grid-template-columns: minmax(240px, 300px) 1fr;
@@ -77,6 +98,7 @@
       }
       .badge.equity { background: #e8f2fc; color: var(--equity); }
       .badge.bond { background: #f7efd9; color: var(--bond); }
+      .badge.fund { background: #e3f5ef; color: var(--fund); }
       .news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
       .news-item {
         padding: 0.75rem; border-radius: 10px; border: 1px solid var(--border); background: var(--card);
@@ -96,15 +118,18 @@
           <p id="subtitle">Загрузка…</p>
         </div>
         <div class="actions">
-          <button type="button" class="secondary" id="btnAll">Все</button>
           <button type="button" class="secondary" id="btnRefresh">Обновить</button>
           <button type="button" id="btnPoll">Опросить сейчас</button>
         </div>
       </header>
+
+      <div class="filters" id="kindFilters" role="tablist" aria-label="Тип бумаг"></div>
+      <div class="sectors" id="sectorFilters" hidden></div>
+
       <div id="error" class="error" hidden></div>
       <div class="layout">
         <aside class="panel">
-          <h2>Тикеры</h2>
+          <h2 id="tickersHeading">Тикеры</h2>
           <ul class="ticker-list" id="tickers"></ul>
         </aside>
         <main class="panel news-panel">
@@ -114,8 +139,14 @@
       </div>
     </div>
     <script>
+      const KIND_LABEL = { all: "Все", equity: "Акции", bond: "Облигации", fund: "Фонды" };
+      const KIND_BADGE = { equity: "акция", bond: "облигация", fund: "фонд" };
+
       let selected = null;
+      let kindFilter = "all"; // all | equity | bond | fund
+      let sectorFilter = null; // null = all sectors (only for equity)
       let tickers = [];
+      let allNews = [];
       let pollInfo = null;
 
       function showError(msg) {
@@ -135,34 +166,138 @@
         return res.json();
       }
 
+      function filteredTickers() {
+        let list = tickers;
+        if (kindFilter !== "all") {
+          list = list.filter((t) => t.kind === kindFilter);
+        }
+        if (kindFilter === "equity" && sectorFilter) {
+          list = list.filter((t) => (t.category || "") === sectorFilter);
+        }
+        return list;
+      }
+
+      function equitySectors() {
+        const set = new Set();
+        for (const t of tickers) {
+          if (t.kind === "equity" && t.category) set.add(t.category);
+        }
+        return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+      }
+
+      function renderKindFilters() {
+        const host = document.getElementById("kindFilters");
+        host.innerHTML = "";
+        for (const key of ["all", "equity", "bond", "fund"]) {
+          const count =
+            key === "all"
+              ? tickers.length
+              : tickers.filter((t) => t.kind === key).length;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "chip" + (kindFilter === key ? " active-filter" : "");
+          btn.textContent = KIND_LABEL[key] + " (" + count + ")";
+          btn.addEventListener("click", () => {
+            kindFilter = key;
+            sectorFilter = null;
+            if (selected && !filteredTickers().some((t) => t.id === selected)) {
+              selected = null;
+            }
+            renderAll();
+          });
+          host.appendChild(btn);
+        }
+      }
+
+      function renderSectorFilters() {
+        const host = document.getElementById("sectorFilters");
+        if (kindFilter !== "equity") {
+          host.hidden = true;
+          host.innerHTML = "";
+          return;
+        }
+        host.hidden = false;
+        host.innerHTML = "";
+        const sectors = equitySectors();
+        const allBtn = document.createElement("button");
+        allBtn.type = "button";
+        allBtn.className = "chip" + (!sectorFilter ? " active-filter" : "");
+        allBtn.textContent = "Все сектора";
+        allBtn.addEventListener("click", () => {
+          sectorFilter = null;
+          if (selected && !filteredTickers().some((t) => t.id === selected)) selected = null;
+          renderAll();
+        });
+        host.appendChild(allBtn);
+        for (const sec of sectors) {
+          const n = tickers.filter((t) => t.kind === "equity" && t.category === sec).length;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "chip" + (sectorFilter === sec ? " active-filter" : "");
+          btn.textContent = sec + " (" + n + ")";
+          btn.addEventListener("click", () => {
+            sectorFilter = sec;
+            if (selected && !filteredTickers().some((t) => t.id === selected)) selected = null;
+            renderAll();
+          });
+          host.appendChild(btn);
+        }
+      }
+
       function renderTickers() {
         const ul = document.getElementById("tickers");
+        const list = filteredTickers();
+        document.getElementById("tickersHeading").textContent =
+          "Тикеры · " + list.length;
         ul.innerHTML = "";
-        for (const t of tickers) {
+        if (!list.length) {
+          ul.innerHTML = '<li class="empty">В этом фильтре пусто.</li>';
+          return;
+        }
+        for (const t of list) {
           const li = document.createElement("li");
           const btn = document.createElement("button");
           btn.type = "button";
           if (selected === t.id) btn.classList.add("active");
+          const badge = KIND_BADGE[t.kind] || t.kind;
           btn.innerHTML =
-            '<span class="badge ' + t.kind + '">' + t.kind + "</span>" +
+            '<span class="badge ' + t.kind + '">' + badge + "</span>" +
             '<span class="id">' + t.id + "</span>" +
-            '<span class="name">' + (t.name || "") + "</span>";
+            '<span class="name">' + (t.name || "") + (t.kind === "equity" && t.category ? " · " + t.category : "") + "</span>";
           btn.addEventListener("click", () => {
             selected = t.id;
-            load();
+            renderAll();
           });
           li.appendChild(btn);
           ul.appendChild(li);
         }
       }
 
-      function renderNews(items) {
+      function visibleNews() {
+        if (selected) {
+          return allNews.filter((n) => n.ticker_id === selected);
+        }
+        const ids = new Set(filteredTickers().map((t) => t.id));
+        if (kindFilter === "all" && !sectorFilter) return allNews;
+        return allNews.filter((n) => ids.has(n.ticker_id));
+      }
+
+      function renderNews() {
+        const items = visibleNews();
         const ul = document.getElementById("news");
         const title = document.getElementById("newsTitle");
-        title.textContent = selected ? "Новости · " + selected : "Лента";
+        if (selected) {
+          title.textContent = "Новости · " + selected;
+        } else if (kindFilter === "equity" && sectorFilter) {
+          title.textContent = "Лента · акции · " + sectorFilter;
+        } else if (kindFilter !== "all") {
+          title.textContent = "Лента · " + KIND_LABEL[kindFilter].toLowerCase();
+        } else {
+          title.textContent = "Лента";
+        }
         ul.innerHTML = "";
         if (!items.length) {
-          ul.innerHTML = '<li class="empty">Пока пусто. Нажми «Опросить сейчас».</li>';
+          ul.innerHTML = '<li class="empty">Пока пусто. Нажми «Опросить сейчас» или смени фильтр.</li>';
           return;
         }
         for (const n of items) {
@@ -184,9 +319,19 @@
       function renderSubtitle() {
         const equity = tickers.filter((t) => t.kind === "equity").length;
         const bond = tickers.filter((t) => t.kind === "bond").length;
-        let text = tickers.length + " бумаг · " + equity + " акций · " + bond + " облигаций";
+        const fund = tickers.filter((t) => t.kind === "fund").length;
+        let text =
+          tickers.length + " бумаг · " + equity + " акций · " + bond + " облигаций · " + fund + " фондов";
         if (pollInfo) text += " · last poll +" + pollInfo.inserted;
         document.getElementById("subtitle").textContent = text;
+      }
+
+      function renderAll() {
+        renderKindFilters();
+        renderSectorFilters();
+        renderTickers();
+        renderNews();
+        renderSubtitle();
       }
 
       async function load() {
@@ -194,22 +339,18 @@
         try {
           const [t, n] = await Promise.all([
             getJson("/api/tickers"),
-            getJson(selected ? "/api/news?ticker=" + encodeURIComponent(selected) + "&limit=80" : "/api/news?limit=80"),
+            getJson("/api/news?limit=200"),
           ]);
           tickers = t;
-          renderTickers();
-          renderNews(n);
-          renderSubtitle();
+          allNews = n;
+          if (selected && !tickers.some((x) => x.id === selected)) selected = null;
+          renderAll();
         } catch (e) {
           showError(String(e.message || e));
           document.getElementById("subtitle").textContent = "Нет связи с API";
         }
       }
 
-      document.getElementById("btnAll").addEventListener("click", () => {
-        selected = null;
-        load();
-      });
       document.getElementById("btnRefresh").addEventListener("click", () => load());
       document.getElementById("btnPoll").addEventListener("click", async () => {
         const btn = document.getElementById("btnPoll");

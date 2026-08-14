@@ -402,7 +402,7 @@
       "id": "GOLD",
       "name": "ВИМ Фонд Золото",
       "isin": "RU000A101NZ2",
-      "kind": "equity",
+      "kind": "fund",
       "category": "ETF",
       "bond_type": null,
       "search_query": "ВИМ Фонд Золото"
@@ -447,7 +447,7 @@
       "id": "BCSR",
       "name": "БПИФ БКС Индекс Росс рынка",
       "isin": "RU000A10A0N6",
-      "kind": "equity",
+      "kind": "fund",
       "category": "ETF",
       "bond_type": null,
       "search_query": "БПИФ БКС Индекс Росс рынка"

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const API = "";
+const KIND_LABEL = { all: "Все", equity: "Акции", bond: "Облигации", fund: "Фонды" };
+const KIND_BADGE = { equity: "акция", bond: "облигация", fund: "фонд" };
 
 async function getJson(path) {
   const res = await fetch(`${API}${path}`);
@@ -10,8 +12,10 @@ async function getJson(path) {
 
 export default function App() {
   const [tickers, setTickers] = useState([]);
-  const [news, setNews] = useState([]);
+  const [allNews, setAllNews] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [kindFilter, setKindFilter] = useState("all");
+  const [sectorFilter, setSectorFilter] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [pollInfo, setPollInfo] = useState(null);
@@ -19,16 +23,13 @@ export default function App() {
   const load = useCallback(async () => {
     setError("");
     try {
-      const [t, n] = await Promise.all([
-        getJson("/api/tickers"),
-        getJson(selected ? `/api/news?ticker=${encodeURIComponent(selected)}&limit=80` : "/api/news?limit=80"),
-      ]);
+      const [t, n] = await Promise.all([getJson("/api/tickers"), getJson("/api/news?limit=200")]);
       setTickers(t);
-      setNews(n);
+      setAllNews(n);
     } catch (e) {
       setError(String(e.message || e));
     }
-  }, [selected]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -37,8 +38,39 @@ export default function App() {
   const counts = useMemo(() => {
     const equity = tickers.filter((t) => t.kind === "equity").length;
     const bond = tickers.filter((t) => t.kind === "bond").length;
-    return { equity, bond };
+    const fund = tickers.filter((t) => t.kind === "fund").length;
+    return { equity, bond, fund };
   }, [tickers]);
+
+  const filteredTickers = useMemo(() => {
+    let list = tickers;
+    if (kindFilter !== "all") list = list.filter((t) => t.kind === kindFilter);
+    if (kindFilter === "equity" && sectorFilter) {
+      list = list.filter((t) => (t.category || "") === sectorFilter);
+    }
+    return list;
+  }, [tickers, kindFilter, sectorFilter]);
+
+  const sectors = useMemo(() => {
+    const set = new Set();
+    for (const t of tickers) {
+      if (t.kind === "equity" && t.category) set.add(t.category);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+  }, [tickers]);
+
+  const news = useMemo(() => {
+    if (selected) return allNews.filter((n) => n.ticker_id === selected);
+    const ids = new Set(filteredTickers.map((t) => t.id));
+    if (kindFilter === "all" && !sectorFilter) return allNews;
+    return allNews.filter((n) => ids.has(n.ticker_id));
+  }, [allNews, selected, filteredTickers, kindFilter, sectorFilter]);
+
+  function setKind(key) {
+    setKindFilter(key);
+    setSectorFilter(null);
+    setSelected(null);
+  }
 
   async function runPoll() {
     setBusy(true);
@@ -63,14 +95,11 @@ export default function App() {
         <div>
           <h1>Portfolio News</h1>
           <p>
-            {tickers.length} бумаг · {counts.equity} акций · {counts.bond} облигаций
+            {tickers.length} бумаг · {counts.equity} акций · {counts.bond} облигаций · {counts.fund} фондов
             {pollInfo ? ` · last poll +${pollInfo.inserted}` : ""}
           </p>
         </div>
         <div className="actions">
-          <button type="button" className="secondary" onClick={() => setSelected(null)}>
-            Все
-          </button>
           <button type="button" className="secondary" onClick={load} disabled={busy}>
             Обновить
           </button>
@@ -80,22 +109,69 @@ export default function App() {
         </div>
       </header>
 
+      <div className="filters">
+        {["all", "equity", "bond", "fund"].map((key) => {
+          const count = key === "all" ? tickers.length : tickers.filter((t) => t.kind === key).length;
+          return (
+            <button
+              key={key}
+              type="button"
+              className={`chip${kindFilter === key ? " active-filter" : ""}`}
+              onClick={() => setKind(key)}
+            >
+              {KIND_LABEL[key]} ({count})
+            </button>
+          );
+        })}
+      </div>
+
+      {kindFilter === "equity" ? (
+        <div className="sectors">
+          <button
+            type="button"
+            className={`chip${!sectorFilter ? " active-filter" : ""}`}
+            onClick={() => {
+              setSectorFilter(null);
+              setSelected(null);
+            }}
+          >
+            Все сектора
+          </button>
+          {sectors.map((sec) => (
+            <button
+              key={sec}
+              type="button"
+              className={`chip${sectorFilter === sec ? " active-filter" : ""}`}
+              onClick={() => {
+                setSectorFilter(sec);
+                setSelected(null);
+              }}
+            >
+              {sec} ({tickers.filter((t) => t.kind === "equity" && t.category === sec).length})
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {error ? <div className="error">API: {error}. Запущен ли backend на :8765?</div> : null}
 
       <div className="layout">
         <aside className="panel">
-          <h2>Тикеры</h2>
+          <h2>Тикеры · {filteredTickers.length}</h2>
           <ul className="ticker-list">
-            {tickers.map((t) => (
+            {filteredTickers.map((t) => (
               <li key={t.id}>
                 <button
                   type="button"
                   className={selected === t.id ? "active" : ""}
                   onClick={() => setSelected(t.id)}
                 >
-                  <span className={`badge ${t.kind}`}>{t.kind}</span>
+                  <span className={`badge ${t.kind}`}>{KIND_BADGE[t.kind] || t.kind}</span>
                   <span className="id">{t.id}</span>
-                  <span className="name">{t.name}</span>
+                  <span className="name">
+                    {t.name}
+                    {t.kind === "equity" && t.category ? ` · ${t.category}` : ""}
+                  </span>
                 </button>
               </li>
             ))}
@@ -103,9 +179,17 @@ export default function App() {
         </aside>
 
         <main className="panel">
-          <h2>{selected ? `Новости · ${selected}` : "Лента"}</h2>
+          <h2>
+            {selected
+              ? `Новости · ${selected}`
+              : kindFilter === "equity" && sectorFilter
+                ? `Лента · акции · ${sectorFilter}`
+                : kindFilter !== "all"
+                  ? `Лента · ${KIND_LABEL[kindFilter].toLowerCase()}`
+                  : "Лента"}
+          </h2>
           {news.length === 0 ? (
-            <div className="empty">Пока пусто. Нажми «Опросить сейчас» или CLI: python -m portfolio_news once</div>
+            <div className="empty">Пока пусто. Нажми «Опросить сейчас» или смени фильтр.</div>
           ) : (
             <ul className="news-list">
               {news.map((n) => (

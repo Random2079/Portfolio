@@ -8,6 +8,7 @@
   --border: #d5dee8;
   --equity: #1a6fd4;
   --bond: #9a6b12;
+  --fund: #0f7a5a;
   --hover: #eaf1f8;
   --card: #f8fafc;
   font-family: "Segoe UI", system-ui, sans-serif;
@@ -54,6 +55,48 @@ header p {
 .actions {
   display: flex;
   gap: 0.5rem;
+}
+
+.filters,
+.sectors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+
+.sectors {
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.chip {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.sectors .chip {
+  padding: 0.28rem 0.7rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.chip.active-filter {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.sectors .chip.active-filter {
+  background: #1a2330;
+  border-color: #1a2330;
+  color: #fff;
 }
 
 button {
@@ -161,6 +204,11 @@ button.secondary {
 .badge.bond {
   background: color-mix(in srgb, var(--bond) 18%, white);
   color: var(--bond);
+}
+
+.badge.fund {
+  background: color-mix(in srgb, var(--fund) 18%, white);
+  color: var(--fund);
 }
 
 .news-list {

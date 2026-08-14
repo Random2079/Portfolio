@@ -9,16 +9,34 @@ from sqlalchemy.orm import Session
 from portfolio_news.db import Ticker
 
 
-def _kind_from_row(asset: str, category: str, sector: str) -> str:
-    blob = f"{category} {sector}".lower()
-    if asset.startswith("RU000") or "блигац" in blob:
+def normalize_kind(asset: str, category: str = "", name: str = "", sector: str = "") -> str:
+    """equity | bond | fund."""
+    cat = (category or "").strip().lower()
+    sec = (sector or "").strip().lower()
+    nm = (name or "").strip().lower()
+    blob = f"{cat} {sec} {nm}"
+    aid = (asset or "").strip()
+    if aid.startswith("RU000") or "блигац" in blob:
         return "bond"
+    if cat == "etf" or "etf" in blob or "бпиф" in nm or "пиф" in nm or "фонд" in cat:
+        return "fund"
     return "equity"
+
+
+def _kind_from_row(asset: str, category: str, sector: str, name: str = "") -> str:
+    return normalize_kind(asset, category=category, name=name, sector=sector)
 
 
 def load_tickers_from_json(path: Path) -> list[dict]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    return list(data.get("tickers") or [])
+    rows = list(data.get("tickers") or [])
+    for item in rows:
+        item["kind"] = normalize_kind(
+            str(item.get("id") or ""),
+            category=str(item.get("category") or ""),
+            name=str(item.get("name") or ""),
+        )
+    return rows
 
 
 def load_tickers_from_snowball_csv(path: Path) -> list[dict]:
@@ -34,14 +52,18 @@ def load_tickers_from_snowball_csv(path: Path) -> list[dict]:
             cat = (row.get("Категория") or "").strip()
             sector = (row.get("Сектор") or "").strip()
             typ = (row.get("Тип") or "").strip()
-            kind = _kind_from_row(asset, cat, sector)
+            kind = _kind_from_row(asset, cat, sector, name)
+            if kind == "equity":
+                category = sector or cat
+            else:
+                category = cat or sector
             rows.append(
                 {
                     "id": asset,
                     "name": name,
                     "isin": isin or (asset if kind == "bond" else ""),
                     "kind": kind,
-                    "category": cat or sector,
+                    "category": category,
                     "bond_type": typ or None,
                     "search_query": name or asset,
                 }
@@ -55,11 +77,16 @@ def upsert_tickers(session: Session, items: list[dict]) -> int:
         tid = str(item["id"]).strip()
         if not tid:
             continue
+        kind = normalize_kind(
+            tid,
+            category=str(item.get("category") or ""),
+            name=str(item.get("name") or ""),
+        )
         existing = session.get(Ticker, tid)
         fields = {
             "name": item.get("name") or tid,
             "isin": item.get("isin") or "",
-            "kind": item.get("kind") or "equity",
+            "kind": kind,
             "category": item.get("category") or "",
             "search_query": item.get("search_query") or item.get("name") or tid,
         }

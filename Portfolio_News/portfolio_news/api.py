@@ -77,8 +77,8 @@ def _ensure_tickers():
     settings = get_settings()
     db = _SessionLocal()
     try:
-        count = db.scalar(select(Ticker.id).limit(1))
-        if count is None and settings.tickers_json.exists():
+        # Always refresh kinds/categories from example JSON when present
+        if settings.tickers_json.exists():
             upsert_tickers(db, load_tickers_from_json(settings.tickers_json))
     finally:
         db.close()
