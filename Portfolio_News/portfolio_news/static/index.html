@@ -42,13 +42,22 @@
       button.secondary {
         background: var(--panel); color: var(--text); border: 1px solid var(--border);
       }
-      .layout { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; }
-      @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(240px, 300px) 1fr;
+        gap: 1rem;
+        align-items: start;
+      }
+      @media (max-width: 800px) {
+        .layout { grid-template-columns: 1fr; }
+      }
       .panel {
         background: var(--panel); border: 1px solid var(--border);
         border-radius: 12px; padding: 0.75rem;
         box-shadow: 0 1px 2px rgb(26 35 48 / 4%);
+        min-height: 0;
       }
+      .panel.news-panel { min-height: 420px; }
       .panel h2 {
         margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--muted);
         text-transform: uppercase; letter-spacing: 0.06em;
@@ -98,7 +107,7 @@
           <h2>Тикеры</h2>
           <ul class="ticker-list" id="tickers"></ul>
         </aside>
-        <main class="panel">
+        <main class="panel news-panel">
           <h2 id="newsTitle">Лента</h2>
           <ul class="news-list" id="news"></ul>
         </main>
