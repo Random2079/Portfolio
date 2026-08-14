@@ -1,0 +1,13 @@
+---
+description: Расшифровки роликов пользователя лежат в YouTube_Translator/dist — искать там, не по всему диску.
+alwaysApply: true
+---
+
+# Ролики → `YouTube_Translator/dist`
+
+Когда пользователь пишет «видео про …», «посмотри ролик», «разбери что там сказали» и **не** прикладывает текст:
+
+1. Сразу смотри `YouTube_Translator/dist/` (полный путь: `C:\Users\Home\OneDrive\Desktop\DS_Projects\YouTube_Translator\dist`).
+2. Папки: `субтитры_<title> [<youtubeId>]/`.
+3. Читай `0_весь_текст_для_буфера.txt`; таймкоды — `1_текст_с_таймкодами.txt`.
+4. Не путать `dist` с `dict`. Не сканировать весь диск в поисках ролика.

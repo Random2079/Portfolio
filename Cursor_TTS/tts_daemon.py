@@ -219,6 +219,40 @@ def stop_playback() -> None:
             pygame.mixer.music.stop()
     except Exception:
         pass
+    # Прервать долгий Kokoro synth (убивает worker; следующий вызов поднимет снова)
+    try:
+        from speak_kokoro import cancel_current
+
+        cancel_current()
+    except Exception:
+        pass
+
+
+def _prepare_engine(engine: str) -> None:
+    """При смене движка освобождаем чужой runtime (VRAM / worker RAM)."""
+    if engine == "kokoro":
+        try:
+            micro = Path(__file__).resolve().parent / "micro_wife"
+            if str(micro) not in sys.path:
+                sys.path.insert(0, str(micro))
+            from speak_qwen import unload as unload_qwen
+
+            unload_qwen()
+        except Exception as error:
+            debug_log(f"unload qwen skip: {error}")
+    elif engine == "qwen":
+        try:
+            from speak_kokoro import stop_worker
+
+            stop_worker()
+        except Exception as error:
+            debug_log(f"stop kokoro worker skip: {error}")
+
+
+def _normalize_kokoro_voice(voice: str | None) -> str:
+    from speak_kokoro import normalize_voice
+
+    return normalize_voice(voice)
 
 
 def pause_playback() -> None:
@@ -286,7 +320,8 @@ def ensure_worker() -> None:
         debug_log("QUEUE_WORKER started")
 
 
-CHUNK_TARGET = 900  # символов на кусок — edge-tts быстрее отдаёт короткий кусок
+CHUNK_TARGET = 900  # символов на кусок (legacy; kokoro/qwen режут в _parts_for_engine)
+
 FAST_START = 220
 
 
@@ -428,10 +463,15 @@ def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None
     """kokoro / qwen → wav. lang оставлен для совместимости (всегда ru)."""
     del lang  # EN hybrid убран вместе с Piper
     engine = cfg["engine"]
+    _prepare_engine(engine)
     if engine == "kokoro":
         from speak_kokoro import synthesize_wav as synthesize_kokoro
 
-        synthesize_kokoro(part, cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE), out_path)
+        synthesize_kokoro(
+            part,
+            _normalize_kokoro_voice(cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)),
+            out_path,
+        )
         return
     if engine == "qwen":
         micro = Path(__file__).resolve().parent / "micro_wife"
@@ -524,51 +564,7 @@ def speak_text(text: str) -> None:
         pause_ms = int(cfg.get("pause_ms", DEFAULT_PAUSE_MS))
         switch_ms = int(cfg.get("lang_switch_pause_ms", DEFAULT_LANG_SWITCH_PAUSE_MS))
         use_prefetch = cfg["engine"] in ("kokoro", "qwen")
-        # #region agent log
-        try:
-            import json as _json_dbg
-            import time as _time_dbg
-            from pathlib import Path as _Path_dbg
-
-            _dbg_path = _Path_dbg(__file__).resolve().parent.parent / "debug-45ab72.log"
-            _qwen_warm = None
-            if cfg["engine"] == "qwen":
-                try:
-                    micro = Path(__file__).resolve().parent / "micro_wife"
-                    if str(micro) not in sys.path:
-                        sys.path.insert(0, str(micro))
-                    import speak_qwen as _sq
-
-                    _qwen_warm = _sq._model is not None
-                except Exception as _e:
-                    _qwen_warm = f"err:{_e}"
-            with open(_dbg_path, "a", encoding="utf-8") as _df:
-                _df.write(
-                    _json_dbg.dumps(
-                        {
-                            "sessionId": "45ab72",
-                            "runId": "post-fix",
-                            "hypothesisId": "C,D,G",
-                            "location": "tts_daemon.py:speak_text",
-                            "message": "speak_plan",
-                            "data": {
-                                "engine": cfg["engine"],
-                                "units": len(units),
-                                "text_chars": len(text),
-                                "use_prefetch": use_prefetch,
-                                "qwen_model_already_loaded": _qwen_warm,
-                                "chunk_lens": [len(u[0]) for u in units[:12]],
-                                "fix": "prefetch_tf32_larger_chunks",
-                            },
-                            "timestamp": int(_time_dbg.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
+        _prepare_engine(str(cfg["engine"]))
         next_thread: threading.Thread | None = None
         current_path: Path | None = None
 
@@ -602,7 +598,7 @@ def speak_text(text: str) -> None:
 
                 if current_path is None:
                     if use_prefetch and next_thread is not None:
-                        next_thread.join(timeout=120)
+                        next_thread.join(timeout=300)
                         result = getattr(next_thread, "_holder", [None])[0]
                         next_thread = None
                         if isinstance(result, Path):
@@ -623,48 +619,7 @@ def speak_text(text: str) -> None:
                         ) as tmp:
                             current_path = Path(tmp.name)
                         try:
-                            # #region agent log
-                            _t_render = time.perf_counter()
-                            # #endregion
                             render_audio(part, cfg, current_path, lang)
-                            # #region agent log
-                            try:
-                                import json as _json_dbg2
-                                from pathlib import Path as _Path_dbg2
-
-                                _dbg_path2 = (
-                                    _Path_dbg2(__file__).resolve().parent.parent
-                                    / "debug-45ab72.log"
-                                )
-                                with open(_dbg_path2, "a", encoding="utf-8") as _df2:
-                                    _df2.write(
-                                        _json_dbg2.dumps(
-                                            {
-                                                "sessionId": "45ab72",
-                                    "runId": "post-fix",
-                                    "hypothesisId": "B,C,D",
-                                    "location": "tts_daemon.py:chunk_render",
-                                    "message": "chunk_render_done",
-                                    "data": {
-                                        "index": index + 1,
-                                        "units": len(units),
-                                        "chars": len(part),
-                                        "render_ms": int(
-                                            (time.perf_counter() - _t_render)
-                                            * 1000
-                                        ),
-                                        "use_prefetch": use_prefetch,
-                                        "engine": cfg["engine"],
-                                    },
-                                                "timestamp": int(time.time() * 1000),
-                                            },
-                                            ensure_ascii=False,
-                                        )
-                                        + "\n"
-                                    )
-                            except Exception:
-                                pass
-                            # #endregion
                         except Exception as error:
                             fail_parts += 1
                             log_chunk_fail(index + 1, len(units), part, error)
@@ -696,48 +651,7 @@ def speak_text(text: str) -> None:
                     if len(npart) >= 2:
                         next_thread = start_prefetch(npart, nlang)
 
-                # #region agent log
-                _t_play = time.perf_counter()
-                # #endregion
                 finished = play_file(current_path, cfg["volume"])
-                # #region agent log
-                try:
-                    import json as _json_dbg3
-                    from pathlib import Path as _Path_dbg3
-
-                    _dbg_path3 = (
-                        _Path_dbg3(__file__).resolve().parent.parent / "debug-45ab72.log"
-                    )
-                    with open(_dbg_path3, "a", encoding="utf-8") as _df3:
-                        _df3.write(
-                            _json_dbg3.dumps(
-                                {
-                                    "sessionId": "45ab72",
-                                    "runId": "post-fix",
-                                    "hypothesisId": "D",
-                                    "location": "tts_daemon.py:chunk_play",
-                                    "message": "chunk_play_done",
-                                    "data": {
-                                        "index": index + 1,
-                                        "units": len(units),
-                                        "play_ms": int(
-                                            (time.perf_counter() - _t_play) * 1000
-                                        ),
-                                        "finished": bool(finished),
-                                        "use_prefetch": use_prefetch,
-                                        "idle_gpu_during_play_if_no_prefetch": (
-                                            cfg["engine"] == "qwen" and not use_prefetch
-                                        ),
-                                    },
-                                    "timestamp": int(time.time() * 1000),
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-                # #endregion
                 _safe_unlink(current_path)
                 current_path = None
                 if not finished or _stop_event.is_set():
@@ -800,12 +714,17 @@ def handle_client(conn: socket.socket) -> None:
         if cmd == "warmup":
             cfg = load_config()
             engine = str(cfg.get("engine", DEFAULT_ENGINE))
+            _prepare_engine(engine)
             if engine == "kokoro":
                 try:
                     from speak_kokoro import warmup as warmup_kokoro
 
                     debug_log("WARMUP kokoro begin")
-                    warmup_kokoro(cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE))
+                    warmup_kokoro(
+                        _normalize_kokoro_voice(
+                            cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)
+                        )
+                    )
                     debug_log("WARMUP kokoro done")
                     conn.sendall(b'{"ok":true,"warmed":true,"engine":"kokoro"}\n')
                 except Exception as error:
@@ -909,12 +828,17 @@ def warmup_engine_background() -> None:
     def run() -> None:
         cfg = load_config()
         engine = cfg.get("engine")
+        _prepare_engine(str(engine or DEFAULT_ENGINE))
         if engine == "kokoro":
             try:
                 from speak_kokoro import warmup as warmup_kokoro
 
                 debug_log("WARMUP bg kokoro begin")
-                warmup_kokoro(cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE))
+                warmup_kokoro(
+                    _normalize_kokoro_voice(
+                        cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)
+                    )
+                )
                 debug_log("WARMUP bg kokoro done")
             except Exception as error:
                 debug_log(f"WARMUP bg kokoro fail: {error}")
@@ -962,6 +886,21 @@ def main() -> int:
         pass
     finally:
         stop_playback()
+        try:
+            from speak_kokoro import stop_worker
+
+            stop_worker()
+        except Exception:
+            pass
+        try:
+            micro = Path(__file__).resolve().parent / "micro_wife"
+            if str(micro) not in sys.path:
+                sys.path.insert(0, str(micro))
+            from speak_qwen import unload as unload_qwen
+
+            unload_qwen()
+        except Exception:
+            pass
         server.close()
         PID_FILE.unlink(missing_ok=True)
     return 0

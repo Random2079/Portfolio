@@ -1,20 +1,85 @@
-"""Тесты merge/дедупа субтитров (YouTube rolling captions)."""
+"""Тесты merge/дедупа субтитров + хелперы Translator."""
 from __future__ import annotations
 
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from Subtitle_App import (
+    build_meta_yt_dlp_cmd,
     build_texts_from_srt,
     extend_caption_text,
+    fetch_video_meta,
+    get_video_id,
     merge_segments,
+    resolve_subtitle_track,
     segments_to_plain_text,
+    write_output_texts,
 )
 
 
 def _seg(start: float, end: float, text: str) -> dict:
     return {"start": start, "end": end, "text": text}
+
+
+class TestVideoId(unittest.TestCase):
+    def test_watch_url(self) -> None:
+        self.assertEqual(
+            get_video_id("https://www.youtube.com/watch?v=PgKGax4kknY"),
+            "PgKGax4kknY",
+        )
+
+    def test_short_url(self) -> None:
+        self.assertEqual(get_video_id("https://youtu.be/PgKGax4kknY"), "PgKGax4kknY")
+
+    def test_rejects_garbage(self) -> None:
+        self.assertIsNone(get_video_id("https://youtu.be/short"))
+        self.assertIsNone(get_video_id("https://example.com/not-youtube"))
+        self.assertIsNone(get_video_id("https://www.youtube.com/watch?v=too_short"))
+
+
+class TestResolveLang(unittest.TestCase):
+    def test_ru_ru_from_auto(self) -> None:
+        meta = {"automatic_captions": {"ru-RU": []}, "subtitles": {}}
+        self.assertEqual(resolve_subtitle_track(meta, "ru"), ("auto", "ru-RU"))
+
+    def test_prefers_auto_over_manual(self) -> None:
+        meta = {
+            "automatic_captions": {"en": []},
+            "subtitles": {"en": []},
+        }
+        self.assertEqual(resolve_subtitle_track(meta, "en"), ("auto", "en"))
+
+    def test_manual_fallback(self) -> None:
+        meta = {"automatic_captions": {}, "subtitles": {"ru": []}}
+        self.assertEqual(resolve_subtitle_track(meta, "ru"), ("manual", "ru"))
+
+    def test_missing(self) -> None:
+        self.assertIsNone(resolve_subtitle_track({}, "ru"))
+
+
+class TestMetaCmd(unittest.TestCase):
+    def test_url_after_double_dash(self) -> None:
+        url = "https://www.youtube.com/watch?v=PgKGax4kknY"
+        cmd = build_meta_yt_dlp_cmd(url, ["--socket-timeout", "20"])
+        self.assertEqual(cmd[-2], "--")
+        self.assertEqual(cmd[-1], url)
+        self.assertIn("--socket-timeout", cmd)
+
+    def test_timeout_stops_retries(self) -> None:
+        import subprocess
+
+        calls: list[list[str]] = []
+
+        def boom(cmd, **kwargs):
+            calls.append(list(cmd))
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=1)
+
+        with mock.patch("Subtitle_App.subprocess.run", side_effect=boom):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                fetch_video_meta("https://www.youtube.com/watch?v=PgKGax4kknY", 0)
+        self.assertEqual(len(calls), 1)
 
 
 class TestExtendCaption(unittest.TestCase):
@@ -49,6 +114,12 @@ class TestExtendCaption(unittest.TestCase):
         self.assertEqual(
             extend_caption_text("мы идём дальше", "идём дальше вместе"),
             "мы идём дальше вместе",
+        )
+
+    def test_punct_tolerant_prefix(self) -> None:
+        self.assertEqual(
+            extend_caption_text("Каждый из нас хоть раз,", "Каждый из нас хоть раз в жизни"),
+            "Каждый из нас хоть раз в жизни",
         )
 
 
@@ -140,26 +211,32 @@ class TestMergePipeline(unittest.TestCase):
         self.assertNotIn("Каждый из нас хоть раз Каждый", plain)
         self.assertEqual(len(phrases), 2)
 
-    def test_rerun_overwrite_not_append(self) -> None:
-        """5) повторная запись в тот же файл не удваивает результат (mode w)."""
-        srt = """1
-00:00:00,000 --> 00:00:02,000
-Одна фраза здесь
+    def test_long_monologue_without_periods_splits(self) -> None:
+        """Длинный rolling без точек режется по словам, не одной простынёй."""
+        words = " ".join(f"слово{i}" for i in range(80))
+        segs = [_seg(0.0, 40.0, words)]
+        phrases = merge_segments(segs, max_chars=60)
+        self.assertGreater(len(phrases), 1)
+        self.assertTrue(all(len(p["text"]) <= 60 for p in phrases))
 
-2
-00:00:00,500 --> 00:00:02,500
-Одна фраза здесь
-"""
-        plain, _, _ = build_texts_from_srt(srt)
+    def test_write_output_texts_overwrite_not_append(self) -> None:
+        """Повторный write_output_texts не удваивает файлы (mode w)."""
         with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "0_весь_текст_для_буфера.txt")
-            for _ in range(3):
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(plain)
-            with open(path, "r", encoding="utf-8") as f:
+            write_output_texts(tmp, "один\n", "[00:00] один\n", "ru", max_chars=100)
+            write_output_texts(tmp, "два\n", "[00:00] два\n", "ru", max_chars=100)
+            with open(
+                os.path.join(tmp, "0_весь_текст_для_буфера.txt"),
+                encoding="utf-8",
+            ) as f:
                 body = f.read()
-            self.assertEqual(body, plain)
-            self.assertEqual(body.count("Одна фраза здесь"), 1)
+            self.assertEqual(body, "два\n")
+            self.assertNotIn("один", body)
+            with open(
+                os.path.join(tmp, "1_текст_с_таймкодами.txt"),
+                encoding="utf-8",
+            ) as f:
+                timed = f.read()
+            self.assertEqual(timed, "[00:00] два\n")
 
 
 if __name__ == "__main__":

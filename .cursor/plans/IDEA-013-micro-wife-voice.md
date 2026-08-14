@@ -2,37 +2,39 @@
 
 ## Цель
 
-Нормальный **женский** голос для Cursor TTS. Piper-Ирина не зашла. Рабочее имя: **micro wife** — текстовый voice design через Qwen, не «ещё один onnx».
+Нормальный **женский** голос для Cursor TTS. Piper-Ирина не зашла. Рабочее имя: **micro wife**.
+
+## Статус
+
+**Готово пока (2026-08-15).** Жить на Kokoro (день) + Qwen (качество). Дальше — только по явной команде.
 
 ## Железо
 
-i5-12450H / 16 GB / **RTX 3050 4 GB** → **Qwen3-TTS-12Hz-0.6B-CustomVoice** + speaker Serena + instruct.  
-(VoiceDesign 1.7B на 4GB часто OOM — не дефолт.)
+i5-12450H / 16 GB / **RTX 3050 4 GB**
 
-## Не в scope
+## Что в проде
 
-- Ломать Edge / Silero / Piper  
+| Движок | Роль |
+|--------|------|
+| **Kokoro-ru** | Быстрый локальный (CPU worker 3.12), голоса Света / Маша / Дима |
+| **Qwen 0.6B** | Лучшее качество; `faster-qwen3-tts` BF16 + SDPA + CUDA graphs |
+
+Edge / Silero / Piper из каталога убраны.
+
+## Сделано
+
+- [`Cursor_TTS/micro_wife/`](../../Cursor_TTS/micro_wife/) — Qwen + prototypes + designs  
+- [`Cursor_TTS/speak_kokoro.py`](../../Cursor_TTS/speak_kokoro.py) + `kokoro_worker.py`  
+- Панель: два движка; README обновлён  
+- Эксперимент Triton/TurboQuant: изолированно, на 3050 ~2× медленнее baseline — не вшивать  
+
+## Не в scope сейчас
+
 - Neuro-агент (IDEA-001)  
-- Клон с чужих аудиокниг / чтецов  
-
-## Сделано (2026-08-14)
-
-- [`Cursor_TTS/micro_wife/`](../../Cursor_TTS/micro_wife/) — `speak_qwen.py`, `prototype_micro_wife.py`, 4 design-пресета  
-- Активный design: `designs/02_soft_high_female.txt` (мягкий высокий / книжный)  
-- `engine: "qwen"` в демоне + пункт **Micro wife (Qwen)** в панели  
-- pause / stop / очередь как у Piper; короткие куски (~220 символов)
-
-## Design-пресеты
-
-1. яркий мужской (театр)  
-2. **мягкий высокий — micro wife**  
-3. тёмный мужской (саспенс)  
-4. баритон-чтец  
+- Клон с чужих аудиокниг  
+- Аренда GPU / 1.7B VoiceDesign  
+- Повторный разгон Qwen без команды  
 
 ## Установка
 
-См. [`Cursor_TTS/micro_wife/README.md`](../../Cursor_TTS/micro_wife/README.md).
-
-## Готово когда
-
-В панели выбирается Micro wife; русская фраза звучит «своей» женской, не как Piper-Ирина; Edge/Silero/Piper живы.
+См. [`Cursor_TTS/README.md`](../../Cursor_TTS/README.md) и [`micro_wife/README.md`](../../Cursor_TTS/micro_wife/README.md).

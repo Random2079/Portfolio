@@ -16,9 +16,9 @@
 
 - **Один активный проект за раз.** Не начинать второй трек «заодно».
 
-- Сейчас в работе по голосу: **IDEA-013 micro wife** (заготовка в `Cursor_TTS/micro_wife/`). IDEA-002 TTS уже работает — жить на нём, большой апгрейд Piper не пилить заодно.
+- Сейчас **нет** обязательного активного трека по голосу: **IDEA-013 закрыта пока** (Qwen + Kokoro в панели). IDEA-002 TTS — жить на нём. Новый трек — только по явной команде.
 
-- **Не трогать параллельно:** IDEA-005 Discord mute, IDEA-014 VPN, IDEA-001 агент, IDEA-016 плеер.
+- **Не трогать параллельно без команды:** IDEA-005 Discord mute, IDEA-014 VPN, IDEA-001 агент, IDEA-016 плеер.
 
 - Стартовать другой трек только если пользователь явно сказал ID / «делаем IDEA-0XX» / «один фокус: …».
 
@@ -244,22 +244,6 @@
 
 
 
-### IDEA-013 — Micro wife (свой женский голос для TTS)
-
-- Проект/область: Cursor_TTS / клон голоса
-
-- Дата: 2026-08-07
-
-- Статус: в работе (Qwen врезан; пожить на design #2)
-
-- Описание: Piper/Ирина — «пластмасса»; нужен нормальный **женский** голос под Cursor TTS — рабочее название **micro wife**. Не Piper: voice design через **Qwen3-TTS 0.6B CustomVoice** (Serena + instruct). Чужие аудиокниги как сэмпл для клона — не используем; текстовые design-пресеты — да.
-
-- Сделано (2026-08-14): [`Cursor_TTS/micro_wife/`](Cursor_TTS/micro_wife/) — `speak_qwen.py`, `prototype_micro_wife.py`, 4 design-пресета (активный **#2 мягкий высокий**); `engine: "qwen"` в демоне + панель **Micro wife (Qwen)**; pause/stop/очередь; README установки CUDA torch + qwen-tts.
-
-- Следующие шаги: прогон на слух; крутить design #2 или сменить пресет в панели; при желании позже свой wav → Base clone. План: [`.cursor/plans/IDEA-013-micro-wife-voice.md`](.cursor/plans/IDEA-013-micro-wife-voice.md).
-
-
-
 ### IDEA-002 — TTS-озвучка чата Cursor
 
 - Проект/область: Cursor / продуктивность
@@ -268,12 +252,13 @@
 
 - Статус: в работе
 - Описание: Простая TTS-озвучка ответов в чате Cursor — надоело читать длинный текст.
-- Сделано: хук afterAgentResponse, панель, демон, Edge + Silero + **Piper**, очередь, паузы между кусками, кнопки pause/resume (Ctrl+Shift+P / «Пауза»), полный стоп (X), хоткеи Ctrl+Shift+T/X/S/P; text_prep: таблицы по строкам, стрелки «затем», mermaid/code → короткая фраза; прогрев демона; `download_piper_voice.py` + `piper_prototype.py`.
+- Сделано: хук afterAgentResponse, панель, демон, очередь, паузы между кусками, pause/resume (Ctrl+Shift+P), стоп (X), хоткеи Ctrl+Shift+T/X/S/P; text_prep; прогрев демона.
+- Движки (2026-08-15): **Kokoro-ru** (быстрый) + **Qwen / micro wife** (качество). Edge / Silero / Piper убраны из каталога (см. IDEA-013).
 - Починено (2026-08-08): авто-озвучка снова жива. Причины молчания: флаг `TTS_OFF`; Windows обрывал голый `.bat` в hook (`canceled by signal abort`); дубль хука в `~\.cursor\hooks.json`. Рабочий command в проектном `.cursor/hooks.json`: `cmd /c …\python.exe …\tts_after_response.py`. Юзерский `~\.cursor\hooks.json` очищен до пустых hooks, чтобы не двоить речь.
-- Сделано (2026-08-13, план pause+bilingual): настоящая `pause()`/`unpause()` без пропуска chunk; `pronunciations.json`; гибрид RU/EN Piper (две модели в кэше); хук только извлекает текст, prep в демоне. Тесты: `Cursor_TTS/test_text_prep.py`, `test_tts_playback.py`.
+- Сделано (2026-08-13, план pause+bilingual): настоящая `pause()`/`unpause()` без пропуска chunk; `pronunciations.json`; (EN Piper hybrid снят вместе с Piper). Тесты: `Cursor_TTS/test_text_prep.py`, `test_tts_playback.py`, `test_kokoro_bridge.py`.
 - Ресурс (2026-07-22): **IndexTTS2** — open-source TTS с клоном голоса (несколько секунд) и контролем эмоций (слайдеры / emo-reference / текст эмоции). Repo: https://github.com/index-tts/index-tts . Есть HF Space (~10 gen/день). Плюсы: выразительность, эмоции отдельно от тембра. Минусы: тяжёлая установка (Python ~3.11, Git LFS, модели несколько GB, GPU), для Cursor-озвучки может быть overkill и медленнее Piper/Silero; лучше для IDEA-001 (агент с «личностью»). В ролике сравнивали с F5-TTS / SparkTTS; для акцентов/мультиязыка местами слабее Microsoft Vibe Voice.
 - Ресурс (2026-07-22): **Qwen3-TTS** (Alibaba) — ещё один SOTA open-source TTS. Клон с ~3–8 сек, voice design текстом («старый хриплый» / «саркастичная тинейджерка»), эмоции/темп/интент в промпте, 9 пресетов, мультиязык, dual-speaker (типа подкаст). Варианты **0.6B** (~&lt;2GB) и **1.7B** (~&lt;4GB VRAM) — под RTX 3050 как раз; в ролике ~10–20 сек на генерацию на ноуте. Установка в видео через **ComfyUI** + custom nodes (офиц. репо «сырой»). По заявлению автора — сильнее ElevenLabs/MiniMax на бенчмарках (с оговоркой: это обзорный ролик). Для Cursor всё ещё тяжеловато vs Piper; для IDEA-001 — сильный кандидат рядом с IndexTTS2 (Qwen проще по VRAM/скорости в демо).
-- Следующие шаги: перезапустить панель/демон; пожить на **Словарь IT**; при желании скачать `en_US-ryan-medium` и включить «Словарь + EN Piper». Свой женский голос — отдельно [IDEA-013](.cursor/plans/IDEA-013-micro-wife-voice.md). IndexTTS2 / Qwen3-TTS для агента — IDEA-001. План Piper: [`.cursor/plans/IDEA-002-tts-piper.md`](.cursor/plans/IDEA-002-tts-piper.md).
+- Следующие шаги: жить на Kokoro/Qwen; словарь IT; свой женский голос закрыт в [IDEA-013](.cursor/plans/IDEA-013-micro-wife-voice.md). IndexTTS2 / Qwen3-TTS для агента — IDEA-001.
 
 
 
@@ -285,17 +270,40 @@
 
 
 
+### IDEA-013 — Micro wife (свой женский голос для TTS)
+
+- Проект/область: Cursor_TTS / клон голоса
+
+- Дата: 2026-08-07
+
+- Статус: готово пока (2026-08-15) — жить на этом; апгрейды только по команде
+
+- Описание: Нормальный **женский** голос под Cursor TTS (**micro wife**). Не Piper-пластмасса.
+
+- Сделано (2026-08-14…15):
+  - **Qwen 0.6B** (`faster-qwen3-tts`, BF16 + CUDA graphs) — лучшее качество, 5–15 с на фразу на 3050
+  - **Kokoro-ru** (Света/Маша/Дима) — быстрый ежедневный; тёплый worker Python 3.12
+  - Панель/демон: только `kokoro` + `qwen`; Edge / Silero / Piper убраны из каталога
+  - Design-пресеты Qwen; Triton/TurboQuant проверен отдельно — на 3050 медленнее, в прод не тащили
+
+- Не делаем сейчас: свой wav-клон, аренда GPU, дальнейший разгон Qwen без новой команды.
+
+- План: [`.cursor/plans/IDEA-013-micro-wife-voice.md`](.cursor/plans/IDEA-013-micro-wife-voice.md).
+
+
+
 ### IDEA-010 — Красивый UI для YouTube Translator
 
 - Проект/область: YouTube_Translator / GUI
 
 - Дата: 2026-07-21
 
-- Статус: готово (2026-07-27, exe/допилы по 2026-08-06)
+- Статус: готово (2026-07-27; допилы 2026-08-06…09)
 
 - Описание: Привести интерфейс Subtitle_App к нормальному виду. Стек — **CustomTkinter**.
 
-- Сделано: боевой GUI на CTk; оптимизация yt-dlp (meta + один download); Ctrl+V на русской раскладке; README/requirements; exe. Бэкап PyQt: `Subtitle_App_qt_backup.py`. План: [`.cursor/plans/IDEA-010-youtube-ui-ctk.md`](.cursor/plans/IDEA-010-youtube-ui-ctk.md).
+- Сделано: боевой GUI на CTk; оптимизация yt-dlp (meta + один download); Ctrl+V на русской раскладке; README/requirements; exe. Бэкап PyQt: `Subtitle_App_qt_backup.py`.
+- Допилы (2026-08-09): ретраи meta + socket-timeout; timeout на скачивание субов; подсказки про zapret (смена стратегии, не выключать); пересборка `dist/Subtitle_App.exe`. План: [`.cursor/plans/IDEA-010-youtube-ui-ctk.md`](.cursor/plans/IDEA-010-youtube-ui-ctk.md).
 
 
 
@@ -305,11 +313,12 @@
 
 - Дата: 2026-07-21
 
-- Статус: готово (2026-08-06)
+- Статус: готово (2026-08-06; допилы merge 2026-08-09)
 
 - Описание: Текст с таймкодами по фразам, чтобы сопоставить момент с кадром (не word-level).
 
-- Сделано: `1_текст_с_таймкодами.txt` (`[mm:ss] фраза`), склейка SRT (пауза &lt; 1.5 с, ≲ 120 символов); `0_весь_текст…` и буфер без изменений. План: [`.cursor/plans/IDEA-011-subtitle-timecodes.md`](.cursor/plans/IDEA-011-subtitle-timecodes.md).
+- Сделано: `1_текст_с_таймкодами.txt` (`[mm:ss] фраза`); `0_весь_текст…` и буфер без изменений.
+- Допилы (2026-08-09): дедуп YouTube rolling captions (`extend_caption_text` / overlap ≥2 слова, без слепой склейки по паузе); тесты `YouTube_Translator/test_subtitle_merge.py` (14 ok). План: [`.cursor/plans/IDEA-011-subtitle-timecodes.md`](.cursor/plans/IDEA-011-subtitle-timecodes.md).
 
 
 

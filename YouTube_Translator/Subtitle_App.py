@@ -66,9 +66,15 @@ def bind_clipboard_any_layout(entry: ctk.CTkEntry) -> None:
 # =====================================================================
 # 1. ВАЛИДАТОР И ИМЕНА
 # =====================================================================
+# Стандартный YouTube video id: 11 символов [A-Za-z0-9_-]
+_YOUTUBE_ID_RE = re.compile(
+    r"(?:v=|/shorts/|/live/|/embed/|youtu\.be/)([A-Za-z0-9_-]{11})"
+)
+
+
 def get_video_id(url: str) -> str | None:
     """Достаёт ID ролика из ссылки YouTube (или None, если ссылка кривая)."""
-    match = re.search(r"(?:v=|/shorts/|/live/|/embed/|youtu\.be/)([^&\n?#]+)", url)
+    match = _YOUTUBE_ID_RE.search(url)
     return match.group(1) if match else None
 
 
@@ -82,12 +88,54 @@ def sanitize_filename(name: str) -> str:
 
 def _lang_available(tracks: dict | None, lang_code: str) -> bool:
     """Есть ли дорожка языка (ru / ru-RU / en / en-US …)."""
-    if not tracks:
-        return False
+    return resolve_lang_key(tracks, lang_code) is not None
+
+
+def resolve_lang_key(tracks: dict | None, lang_code: str) -> str | None:
+    """Точный ключ дорожки в meta yt-dlp (ru → ru или ru-RU)."""
+    if not tracks or not isinstance(tracks, dict):
+        return None
     if lang_code in tracks:
-        return True
+        return lang_code
     prefix = lang_code + "-"
-    return any(key == lang_code or key.startswith(prefix) for key in tracks)
+    for key in tracks:
+        if key.startswith(prefix):
+            return key
+    return None
+
+
+def resolve_subtitle_track(meta: dict, lang_code: str) -> tuple[str, str] | None:
+    """
+    Что качать: (mode, yt_lang_key) или None.
+    mode: auto | manual. yt_lang_key — как в JSON yt-dlp (для --sub-lang).
+    Приоритет: сначала auto, иначе manual.
+    """
+    auto_key = resolve_lang_key(meta.get("automatic_captions"), lang_code)
+    if auto_key:
+        return "auto", auto_key
+    manual_key = resolve_lang_key(meta.get("subtitles"), lang_code)
+    if manual_key:
+        return "manual", manual_key
+    return None
+
+
+def pick_subtitle_mode(meta: dict, lang_code: str) -> str | None:
+    """Обратная совместимость: только mode (auto/manual/None)."""
+    resolved = resolve_subtitle_track(meta, lang_code)
+    return resolved[0] if resolved else None
+
+
+def build_meta_yt_dlp_cmd(url: str, extra: list[str] | None = None) -> list[str]:
+    """Аргументы yt-dlp для meta (для пайплайна и тестов)."""
+    return [
+        "yt-dlp",
+        "--dump-single-json",
+        "--skip-download",
+        "--no-warnings",
+        *(extra or []),
+        "--",
+        url,
+    ]
 
 
 def fetch_video_meta(
@@ -124,15 +172,7 @@ def fetch_video_meta(
             status_cb,
             f"Статус: [1/3] метаданные — попытка {attempt_i}/{len(attempts)}…",
         )
-        cmd = [
-            "yt-dlp",
-            "--dump-single-json",
-            "--skip-download",
-            "--no-warnings",
-            *extra,
-            "--",
-            url,
-        ]
+        cmd = build_meta_yt_dlp_cmd(url, extra)
         try:
             result = subprocess.run(
                 cmd,
@@ -163,27 +203,13 @@ def fetch_video_meta(
     raise last_exc
 
 
-def pick_subtitle_mode(meta: dict, lang_code: str) -> str | None:
-    """
-    Что качать одним вызовом:
-    - auto   — авто-субтитры YouTube
-    - manual — загруженные автором
-    - None   — языка нет ни там, ни там
-    Приоритет как раньше: сначала auto, иначе manual.
-    """
-    if _lang_available(meta.get("automatic_captions"), lang_code):
-        return "auto"
-    if _lang_available(meta.get("subtitles"), lang_code):
-        return "manual"
-    return None
-
-
-def find_output_folder(video_id: str) -> str | None:
+def find_output_folder(video_id: str, base_dir: str | None = None) -> str | None:
     """Находит созданную папку по уникальному ID видео."""
+    root = base_dir if base_dir is not None else os.getcwd()
     suffix = f" [{video_id}]"
     folders = [
         entry.path
-        for entry in os.scandir(".")
+        for entry in os.scandir(root)
         if entry.is_dir()
         and entry.name.startswith("субтитры_")
         and entry.name.endswith(suffix)
@@ -191,11 +217,28 @@ def find_output_folder(video_id: str) -> str | None:
     return max(folders, key=os.path.getmtime) if folders else None
 
 
-def _find_srt(lang_code: str) -> str | None:
-    """Один проход по папке — ищем готовый .srt нужного языка."""
-    for name in os.listdir("."):
-        if name.endswith(f".{lang_code}.srt"):
-            return name
+def _find_srt(folder: str, *lang_candidates: str) -> str | None:
+    """Ищем .srt в папке: точный язык из meta, затем короткий код (ru / en)."""
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return None
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for lang in lang_candidates:
+        if lang and lang not in seen:
+            seen.add(lang)
+            ordered.append(lang)
+    for lang in ordered:
+        suffix = f".{lang}.srt"
+        for name in names:
+            if name.endswith(suffix):
+                return os.path.join(folder, name)
+    for lang in ordered:
+        needle = f".{lang}."
+        for name in names:
+            if name.endswith(".srt") and needle in name:
+                return os.path.join(folder, name)
     return None
 
 
@@ -216,6 +259,7 @@ _MERGE_GAP_SEC = 1.5
 _MERGE_MAX_CHARS = 120
 # одно общее слово («в», «и», «на») — слишком часто ложная склейка
 _WORD_OVERLAP_MIN = 2
+_TRAIL_PUNCT_RE = re.compile(r"[\s.,!?;:…]+$", re.UNICODE)
 
 
 def _hms_to_seconds(h: str, m: str, s: str, ms: str) -> float:
@@ -234,6 +278,11 @@ def _clean_cue_text(text: str) -> str:
     text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def _caption_core(text: str) -> str:
+    """Для сравнения prefix: без хвостовой пунктуации, lower."""
+    return _TRAIL_PUNCT_RE.sub("", text).casefold()
 
 
 def parse_srt_segments(content: str) -> list[dict]:
@@ -307,10 +356,75 @@ def extend_caption_text(prev: str, nxt: str) -> str | None:
     # prev уже содержит nxt (короткое окно внутри длинного)
     if prev.startswith(nxt):
         return prev
+    # то же, но с разной хвостовой пунктуацией («раз,» vs «раз в жизни»)
+    prev_c = _caption_core(prev)
+    nxt_c = _caption_core(nxt)
+    if len(prev_c) >= 3 and nxt_c.startswith(prev_c):
+        return nxt if len(nxt) >= len(prev) else prev
+    if len(nxt_c) >= 3 and prev_c.startswith(nxt_c):
+        return prev
     overlapped = _word_overlap_merge(prev, nxt)
     if overlapped is not None:
         return overlapped
     return None
+
+
+def _chunk_text_by_words(text: str, max_chars: int) -> list[str]:
+    """Режет длинный текст без точек на куски ≲ max_chars по словам."""
+    if len(text) <= max_chars:
+        return [text]
+    words = text.split()
+    if not words:
+        return [text]
+    chunks: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for word in words:
+        add = len(word) + (1 if cur else 0)
+        if cur and cur_len + add > max_chars:
+            chunks.append(" ".join(cur))
+            cur = [word]
+            cur_len = len(word)
+        else:
+            cur.append(word)
+            cur_len += add
+    if cur:
+        chunks.append(" ".join(cur))
+    return chunks
+
+
+def _distribute_time_chunks(
+    start: float, end: float, parts: list[str]
+) -> list[dict]:
+    span = max(end - start, 0.01)
+    step = span / max(len(parts), 1)
+    t = start
+    out: list[dict] = []
+    for part in parts:
+        out.append({"start": t, "end": t + step, "text": part})
+        t += step
+    return out
+
+
+def _split_long_segments(
+    segments: list[dict], max_chars: int
+) -> list[dict]:
+    """Сначала по предложениям, потом по словам — чтобы таймкоды не были простынями."""
+    result: list[dict] = []
+    for seg in segments:
+        text = seg["text"]
+        if len(text) <= max_chars:
+            result.append(seg)
+            continue
+        if re.search(r"[.?!…]", text):
+            parts = [p.strip() for p in re.split(r"(?<=[.?!…])\s+", text) if p.strip()]
+        else:
+            parts = [text]
+        pieces: list[str] = []
+        for part in parts:
+            pieces.extend(_chunk_text_by_words(part, max_chars))
+        result.extend(_distribute_time_chunks(seg["start"], seg["end"], pieces))
+    return result
 
 
 def merge_segments(
@@ -342,10 +456,10 @@ def merge_segments(
         if near:
             extended = extend_caption_text(cur["text"], nxt["text"])
             if extended is not None:
-                if len(extended) <= max_chars or extended.startswith(cur["text"]):
-                    cur["text"] = extended
-                    cur["end"] = max(cur["end"], nxt["end"])
-                    continue
+                # rolling может вырасти > max_chars — режем в _split_long_segments
+                cur["text"] = extended
+                cur["end"] = max(cur["end"], nxt["end"])
+                continue
 
         merged.append(cur)
         cur = {
@@ -355,23 +469,7 @@ def merge_segments(
         }
 
     merged.append(cur)
-
-    # длинные фразы с точками — режем по предложениям
-    result: list[dict] = []
-    for seg in merged:
-        text = seg["text"]
-        if len(text) <= max_chars or not re.search(r"[.?!…]", text):
-            result.append(seg)
-            continue
-        parts = re.split(r"(?<=[.?!…])\s+", text)
-        span = max(seg["end"] - seg["start"], 0.01)
-        t = seg["start"]
-        usable = [p.strip() for p in parts if p.strip()]
-        step = span / max(len(usable), 1)
-        for part in usable:
-            result.append({"start": t, "end": t + step, "text": part})
-            t += step
-    return result
+    return _split_long_segments(merged, max_chars)
 
 
 def segments_to_plain_text(segments: list[dict]) -> str:
@@ -410,6 +508,35 @@ def build_texts_from_srt(content: str) -> tuple[str, str, list[dict]]:
     return segments_to_plain_text(phrases), segments_to_timed_text(phrases), phrases
 
 
+def write_output_texts(
+    folder: str,
+    clean_text: str,
+    timed_text: str,
+    lang_code: str,
+    max_chars: int = 150000,
+) -> int:
+    """
+    Пишет 0_/1_/часть_* в folder (режим \"w\" — перезапись, не append).
+    Возвращает число частей.
+    """
+    plain_path = os.path.join(folder, "0_весь_текст_для_буфера.txt")
+    timed_path = os.path.join(folder, "1_текст_с_таймкодами.txt")
+    with open(plain_path, "w", encoding="utf-8") as f:
+        f.write(clean_text)
+    with open(timed_path, "w", encoding="utf-8") as f:
+        f.write(timed_text)
+
+    parts = [
+        clean_text[i : i + max_chars] for i in range(0, len(clean_text), max_chars)
+    ] or [""]
+    for i, part in enumerate(parts):
+        filename = os.path.join(folder, f"часть_{lang_code}_{i + 1}.txt")
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(part)
+        print(f"{os.path.basename(filename)} ({len(part)} знаков)")
+    return len(parts)
+
+
 # =====================================================================
 # 2. ЛОГИКА СКАЧИВАНИЯ (без GUI)
 # =====================================================================
@@ -422,6 +549,7 @@ def download_and_split(
     """
     Весь пайплайн без GUI: meta → скачать субы → plain + таймкоды → части.
     True = ок, False = ошибка (текст в stderr / status_cb).
+    Без os.chdir — только абсолютные пути от текущего cwd на старте.
     """
     video_id = get_video_id(url)
     if not video_id:
@@ -432,6 +560,7 @@ def download_and_split(
 
     creation_flags = 0x08000000 if os.name == "nt" else 0
     timings: dict[str, float] = {}
+    work_root = os.getcwd()
 
     # --- 1) метаданные: title + какие субы есть (один сетевой проход) ---
     _emit(status_cb, f"Статус: [1/3] метаданные ({lang_code.upper()})…")
@@ -478,117 +607,104 @@ def download_and_split(
     timings["meta"] = time.perf_counter() - t0
 
     video_title = sanitize_filename((meta.get("title") or "").strip())
-    mode = pick_subtitle_mode(meta, lang_code)
-    if mode is None:
+    resolved = resolve_subtitle_track(meta, lang_code)
+    if resolved is None:
         sys.stderr.write(
             f"Ошибка: субтитры на языке '{lang_code}' отсутствуют "
             f"(ни авто, ни обычные).\n"
         )
         return False
+    mode, yt_lang = resolved
 
     folder_name = f"субтитры_{video_title} [{video_id}]"
-    os.makedirs(folder_name, exist_ok=True)
+    folder_path = os.path.join(work_root, folder_name)
+    os.makedirs(folder_path, exist_ok=True)
 
-    old_cwd = os.getcwd()
-    os.chdir(folder_name)
+    # --- 2) один скачивающий вызов yt-dlp ---
+    mode_label = "авто" if mode == "auto" else "обычные"
+    _emit(
+        status_cb,
+        f"Статус: [2/3] скачиваю {mode_label} {yt_lang}-субтитры…",
+    )
+    t1 = time.perf_counter()
+
+    write_flag = "--write-auto-subs" if mode == "auto" else "--write-subs"
+    out_template = os.path.join(folder_path, "temp_subtitles")
+    cmd = [
+        "yt-dlp",
+        write_flag,
+        "--sub-lang",
+        yt_lang,
+        "--convert-subs",
+        "srt",
+        "--skip-download",
+        "--socket-timeout",
+        "30",
+        "-o",
+        out_template,
+        "--",
+        url,
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            creationflags=creation_flags,
+            timeout=180,
+        )
+    except subprocess.TimeoutExpired:
+        sys.stderr.write(
+            "Ошибка: yt-dlp завис на скачивании субтитров (таймаут). "
+            "Проверь сеть/стратегию zapret и повтори.\n"
+        )
+        return False
+    timings["subs"] = time.perf_counter() - t1
+
+    if result.returncode != 0:
+        sys.stderr.write(f"Ошибка yt-dlp: {result.stderr}\n")
+        return False
+
+    srt_file = _find_srt(folder_path, yt_lang, lang_code)
+    if not srt_file:
+        sys.stderr.write(
+            f"Ошибка: yt-dlp не сохранил .srt для языка '{yt_lang}' "
+            f"(искали также '{lang_code}').\n"
+        )
+        return False
+
+    # --- 3) разбор srt → plain + таймкоды / части / буферный файл ---
+    _emit(status_cb, "Статус: [3/3] обрабатываю текст…")
+    t2 = time.perf_counter()
+
+    with open(srt_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    clean_text, timed_text, phrases = build_texts_from_srt(content)
+    if not phrases:
+        sys.stderr.write("Ошибка: в SRT не найдено текстовых сегментов.\n")
+        return False
 
     try:
-        # --- 2) один скачивающий вызов yt-dlp ---
-        mode_label = "авто" if mode == "auto" else "обычные"
-        _emit(
-            status_cb,
-            f"Статус: [2/3] скачиваю {mode_label} {lang_code}-субтитры…",
-        )
-        t1 = time.perf_counter()
-
-        write_flag = "--write-auto-subs" if mode == "auto" else "--write-subs"
-        cmd = [
-            "yt-dlp",
-            write_flag,
-            "--sub-lang",
-            lang_code,
-            "--convert-subs",
-            "srt",
-            "--skip-download",
-            "--socket-timeout",
-            "30",
-            "-o",
-            "temp_subtitles",
-            "--",
-            url,
-        ]
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                creationflags=creation_flags,
-                timeout=180,
-            )
-        except subprocess.TimeoutExpired:
-            sys.stderr.write(
-                "Ошибка: yt-dlp завис на скачивании субтитров (таймаут). "
-                "Проверь сеть/стратегию zapret и повтори.\n"
-            )
-            return False
-        timings["subs"] = time.perf_counter() - t1
-
-        if result.returncode != 0:
-            sys.stderr.write(f"Ошибка yt-dlp: {result.stderr}\n")
-            return False
-
-        srt_file = _find_srt(lang_code)
-        if not srt_file:
-            sys.stderr.write(
-                f"Ошибка: yt-dlp не сохранил .srt для языка '{lang_code}'.\n"
-            )
-            return False
-
-        # --- 3) разбор srt → plain + таймкоды / части / буферный файл ---
-        _emit(status_cb, "Статус: [3/3] обрабатываю текст…")
-        t2 = time.perf_counter()
-
-        with open(srt_file, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        clean_text, timed_text, phrases = build_texts_from_srt(content)
-        if not phrases:
-            sys.stderr.write("Ошибка: в SRT не найдено текстовых сегментов.\n")
-            return False
-
         os.remove(srt_file)
+    except OSError:
+        pass
 
-        # "w" — перезапись, не append (повторный запуск не удваивает файл)
-        with open("0_весь_текст_для_буфера.txt", "w", encoding="utf-8") as f:
-            f.write(clean_text)
-
-        with open("1_текст_с_таймкодами.txt", "w", encoding="utf-8") as f:
-            f.write(timed_text)
-
-        parts = [
-            clean_text[i : i + max_chars] for i in range(0, len(clean_text), max_chars)
-        ]
-        for i, part in enumerate(parts):
-            filename = f"часть_{lang_code}_{i + 1}.txt"
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(part)
-            print(f"{filename} ({len(part)} знаков)")
-
-        timings["parse"] = time.perf_counter() - t2
-        total = sum(timings.values())
-        timing_line = (
-            f"Тайминги: meta {timings['meta']:.1f}s | "
-            f"subs {timings['subs']:.1f}s | "
-            f"parse {timings['parse']:.2f}s | "
-            f"всего {total:.1f}s ({mode_label}) | "
-            f"+ файл с таймкодами ({len(phrases)} фраз)"
-        )
-        print(f"Готово. {len(parts)} частей. Таймкодов: {len(phrases)}.")
-        _emit(status_cb, timing_line)
-        return True
-
-    finally:
-        os.chdir(old_cwd)
+    n_parts = write_output_texts(
+        folder_path, clean_text, timed_text, lang_code, max_chars=max_chars
+    )
+    timings["parse"] = time.perf_counter() - t2
+    total = sum(timings.values())
+    timing_line = (
+        f"Тайминги: meta {timings['meta']:.1f}s | "
+        f"subs {timings['subs']:.1f}s | "
+        f"parse {timings['parse']:.2f}s | "
+        f"всего {total:.1f}s ({mode_label}) | "
+        f"+ файл с таймкодами ({len(phrases)} фраз)"
+    )
+    print(f"Готово. {n_parts} частей. Таймкодов: {len(phrases)}.")
+    _emit(status_cb, timing_line)
+    return True
 
 
 # =====================================================================
