@@ -1,12 +1,13 @@
-{
-  "engine": "piper",
-  "voice": "ru-RU-SvetlanaNeural",
-  "local_speaker": "kseniya",
-  "piper_model": "models/ru_RU-irina-medium.onnx",
-  "piper_model_en": "models/en_US-ryan-medium.onnx",
-  "hybrid_mode": "dict_only",
-  "lang_switch_pause_ms": 80,
-  "volume": 68,
-  "interrupt_on_new": false,
-  "pause_ms": 300
-}
+{
+  "engine": "kokoro",
+  "kokoro_voice": "sveta",
+  "hybrid_mode": "dict_only",
+  "micro_wife_design_file": "micro_wife/designs/05_adult_book_female.txt",
+  "qwen_speaker": "sohee",
+  "volume": 100,
+  "interrupt_on_new": false,
+  "pause_ms": 500,
+  "lang_switch_pause_ms": 80,
+  "qwen_model": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+  "micro_wife_ready": true
+}

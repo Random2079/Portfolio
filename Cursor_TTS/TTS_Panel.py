@@ -35,52 +35,43 @@ OFF_FLAG = ROOT / "TTS_OFF"
 PAUSE_FLAG = ROOT / "TTS_PAUSED"
 CONFIG_FILE = ROOT / "tts_config.json"
 PID_FILE = ROOT / "tts_speech.pid"
-SPEAK_EDGE = ROOT / "speak_edge.py"
+SPEAK_EDGE = ROOT / "speak_edge.py"  # клиент к демону (имя историческое)
 
-VOICES_EDGE = [
-    ("ru-RU-DmitryNeural", "Дмитрий (мужской)"),
-    ("ru-RU-SvetlanaNeural", "Светлана (женский)"),
+VOICES_KOKORO = [
+    ("sveta", "Света (kokoro-ru)"),
+    ("masha", "Маша (kokoro-ru)"),
+    ("dima", "Дима (kokoro-ru)"),
 ]
-VOICES_LOCAL = [
-    ("xenia", "Ксения (жен.)"),
-    ("baya", "Бая (жен.)"),
-    ("kseniya", "Ксения-2 (жен.)"),
-    ("aidar", "Айдар (муж.)"),
-    ("eugene", "Евгений (муж.)"),
-]
-# code = относительный путь к .onnx от Cursor_TTS/
-VOICES_PIPER = [
-    ("models/ru_RU-dmitri-medium.onnx", "Дмитрий (medium)"),
-    ("models/ru_RU-irina-medium.onnx", "Ирина (medium)"),
-    ("models/ru_RU-ruslan-medium.onnx", "Руслан (medium)"),
-    ("models/ru_RU-denis-medium.onnx", "Денис (medium)"),
-]
-DEFAULT_VOICE = VOICES_EDGE[0][0]
-DEFAULT_LOCAL_SPEAKER = "xenia"
-DEFAULT_PIPER_MODEL = VOICES_PIPER[0][0]
-DEFAULT_PIPER_MODEL_EN = "models/en_US-ryan-medium.onnx"
+DEFAULT_KOKORO_VOICE = "sveta"
 DEFAULT_HYBRID_MODE = "dict_only"
 DEFAULT_VOLUME = 45
-DEFAULT_ENGINE = "edge"
+DEFAULT_ENGINE = "kokoro"
 DEFAULT_PAUSE_MS = 350
-_ENGINES = {"edge", "local", "piper"}
-_HYBRID_MODES = {"off", "dict_only", "dict_and_en"}
+DEFAULT_QWEN_SPEAKER = "serena"
+DEFAULT_QWEN_DESIGN = "micro_wife/designs/02_soft_high_female.txt"
+_ENGINES = {"kokoro", "qwen"}
+_HYBRID_MODES = {"off", "dict_only"}
 HYBRID_ITEMS = [
     ("off", "Как написано (без словаря)"),
     ("dict_only", "Словарь IT (fallback → фэлбэк)"),
-    ("dict_and_en", "Словарь + EN-голос (Piper)"),
 ]
-TEST_PHRASE = "Привет. Это проверка голоса Cursor TTS. Режим локальный или интернет."
+VOICES_QWEN = [
+    ("micro_wife/designs/02_soft_high_female.txt", "2 · мягкий высокий (micro wife)"),
+    ("micro_wife/designs/05_adult_book_female.txt", "5 · взрослая книжная (не лоли)"),
+    ("micro_wife/designs/01_bright_male_theater.txt", "1 · яркий мужской (театр)"),
+    ("micro_wife/designs/03_dark_male_suspense.txt", "3 · тёмный мужской (саспенс)"),
+    ("micro_wife/designs/04_neutral_baritone.txt", "4 · баритон-чтец"),
+]
+TEST_PHRASE = "Привет. Это проверка голоса Cursor TTS. Kokoro или Qwen."
 
 
 def load_config() -> dict:
     data = {
         "engine": DEFAULT_ENGINE,
-        "voice": DEFAULT_VOICE,
-        "local_speaker": DEFAULT_LOCAL_SPEAKER,
-        "piper_model": DEFAULT_PIPER_MODEL,
-        "piper_model_en": DEFAULT_PIPER_MODEL_EN,
+        "kokoro_voice": DEFAULT_KOKORO_VOICE,
         "hybrid_mode": DEFAULT_HYBRID_MODE,
+        "micro_wife_design_file": DEFAULT_QWEN_DESIGN,
+        "qwen_speaker": DEFAULT_QWEN_SPEAKER,
         "volume": DEFAULT_VOLUME,
         "interrupt_on_new": False,
         "pause_ms": DEFAULT_PAUSE_MS,
@@ -94,29 +85,30 @@ def load_config() -> dict:
             pass
 
     engine = str(data.get("engine", DEFAULT_ENGINE)).strip().lower()
-    data["engine"] = engine if engine in _ENGINES else DEFAULT_ENGINE
+    # старые edge/local/piper → kokoro
+    if engine not in _ENGINES:
+        engine = DEFAULT_ENGINE
+    data["engine"] = engine
 
-    voice = str(data.get("voice", DEFAULT_VOICE)).strip()
-    known_edge = {code for code, _ in VOICES_EDGE}
-    if voice not in known_edge:
-        voice = DEFAULT_VOICE
-    data["voice"] = voice
+    kokoro_voice = str(data.get("kokoro_voice", DEFAULT_KOKORO_VOICE)).strip().lower()
+    known_kokoro = {code for code, _ in VOICES_KOKORO}
+    if kokoro_voice not in known_kokoro:
+        kokoro_voice = DEFAULT_KOKORO_VOICE
+    data["kokoro_voice"] = kokoro_voice
 
-    local_speaker = str(data.get("local_speaker", DEFAULT_LOCAL_SPEAKER)).strip()
-    known_local = {code for code, _ in VOICES_LOCAL}
-    if local_speaker not in known_local:
-        local_speaker = DEFAULT_LOCAL_SPEAKER
-    data["local_speaker"] = local_speaker
-
-    piper_model = str(data.get("piper_model", DEFAULT_PIPER_MODEL)).strip()
-    known_piper = {code for code, _ in VOICES_PIPER}
-    if piper_model not in known_piper:
-        piper_model = DEFAULT_PIPER_MODEL
-    data["piper_model"] = piper_model
-    piper_en = str(data.get("piper_model_en", DEFAULT_PIPER_MODEL_EN)).strip()
-    data["piper_model_en"] = piper_en or DEFAULT_PIPER_MODEL_EN
     hybrid = str(data.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
+    if hybrid == "dict_and_en":
+        hybrid = "dict_only"
     data["hybrid_mode"] = hybrid if hybrid in _HYBRID_MODES else DEFAULT_HYBRID_MODE
+
+    design = str(data.get("micro_wife_design_file", DEFAULT_QWEN_DESIGN)).strip()
+    known_qwen = {code for code, _ in VOICES_QWEN}
+    if design not in known_qwen:
+        design = DEFAULT_QWEN_DESIGN
+    data["micro_wife_design_file"] = design
+    data["qwen_speaker"] = (
+        str(data.get("qwen_speaker", DEFAULT_QWEN_SPEAKER)).strip() or DEFAULT_QWEN_SPEAKER
+    )
 
     try:
         volume = int(data.get("volume", DEFAULT_VOLUME))
@@ -134,32 +126,53 @@ def load_config() -> dict:
 def save_config(
     *,
     engine: str | None = None,
-    voice: str | None = None,
-    local_speaker: str | None = None,
-    piper_model: str | None = None,
+    kokoro_voice: str | None = None,
     hybrid_mode: str | None = None,
+    micro_wife_design_file: str | None = None,
+    qwen_speaker: str | None = None,
     volume: int | None = None,
     interrupt_on_new: bool | None = None,
     pause_ms: int | None = None,
 ) -> None:
     data = load_config()
     if engine is not None:
-        data["engine"] = engine
-    if voice is not None:
-        data["voice"] = voice
-    if local_speaker is not None:
-        data["local_speaker"] = local_speaker
-    if piper_model is not None:
-        data["piper_model"] = piper_model
+        data["engine"] = engine if engine in _ENGINES else DEFAULT_ENGINE
+    if kokoro_voice is not None:
+        voice = str(kokoro_voice).strip().lower()
+        known = {code for code, _ in VOICES_KOKORO}
+        data["kokoro_voice"] = voice if voice in known else DEFAULT_KOKORO_VOICE
     if hybrid_mode is not None:
         mode = str(hybrid_mode).strip().lower()
+        if mode == "dict_and_en":
+            mode = "dict_only"
         data["hybrid_mode"] = mode if mode in _HYBRID_MODES else DEFAULT_HYBRID_MODE
+    if micro_wife_design_file is not None:
+        data["micro_wife_design_file"] = micro_wife_design_file
+        # держим active voice_design.txt в синхроне с пресетом
+        try:
+            src = ROOT / micro_wife_design_file
+            dst = ROOT / "micro_wife" / "voice_design.txt"
+            if src.is_file():
+                dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
+    if qwen_speaker is not None:
+        data["qwen_speaker"] = qwen_speaker
     if volume is not None:
         data["volume"] = max(10, min(100, volume))
     if interrupt_on_new is not None:
         data["interrupt_on_new"] = interrupt_on_new
     if pause_ms is not None:
         data["pause_ms"] = max(0, min(1500, pause_ms))
+    # вычищаем мёртвые ключи старых движков
+    for dead in (
+        "voice",
+        "local_speaker",
+        "piper_model",
+        "piper_model_en",
+    ):
+        data.pop(dead, None)
+    data["micro_wife_ready"] = True
     CONFIG_FILE.write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -272,7 +285,12 @@ def pause_toggle_speech() -> bool:
 
 
 def warmup_tts_backend() -> None:
-    """Убить старый демон (иначе код паузы не подхватится) + прогреть модель."""
+    """Прогреть модель при открытии панели.
+
+    Не делаем --restart-daemon каждый раз: для Qwen это сбрасывает VRAM
+    и снова даёт ~10–70 с cold load. Рестарт — только вручную
+    (speak_edge.py --restart-daemon) после правок кода демона.
+    """
     if not SPEAK_EDGE.is_file():
         return
     flags = 0x08000000 if sys.platform == "win32" else 0
@@ -280,7 +298,7 @@ def warmup_tts_backend() -> None:
     def run() -> None:
         try:
             subprocess.run(
-                [sys.executable, str(SPEAK_EDGE), "--restart-daemon", "--warmup"],
+                [sys.executable, str(SPEAK_EDGE), "--warmup"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=flags,
@@ -337,9 +355,8 @@ class TTSPanel(QMainWindow):
         engine_row = QHBoxLayout()
         engine_row.addWidget(QLabel("Движок:", self))
         self.engine_combo = QComboBox(self)
-        self.engine_combo.addItem("Интернет (edge)", "edge")
-        self.engine_combo.addItem("Локальный (Silero)", "local")
-        self.engine_combo.addItem("Локальный (Piper)", "piper")
+        self.engine_combo.addItem("Kokoro-ru (быстрый)", "kokoro")
+        self.engine_combo.addItem("Micro wife (Qwen)", "qwen")
         self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         engine_row.addWidget(self.engine_combo, stretch=1)
         layout.addLayout(engine_row)
@@ -433,12 +450,7 @@ class TTSPanel(QMainWindow):
     def _fill_voices(self, engine: str, selected: str | None = None) -> None:
         self.voice_combo.blockSignals(True)
         self.voice_combo.clear()
-        if engine == "local":
-            items = VOICES_LOCAL
-        elif engine == "piper":
-            items = VOICES_PIPER
-        else:
-            items = VOICES_EDGE
+        items = VOICES_QWEN if engine == "qwen" else VOICES_KOKORO
         for code, label in items:
             self.voice_combo.addItem(label, code)
         if selected:
@@ -449,11 +461,9 @@ class TTSPanel(QMainWindow):
 
     @staticmethod
     def _selected_voice_for_engine(cfg: dict, engine: str) -> str:
-        if engine == "local":
-            return cfg["local_speaker"]
-        if engine == "piper":
-            return cfg.get("piper_model", DEFAULT_PIPER_MODEL)
-        return cfg["voice"]
+        if engine == "qwen":
+            return cfg.get("micro_wife_design_file", DEFAULT_QWEN_DESIGN)
+        return cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)
 
     def _reload_from_disk(self) -> None:
         self._updating = True
@@ -539,20 +549,21 @@ class TTSPanel(QMainWindow):
     def _on_engine_changed(self, _index: int) -> None:
         if self._updating:
             return
-        engine = str(self.engine_combo.currentData() or "edge")
+        engine = str(self.engine_combo.currentData() or DEFAULT_ENGINE)
         cfg = load_config()
         selected = self._selected_voice_for_engine(cfg, engine)
         self._fill_voices(engine, selected)
         save_config(engine=engine)
-        if engine == "local":
-            msg = "Движок: Silero. Первый запуск скачает модель (нужен интернет один раз)."
-        elif engine == "piper":
+        if engine == "qwen":
             msg = (
-                "Движок: Piper. Нужны onnx в Cursor_TTS/models/ "
-                "(см. README: download_piper_voice)."
+                "Движок: Micro wife (Qwen). Лучшее качество, 5–15 с на фразу после прогрева. "
+                "CUDA Graphs на старте."
             )
         else:
-            msg = "Движок: интернет (edge)."
+            msg = (
+                "Движок: Kokoro-ru. Быстрее Qwen, лучше Piper. "
+                "Первый старт ~20–30 с (Python 3.12 worker), дальше теплее."
+            )
         self.status_label.setText(msg)
         self._refresh_status()
 
@@ -563,10 +574,6 @@ class TTSPanel(QMainWindow):
         save_config(hybrid_mode=mode)
         if mode == "off":
             msg = "Текст: как написано, без словаря."
-        elif mode == "dict_and_en":
-            msg = (
-                "Текст: словарь + английские фразы другим голосом (нужен Piper EN onnx)."
-            )
         else:
             msg = "Текст: словарь IT (fallback → фэлбэк). Пауза продолжает тот же слог."
         self.status_label.setText(msg)
@@ -578,13 +585,23 @@ class TTSPanel(QMainWindow):
         code = self.voice_combo.currentData()
         if not code:
             return
-        engine = str(self.engine_combo.currentData() or "edge")
-        if engine == "local":
-            save_config(local_speaker=str(code))
-        elif engine == "piper":
-            save_config(piper_model=str(code))
+        engine = str(self.engine_combo.currentData() or DEFAULT_ENGINE)
+        if engine == "qwen":
+            # speaker под пресет (не всегда serena — иначе «баритон» звучит женским)
+            try:
+                import sys as _sys
+
+                micro = str(ROOT / "micro_wife")
+                if micro not in _sys.path:
+                    _sys.path.insert(0, micro)
+                from speak_qwen import speaker_for_design
+
+                spk = speaker_for_design(str(code))
+            except Exception:
+                spk = DEFAULT_QWEN_SPEAKER
+            save_config(micro_wife_design_file=str(code), qwen_speaker=spk)
         else:
-            save_config(voice=str(code))
+            save_config(kokoro_voice=str(code))
         self._refresh_status()
 
     def _on_volume_changed(self, value: int) -> None:
@@ -627,12 +644,16 @@ class TTSPanel(QMainWindow):
             creationflags=flags,
         )
         engine = load_config()["engine"]
-        if engine == "local":
-            tip = "Проигрываю тест… (Silero: первый раз может долго качать модель)"
-        elif engine == "piper":
-            tip = "Проигрываю тест… (Piper: нужен .onnx в models/)"
+        if engine == "qwen":
+            tip = (
+                "Qwen синтезирует… после прогрева обычно 5–15 секунд. "
+                "Не запускай новую фразу до начала речи."
+            )
         else:
-            tip = "Проигрываю тестовую фразу…"
+            tip = (
+                "Kokoro синтезирует… первый раз после старта демона может быть ~20–30 с, "
+                "потом быстрее."
+            )
         self.status_label.setText(tip)
 
     def _on_pause_toggle(self) -> None:
@@ -687,7 +708,7 @@ def main() -> int:
     window.show()
     window.raise_()
     window.activateWindow()
-    # Холодный старт Silero — в фоне, чтобы первая фраза из чата не ждала torch
+    # Холодный старт Kokoro/Qwen — в фоне
     QTimer.singleShot(300, warmup_tts_backend)
     return app.exec_()
 

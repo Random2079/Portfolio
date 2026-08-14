@@ -19,38 +19,33 @@ python TTS_Panel.py
 ```
 
 В окне: авто, **движок**, голос, громкость, **пауза между кусками**, «Прослушать», **«Пауза»**, «Стоп».  
-При открытии панели демон поднимается сам и **прогревает** Silero/Piper в фоне  
-(чтобы первая фраза из чата не ждала загрузку модели).  
+При открытии панели демон поднимается сам и **прогревает** текущий движок в фоне.  
 Пишет в те же файлы, что хук и AHK (`TTS_OFF`, `tts_config.json`).
 
-### Три движка
+### Два движка
 
 | Движок | Когда |
 |--------|--------|
-| **Интернет (edge)** | красивый голос, нужен стабильный инет/VPN |
-| **Локальный (Silero)** | без инета после скачивания; первый запуск качает torch-модель |
-| **Локальный (Piper)** | быстро после warmup (~1 с на фразу); нужен `.onnx` в `models/` |
+| **Kokoro-ru** | быстрый локальный (CPU), голоса Света / Маша / Дима; лучше Piper |
+| **Micro wife (Qwen)** | лучшее качество на GPU; 5–15 с на фразу после прогрева |
 
-По умолчанию **очередь**: новый ответ не убивает старый.  
-Галочка в панели «Новый ответ обрывает старый» — вернуть старое поведение.
+В `tts_config.json`: `"engine": "kokoro"|"qwen"`,  
+`"kokoro_voice": "sveta"`,  
+`"micro_wife_design_file": "micro_wife/designs/02_soft_high_female.txt"`.
 
-В `tts_config.json`: `"engine": "edge"|"local"|"piper"`, `"interrupt_on_new": false|true`,  
-`"piper_model": "models/ru_RU-dmitri-medium.onnx"`.
+Подробнее про Qwen: [`micro_wife/README.md`](micro_wife/README.md).
 
-> Полноценный `.exe` (без установленного Python) — можно собрать позже через PyInstaller, как Subtitle App.
+### Kokoro-ru (один раз)
 
-### Piper — установка модели (один раз)
+Нужен отдельный **Python 3.12** (пакет `kokoro` не ставится на 3.13):
 
 ```powershell
-cd Cursor_TTS
-pip install piper-tts
-python download_piper_voice.py ru_RU-dmitri-medium
-# опционально: irina / ruslan / denis
-python piper_prototype.py
+py -3.12 -m venv C:\Users\Home\.venvs\kokoro312
+C:\Users\Home\.venvs\kokoro312\Scripts\python.exe -m pip install kokoro soundfile huggingface_hub ruaccent
+# ассеты уже в C:\Users\Home\.kokoro_ru (или скачает worker)
 ```
 
-Файлы кладутся в `Cursor_TTS/models/*.onnx` (+ `.onnx.json` рядом).  
-В панели: движок **Локальный (Piper)** → голос Дмитрий/Ирина/…
+Демон (любой Python) держит тёплый worker через `speak_kokoro.py` → `micro_wife/kokoro_worker.py`.
 
 ## Горячие клавиши
 
@@ -94,8 +89,8 @@ python speak_edge.py --stop
 Это **не** то же самое, что кнопка «Пауза» / Ctrl+Shift+P (заморозка звука на месте, потом resume с того же слога).
 
 После правки кода демона **закрытие панели само по себе не подхватывает новый код**:
-процесс `tts_daemon.py` живёт на порту 47391. Открой панель заново (она делает `--restart-daemon`)
-или вручную: `python speak_edge.py --restart-daemon --warmup`. Exe собирать не нужно.
+процесс `tts_daemon.py` живёт на порту 47391. Открой панель заново (она делает warmup)
+или вручную: `python speak_edge.py --restart-daemon --warmup`.
 
 ## Текст для озвучки
 
@@ -111,21 +106,9 @@ cd Cursor_TTS
 pip install -r requirements.txt
 ```
 
-Голос и **громкость (10–100%)** — в `TTS_Panel.py` или в `tts_config.json`.
-По умолчанию громкость **45%** (edge-tts и так громкий).
+Голос и **громкость (10–100%)** — в панели или в `tts_config.json`.
 
 Длинные ответы читаются **частями**.
-
-### Выбор голоса (edge)
-
-Удобнее через `TTS_Panel.py`. Или вручную в `tts_config.json`:
-
-| Значение | Кто |
-|----------|-----|
-| `ru-RU-DmitryNeural` | мужской (по умолчанию) |
-| `ru-RU-SvetlanaNeural` | женский |
-
-Полный список: `python list_voices.py ru`
 
 ## Файлы
 
@@ -134,12 +117,13 @@ pip install -r requirements.txt
 - `.cursor/hooks/tts_after_response.py` — получает текст и запускает голос.
 - `Cursor_TTS/text_prep.py` — подготовка текста + **ru-normalizr**.
 - `Cursor_TTS/tts_daemon.py` — тёплый фоновый воркер (очередь, pause/resume, stop).
-- `Cursor_TTS/speak_edge.py` — клиент к демону.
-- `Cursor_TTS/speak_local.py` / `speak_piper.py` — локальные движки.
-- `Cursor_TTS/download_piper_voice.py` — скачать ru ONNX.
-- `Cursor_TTS/piper_prototype.py` — бенч Piper вне демона.
+- `Cursor_TTS/speak_edge.py` — клиент к демону (имя историческое).
+- `Cursor_TTS/speak_kokoro.py` + `micro_wife/kokoro_worker.py` — Kokoro-ru.
+- `Cursor_TTS/micro_wife/speak_qwen.py` — Qwen / micro wife.
 - `Cursor_TTS/tts_config.json` — движок / голос / пауза.
 - `Cursor_TTS/hotkey_tts.ahk` — горячие клавиши.
+
+Старые Edge / Silero / Piper из каталога убраны (скрипты на диске могут ещё лежать, демон их не зовёт).
 
 ## Если не работает
 
@@ -152,4 +136,5 @@ pip install -r requirements.txt
    - `Cursor_TTS/tts_debug.log` — куски, ошибки
    - `Cursor_TTS/tts_last_clean.txt` — последний текст в голос  
    Ищи строки `CHUNK_FAIL`.
-7. Piper: нет файла модели → `python download_piper_voice.py`; перезапусти демон (Стоп / закрой панель / снова Прослушать).
+7. Kokoro: проверь venv `C:\Users\Home\.venvs\kokoro312` и ассеты `C:\Users\Home\.kokoro_ru`.
+8. После смены кода демона: `python speak_edge.py --restart-daemon --warmup`.

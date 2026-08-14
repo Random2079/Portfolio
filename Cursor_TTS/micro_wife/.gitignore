@@ -1,0 +1,7 @@
+.venv*/
+.venv_kokoro/
+__pycache__/
+experiments/out/
+faster_qwen_test.wav
+samples/*.wav
+!samples/.gitkeep

@@ -57,8 +57,7 @@ return
 return
 
 ^+s::
-    Gosub, StopSpeech
-
+    ; Сначала копируем выделение — Stop до ^c часто срывает фокус в Cursor
     clipSaved := ClipboardAll
     Clipboard :=
     SendInput, ^c
@@ -72,6 +71,8 @@ return
 
     RunWait, powershell -NoProfile -Command "Get-Clipboard -Raw | Set-Content -LiteralPath '%selFile%' -Encoding UTF8", , Hide
     Clipboard := clipSaved
+
+    Gosub, StopSpeech
 
     ToolTip, TTS: speaking selection..., 10, 10
     SetTimer, RemoveTip, -1500

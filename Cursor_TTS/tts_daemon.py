@@ -11,7 +11,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import queue
@@ -29,17 +28,17 @@ CONFIG_FILE = ROOT / "tts_config.json"
 PID_FILE = ROOT / "tts_daemon.pid"
 HOST = "127.0.0.1"
 PORT = 47391
-DEFAULT_VOICE = "ru-RU-DmitryNeural"
-DEFAULT_LOCAL_SPEAKER = "xenia"
 DEFAULT_VOLUME = 45
-DEFAULT_ENGINE = "edge"  # edge | local | piper
+DEFAULT_ENGINE = "kokoro"  # kokoro | qwen
 DEFAULT_PAUSE_MS = 350  # пауза между кусками (реф: ~300–500ms между предложениями)
-DEFAULT_PIPER_MODEL = "models/ru_RU-dmitri-medium.onnx"
-DEFAULT_PIPER_MODEL_EN = "models/en_US-ryan-medium.onnx"
 DEFAULT_HYBRID_MODE = "dict_only"
 DEFAULT_LANG_SWITCH_PAUSE_MS = 80
-_ENGINES = {"edge", "local", "piper"}
-_HYBRID_MODES = {"off", "dict_only", "dict_and_en"}
+DEFAULT_KOKORO_VOICE = "sveta"
+DEFAULT_QWEN_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+DEFAULT_QWEN_SPEAKER = "serena"
+DEFAULT_QWEN_DESIGN = "micro_wife/voice_design.txt"
+_ENGINES = {"kokoro", "qwen"}
+_HYBRID_MODES = {"off", "dict_only"}
 
 try:
     from tts_debug import (
@@ -82,12 +81,12 @@ _worker_lock = threading.Lock()
 def load_config() -> dict:
     data = {
         "engine": DEFAULT_ENGINE,
-        "voice": DEFAULT_VOICE,
-        "local_speaker": DEFAULT_LOCAL_SPEAKER,
-        "piper_model": DEFAULT_PIPER_MODEL,
-        "piper_model_en": DEFAULT_PIPER_MODEL_EN,
+        "kokoro_voice": DEFAULT_KOKORO_VOICE,
         "hybrid_mode": DEFAULT_HYBRID_MODE,
         "lang_switch_pause_ms": DEFAULT_LANG_SWITCH_PAUSE_MS,
+        "qwen_model": DEFAULT_QWEN_MODEL,
+        "qwen_speaker": DEFAULT_QWEN_SPEAKER,
+        "micro_wife_design_file": DEFAULT_QWEN_DESIGN,
         "volume": DEFAULT_VOLUME / 100.0,
         "interrupt_on_new": False,
     }
@@ -96,17 +95,23 @@ def load_config() -> dict:
             raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             engine = str(raw.get("engine", DEFAULT_ENGINE)).strip().lower()
             data["engine"] = engine if engine in _ENGINES else DEFAULT_ENGINE
-            data["voice"] = str(raw.get("voice", DEFAULT_VOICE)).strip() or DEFAULT_VOICE
-            data["local_speaker"] = (
-                str(raw.get("local_speaker", DEFAULT_LOCAL_SPEAKER)).strip()
-                or DEFAULT_LOCAL_SPEAKER
-            )
-            piper_model = str(raw.get("piper_model", DEFAULT_PIPER_MODEL)).strip()
-            data["piper_model"] = piper_model or DEFAULT_PIPER_MODEL
-            piper_en = str(raw.get("piper_model_en", DEFAULT_PIPER_MODEL_EN)).strip()
-            data["piper_model_en"] = piper_en or DEFAULT_PIPER_MODEL_EN
+            kokoro_voice = str(raw.get("kokoro_voice", DEFAULT_KOKORO_VOICE)).strip().lower()
+            data["kokoro_voice"] = kokoro_voice or DEFAULT_KOKORO_VOICE
             hybrid = str(raw.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
+            if hybrid == "dict_and_en":
+                hybrid = "dict_only"
             data["hybrid_mode"] = hybrid if hybrid in _HYBRID_MODES else DEFAULT_HYBRID_MODE
+            data["qwen_model"] = (
+                str(raw.get("qwen_model", DEFAULT_QWEN_MODEL)).strip() or DEFAULT_QWEN_MODEL
+            )
+            data["qwen_speaker"] = (
+                str(raw.get("qwen_speaker", DEFAULT_QWEN_SPEAKER)).strip()
+                or DEFAULT_QWEN_SPEAKER
+            )
+            data["micro_wife_design_file"] = (
+                str(raw.get("micro_wife_design_file", DEFAULT_QWEN_DESIGN)).strip()
+                or DEFAULT_QWEN_DESIGN
+            )
             try:
                 data["lang_switch_pause_ms"] = max(
                     0,
@@ -126,12 +131,14 @@ def load_config() -> dict:
             pass
     if "pause_ms" not in data:
         data["pause_ms"] = DEFAULT_PAUSE_MS
-    if "piper_model_en" not in data:
-        data["piper_model_en"] = DEFAULT_PIPER_MODEL_EN
-    if "hybrid_mode" not in data:
-        data["hybrid_mode"] = DEFAULT_HYBRID_MODE
-    if "lang_switch_pause_ms" not in data:
-        data["lang_switch_pause_ms"] = DEFAULT_LANG_SWITCH_PAUSE_MS
+    if "qwen_model" not in data:
+        data["qwen_model"] = DEFAULT_QWEN_MODEL
+    if "qwen_speaker" not in data:
+        data["qwen_speaker"] = DEFAULT_QWEN_SPEAKER
+    if "micro_wife_design_file" not in data:
+        data["micro_wife_design_file"] = DEFAULT_QWEN_DESIGN
+    if "kokoro_voice" not in data:
+        data["kokoro_voice"] = DEFAULT_KOKORO_VOICE
     return data
 
 
@@ -354,41 +361,6 @@ def split_for_speech(text: str) -> list[str]:
     return [first] + split_into_chunks(rest)
 
 
-async def download_mp3(text: str, voice: str, mp3_path: Path) -> None:
-    import edge_tts
-
-    communicate = edge_tts.Communicate(text, voice)
-    with mp3_path.open("wb") as file:
-        async for chunk in communicate.stream():
-            if _stop_event.is_set():
-                return
-            if chunk["type"] == "audio":
-                file.write(chunk["data"])
-
-
-def download_mp3_retry(text: str, voice: str, mp3_path: Path, tries: int = 3) -> None:
-    last_error: BaseException | None = None
-    for attempt in range(1, tries + 1):
-        if _stop_event.is_set():
-            return
-        try:
-            if mp3_path.exists():
-                mp3_path.unlink(missing_ok=True)
-            asyncio.run(download_mp3(text, voice, mp3_path))
-            if mp3_path.is_file() and mp3_path.stat().st_size >= 64:
-                return
-            last_error = RuntimeError("empty mp3 / nothing to play")
-        except Exception as error:
-            last_error = error
-        # Короткая пауза и ещё попытка (edge иногда NoAudioReceived)
-        if attempt < tries and not _stop_event.is_set():
-            import time
-
-            time.sleep(0.4 * attempt)
-    if last_error is not None:
-        raise last_error
-
-
 def play_file(mp3_path: Path, volume: float) -> bool:
     """Играть до конца. True = дослушали, False = hard stop.
     get_busy() на паузе False — не считать это концом файла.
@@ -449,26 +421,37 @@ def _safe_unlink(path: Path) -> None:
 
 
 def _audio_suffix(engine: str) -> str:
-    return ".mp3" if engine == "edge" else ".wav"
+    return ".wav"
 
 
 def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None:
-    """edge → mp3, local/piper → wav. lang=en только для Piper hybrid."""
+    """kokoro / qwen → wav. lang оставлен для совместимости (всегда ru)."""
+    del lang  # EN hybrid убран вместе с Piper
     engine = cfg["engine"]
-    if engine == "local":
-        from speak_local import synthesize_wav
+    if engine == "kokoro":
+        from speak_kokoro import synthesize_wav as synthesize_kokoro
 
-        synthesize_wav(part, cfg["local_speaker"], out_path)
+        synthesize_kokoro(part, cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE), out_path)
         return
-    if engine == "piper":
-        from speak_piper import synthesize_wav as synthesize_piper
+    if engine == "qwen":
+        micro = Path(__file__).resolve().parent / "micro_wife"
+        if str(micro) not in sys.path:
+            sys.path.insert(0, str(micro))
+        from speak_qwen import synthesize_wav as synthesize_qwen
+        from speak_qwen import speaker_for_design
 
-        model = cfg.get("piper_model", DEFAULT_PIPER_MODEL)
-        if lang == "en":
-            model = cfg.get("piper_model_en", DEFAULT_PIPER_MODEL_EN)
-        synthesize_piper(part, model, out_path)
+        design_file = cfg.get("micro_wife_design_file", DEFAULT_QWEN_DESIGN)
+        # speaker всегда из пресета design (конфиг мог залипнуть на serena)
+        synthesize_qwen(
+            part,
+            out_path,
+            design_file=design_file,
+            model_id=cfg.get("qwen_model", DEFAULT_QWEN_MODEL),
+            speaker=speaker_for_design(design_file),
+            language="russian",
+        )
         return
-    download_mp3_retry(part, cfg["voice"], out_path)
+    raise ValueError(f"unknown engine: {engine}")
 
 
 def _prefetch_part(part: str, cfg: dict, out_holder: list, lang: str = "ru") -> None:
@@ -494,53 +477,26 @@ def _looks_like_table_speech(text: str) -> bool:
 
 def _parts_for_engine(text: str, engine: str) -> list[str]:
     table_like = _looks_like_table_speech(text)
-    if engine == "local":
-        return split_into_chunks(text, target=160 if table_like else 500)
-    if engine == "piper":
+    if engine == "kokoro":
         return split_into_chunks(text, target=160 if table_like else 400)
-    if table_like:
-        return split_into_chunks(text, target=180)
-    return split_for_speech(text)
+    if engine == "qwen":
+        # Короткие куски на Qwen дают хуже RTF (фиксированный overhead generate).
+        # table_like раньше резал до 120 — это усугубляло; держим крупные куски.
+        return split_into_chunks(text, target=420)
+    return split_into_chunks(text, target=160 if table_like else 400)
 
 
 def _effective_hybrid(cfg: dict) -> str:
-    """dict_and_en только если Piper и EN-модель на диске, иначе dict_only."""
     mode = str(cfg.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
     if mode not in _HYBRID_MODES:
         mode = DEFAULT_HYBRID_MODE
-    if cfg.get("engine") != "piper":
-        return "off" if mode == "off" else "dict_only"
-    if mode != "dict_and_en":
-        return mode
-    try:
-        from speak_piper import model_exists
-
-        if model_exists(cfg.get("piper_model_en", DEFAULT_PIPER_MODEL_EN)):
-            return "dict_and_en"
-    except Exception:
-        pass
-    return "dict_only"
+    return "off" if mode == "off" else "dict_only"
 
 
 def _speech_units(text: str, cfg: dict) -> list[tuple[str, str]]:
-    """Куски [(текст, lang)]. EN-сегменты только в режиме dict_and_en."""
+    """Куски [(текст, lang)]. Всегда ru после удаления Piper EN hybrid."""
     hybrid = _effective_hybrid(cfg)
     engine = str(cfg.get("engine", DEFAULT_ENGINE))
-    if engine == "piper" and hybrid == "dict_and_en":
-        try:
-            from text_prep import finalize_speech_segments
-
-            segments = finalize_speech_segments(text)
-        except Exception as error:
-            debug_log(f"text_prep segments skipped: {error}")
-            segments = []
-        if segments:
-            units: list[tuple[str, str]] = []
-            for seg in segments:
-                for chunk in _parts_for_engine(seg.text, engine):
-                    if chunk:
-                        units.append((chunk, seg.lang))
-            return units
     prepared = text
     try:
         from text_prep import finalize_speech_text
@@ -567,7 +523,52 @@ def speak_text(text: str) -> None:
         suffix = _audio_suffix(cfg["engine"])
         pause_ms = int(cfg.get("pause_ms", DEFAULT_PAUSE_MS))
         switch_ms = int(cfg.get("lang_switch_pause_ms", DEFAULT_LANG_SWITCH_PAUSE_MS))
-        use_prefetch = cfg["engine"] == "edge"
+        use_prefetch = cfg["engine"] in ("kokoro", "qwen")
+        # #region agent log
+        try:
+            import json as _json_dbg
+            import time as _time_dbg
+            from pathlib import Path as _Path_dbg
+
+            _dbg_path = _Path_dbg(__file__).resolve().parent.parent / "debug-45ab72.log"
+            _qwen_warm = None
+            if cfg["engine"] == "qwen":
+                try:
+                    micro = Path(__file__).resolve().parent / "micro_wife"
+                    if str(micro) not in sys.path:
+                        sys.path.insert(0, str(micro))
+                    import speak_qwen as _sq
+
+                    _qwen_warm = _sq._model is not None
+                except Exception as _e:
+                    _qwen_warm = f"err:{_e}"
+            with open(_dbg_path, "a", encoding="utf-8") as _df:
+                _df.write(
+                    _json_dbg.dumps(
+                        {
+                            "sessionId": "45ab72",
+                            "runId": "post-fix",
+                            "hypothesisId": "C,D,G",
+                            "location": "tts_daemon.py:speak_text",
+                            "message": "speak_plan",
+                            "data": {
+                                "engine": cfg["engine"],
+                                "units": len(units),
+                                "text_chars": len(text),
+                                "use_prefetch": use_prefetch,
+                                "qwen_model_already_loaded": _qwen_warm,
+                                "chunk_lens": [len(u[0]) for u in units[:12]],
+                                "fix": "prefetch_tf32_larger_chunks",
+                            },
+                            "timestamp": int(_time_dbg.time() * 1000),
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
         next_thread: threading.Thread | None = None
         current_path: Path | None = None
 
@@ -622,7 +623,48 @@ def speak_text(text: str) -> None:
                         ) as tmp:
                             current_path = Path(tmp.name)
                         try:
+                            # #region agent log
+                            _t_render = time.perf_counter()
+                            # #endregion
                             render_audio(part, cfg, current_path, lang)
+                            # #region agent log
+                            try:
+                                import json as _json_dbg2
+                                from pathlib import Path as _Path_dbg2
+
+                                _dbg_path2 = (
+                                    _Path_dbg2(__file__).resolve().parent.parent
+                                    / "debug-45ab72.log"
+                                )
+                                with open(_dbg_path2, "a", encoding="utf-8") as _df2:
+                                    _df2.write(
+                                        _json_dbg2.dumps(
+                                            {
+                                                "sessionId": "45ab72",
+                                    "runId": "post-fix",
+                                    "hypothesisId": "B,C,D",
+                                    "location": "tts_daemon.py:chunk_render",
+                                    "message": "chunk_render_done",
+                                    "data": {
+                                        "index": index + 1,
+                                        "units": len(units),
+                                        "chars": len(part),
+                                        "render_ms": int(
+                                            (time.perf_counter() - _t_render)
+                                            * 1000
+                                        ),
+                                        "use_prefetch": use_prefetch,
+                                        "engine": cfg["engine"],
+                                    },
+                                                "timestamp": int(time.time() * 1000),
+                                            },
+                                            ensure_ascii=False,
+                                        )
+                                        + "\n"
+                                    )
+                            except Exception:
+                                pass
+                            # #endregion
                         except Exception as error:
                             fail_parts += 1
                             log_chunk_fail(index + 1, len(units), part, error)
@@ -654,7 +696,48 @@ def speak_text(text: str) -> None:
                     if len(npart) >= 2:
                         next_thread = start_prefetch(npart, nlang)
 
+                # #region agent log
+                _t_play = time.perf_counter()
+                # #endregion
                 finished = play_file(current_path, cfg["volume"])
+                # #region agent log
+                try:
+                    import json as _json_dbg3
+                    from pathlib import Path as _Path_dbg3
+
+                    _dbg_path3 = (
+                        _Path_dbg3(__file__).resolve().parent.parent / "debug-45ab72.log"
+                    )
+                    with open(_dbg_path3, "a", encoding="utf-8") as _df3:
+                        _df3.write(
+                            _json_dbg3.dumps(
+                                {
+                                    "sessionId": "45ab72",
+                                    "runId": "post-fix",
+                                    "hypothesisId": "D",
+                                    "location": "tts_daemon.py:chunk_play",
+                                    "message": "chunk_play_done",
+                                    "data": {
+                                        "index": index + 1,
+                                        "units": len(units),
+                                        "play_ms": int(
+                                            (time.perf_counter() - _t_play) * 1000
+                                        ),
+                                        "finished": bool(finished),
+                                        "use_prefetch": use_prefetch,
+                                        "idle_gpu_during_play_if_no_prefetch": (
+                                            cfg["engine"] == "qwen" and not use_prefetch
+                                        ),
+                                    },
+                                    "timestamp": int(time.time() * 1000),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+                # #endregion
                 _safe_unlink(current_path)
                 current_path = None
                 if not finished or _stop_event.is_set():
@@ -717,16 +800,16 @@ def handle_client(conn: socket.socket) -> None:
         if cmd == "warmup":
             cfg = load_config()
             engine = str(cfg.get("engine", DEFAULT_ENGINE))
-            if engine == "local":
+            if engine == "kokoro":
                 try:
-                    from speak_local import warmup as warmup_local
+                    from speak_kokoro import warmup as warmup_kokoro
 
-                    debug_log("WARMUP local begin")
-                    warmup_local()
-                    debug_log("WARMUP local done")
-                    conn.sendall(b'{"ok":true,"warmed":true,"engine":"local"}\n')
+                    debug_log("WARMUP kokoro begin")
+                    warmup_kokoro(cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE))
+                    debug_log("WARMUP kokoro done")
+                    conn.sendall(b'{"ok":true,"warmed":true,"engine":"kokoro"}\n')
                 except Exception as error:
-                    debug_log(f"WARMUP fail: {error}")
+                    debug_log(f"WARMUP kokoro fail: {error}")
                     conn.sendall(
                         json.dumps(
                             {"ok": False, "error": str(error)},
@@ -734,19 +817,19 @@ def handle_client(conn: socket.socket) -> None:
                         ).encode("utf-8")
                         + b"\n"
                     )
-            elif engine == "piper":
+            elif engine == "qwen":
                 try:
-                    from speak_piper import warmup_many
+                    micro = Path(__file__).resolve().parent / "micro_wife"
+                    if str(micro) not in sys.path:
+                        sys.path.insert(0, str(micro))
+                    from speak_qwen import warmup as warmup_qwen
 
-                    debug_log("WARMUP piper begin")
-                    models = [cfg.get("piper_model", DEFAULT_PIPER_MODEL)]
-                    if _effective_hybrid(cfg) == "dict_and_en":
-                        models.append(cfg.get("piper_model_en", DEFAULT_PIPER_MODEL_EN))
-                    warmup_many(models)
-                    debug_log("WARMUP piper done")
-                    conn.sendall(b'{"ok":true,"warmed":true,"engine":"piper"}\n')
+                    debug_log("WARMUP qwen begin")
+                    warmup_qwen(cfg.get("qwen_model", DEFAULT_QWEN_MODEL))
+                    debug_log("WARMUP qwen done")
+                    conn.sendall(b'{"ok":true,"warmed":true,"engine":"qwen"}\n')
                 except Exception as error:
-                    debug_log(f"WARMUP piper fail: {error}")
+                    debug_log(f"WARMUP qwen fail: {error}")
                     conn.sendall(
                         json.dumps(
                             {"ok": False, "error": str(error)},
@@ -755,8 +838,13 @@ def handle_client(conn: socket.socket) -> None:
                         + b"\n"
                     )
             else:
-                debug_log("WARMUP edge skip (daemon already warm)")
-                conn.sendall(b'{"ok":true,"warmed":true,"engine":"edge"}\n')
+                conn.sendall(
+                    json.dumps(
+                        {"ok": False, "error": f"unknown engine: {engine}"},
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    + b"\n"
+                )
             return
         if cmd == "pause":
             pause_playback()
@@ -816,34 +904,34 @@ def already_running() -> bool:
 
 
 def warmup_engine_background() -> None:
-    """Не блокирует accept: local/piper грузятся в фоне после старта."""
+    """Не блокирует accept: kokoro/qwen грузятся в фоне после старта."""
 
     def run() -> None:
         cfg = load_config()
         engine = cfg.get("engine")
-        if engine == "local":
+        if engine == "kokoro":
             try:
-                from speak_local import warmup as warmup_local
+                from speak_kokoro import warmup as warmup_kokoro
 
-                debug_log("WARMUP bg local begin")
-                warmup_local()
-                debug_log("WARMUP bg local done")
+                debug_log("WARMUP bg kokoro begin")
+                warmup_kokoro(cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE))
+                debug_log("WARMUP bg kokoro done")
             except Exception as error:
-                debug_log(f"WARMUP bg fail: {error}")
-        elif engine == "piper":
+                debug_log(f"WARMUP bg kokoro fail: {error}")
+        elif engine == "qwen":
             try:
-                from speak_piper import warmup_many
+                micro = Path(__file__).resolve().parent / "micro_wife"
+                if str(micro) not in sys.path:
+                    sys.path.insert(0, str(micro))
+                from speak_qwen import warmup as warmup_qwen
 
-                debug_log("WARMUP bg piper begin")
-                models = [cfg.get("piper_model", DEFAULT_PIPER_MODEL)]
-                if _effective_hybrid(cfg) == "dict_and_en":
-                    models.append(cfg.get("piper_model_en", DEFAULT_PIPER_MODEL_EN))
-                warmup_many(models)
-                debug_log("WARMUP bg piper done")
+                debug_log("WARMUP bg qwen begin")
+                warmup_qwen(cfg.get("qwen_model", DEFAULT_QWEN_MODEL))
+                debug_log("WARMUP bg qwen done")
             except Exception as error:
-                debug_log(f"WARMUP bg piper fail: {error}")
+                debug_log(f"WARMUP bg qwen fail: {error}")
         else:
-            debug_log("WARMUP bg skip (engine!=local/piper)")
+            debug_log(f"WARMUP bg skip (engine={engine})")
 
     threading.Thread(target=run, name="tts-warmup", daemon=True).start()
 
