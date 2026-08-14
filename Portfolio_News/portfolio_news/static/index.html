@@ -33,7 +33,7 @@
       }
       header h1 { margin: 0; font-size: 1.5rem; }
       header p { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.9rem; }
-      .actions { display: flex; gap: 0.5rem; }
+      .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
       button {
         background: var(--accent); color: #fff; border: none; border-radius: 8px;
         padding: 0.45rem 0.9rem; font-weight: 600; cursor: pointer;
@@ -45,8 +45,9 @@
       .layout { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; }
       @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
       .panel {
-        background: color-mix(in srgb, var(--panel) 92%, transparent);
-        border: 1px solid var(--border); border-radius: 12px; padding: 0.75rem;
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: 12px; padding: 0.75rem;
+        box-shadow: 0 1px 2px rgb(26 35 48 / 4%);
       }
       .panel h2 {
         margin: 0 0 0.75rem; font-size: 0.95rem; color: var(--muted);
@@ -65,8 +66,8 @@
         display: inline-block; font-size: 0.65rem; text-transform: uppercase;
         padding: 0.1rem 0.35rem; border-radius: 4px; width: fit-content;
       }
-      .badge.equity { background: color-mix(in srgb, var(--equity) 25%, transparent); color: var(--equity); }
-      .badge.bond { background: color-mix(in srgb, var(--bond) 25%, transparent); color: var(--bond); }
+      .badge.equity { background: #e8f2fc; color: var(--equity); }
+      .badge.bond { background: #f7efd9; color: var(--bond); }
       .news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
       .news-item {
         padding: 0.75rem; border-radius: 10px; border: 1px solid var(--border); background: var(--card);
@@ -79,122 +80,147 @@
     </style>
   </head>
   <body>
-    <div id="root"></div>
-    <script src="https://unpkg.com/react@19/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@19/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script type="text/babel">
-      const { useCallback, useEffect, useMemo, useState } = React;
+    <div class="app">
+      <header>
+        <div>
+          <h1>Portfolio News</h1>
+          <p id="subtitle">Загрузка…</p>
+        </div>
+        <div class="actions">
+          <button type="button" class="secondary" id="btnAll">Все</button>
+          <button type="button" class="secondary" id="btnRefresh">Обновить</button>
+          <button type="button" id="btnPoll">Опросить сейчас</button>
+        </div>
+      </header>
+      <div id="error" class="error" hidden></div>
+      <div class="layout">
+        <aside class="panel">
+          <h2>Тикеры</h2>
+          <ul class="ticker-list" id="tickers"></ul>
+        </aside>
+        <main class="panel">
+          <h2 id="newsTitle">Лента</h2>
+          <ul class="news-list" id="news"></ul>
+        </main>
+      </div>
+    </div>
+    <script>
+      let selected = null;
+      let tickers = [];
+      let pollInfo = null;
+
+      function showError(msg) {
+        const el = document.getElementById("error");
+        if (!msg) {
+          el.hidden = true;
+          el.textContent = "";
+          return;
+        }
+        el.hidden = false;
+        el.textContent = "API: " + msg;
+      }
 
       async function getJson(path) {
         const res = await fetch(path);
-        if (!res.ok) throw new Error(`${res.status} ${path}`);
+        if (!res.ok) throw new Error(res.status + " " + path);
         return res.json();
       }
 
-      function App() {
-        const [tickers, setTickers] = useState([]);
-        const [news, setNews] = useState([]);
-        const [selected, setSelected] = useState(null);
-        const [error, setError] = useState("");
-        const [busy, setBusy] = useState(false);
-        const [pollInfo, setPollInfo] = useState(null);
-
-        const load = useCallback(async () => {
-          setError("");
-          try {
-            const [t, n] = await Promise.all([
-              getJson("/api/tickers"),
-              getJson(selected ? `/api/news?ticker=${encodeURIComponent(selected)}&limit=80` : "/api/news?limit=80"),
-            ]);
-            setTickers(t);
-            setNews(n);
-          } catch (e) {
-            setError(String(e.message || e));
-          }
-        }, [selected]);
-
-        useEffect(() => { load(); }, [load]);
-
-        const counts = useMemo(() => ({
-          equity: tickers.filter((t) => t.kind === "equity").length,
-          bond: tickers.filter((t) => t.kind === "bond").length,
-        }), [tickers]);
-
-        async function runPoll() {
-          setBusy(true);
-          setError("");
-          try {
-            const stats = await fetch("/api/poll?notify=true", { method: "POST" }).then((r) => {
-              if (!r.ok) throw new Error(`poll ${r.status}`);
-              return r.json();
-            });
-            setPollInfo(stats);
-            await load();
-          } catch (e) {
-            setError(String(e.message || e));
-          } finally {
-            setBusy(false);
-          }
+      function renderTickers() {
+        const ul = document.getElementById("tickers");
+        ul.innerHTML = "";
+        for (const t of tickers) {
+          const li = document.createElement("li");
+          const btn = document.createElement("button");
+          btn.type = "button";
+          if (selected === t.id) btn.classList.add("active");
+          btn.innerHTML =
+            '<span class="badge ' + t.kind + '">' + t.kind + "</span>" +
+            '<span class="id">' + t.id + "</span>" +
+            '<span class="name">' + (t.name || "") + "</span>";
+          btn.addEventListener("click", () => {
+            selected = t.id;
+            load();
+          });
+          li.appendChild(btn);
+          ul.appendChild(li);
         }
-
-        return (
-          <div className="app">
-            <header>
-              <div>
-                <h1>Portfolio News</h1>
-                <p>
-                  {tickers.length} бумаг · {counts.equity} акций · {counts.bond} облигаций
-                  {pollInfo ? ` · last poll +${pollInfo.inserted}` : ""}
-                </p>
-              </div>
-              <div className="actions">
-                <button type="button" className="secondary" onClick={() => setSelected(null)}>Все</button>
-                <button type="button" className="secondary" onClick={load} disabled={busy}>Обновить</button>
-                <button type="button" onClick={runPoll} disabled={busy}>{busy ? "Опрос…" : "Опросить сейчас"}</button>
-              </div>
-            </header>
-            {error ? <div className="error">API: {error}</div> : null}
-            <div className="layout">
-              <aside className="panel">
-                <h2>Тикеры</h2>
-                <ul className="ticker-list">
-                  {tickers.map((t) => (
-                    <li key={t.id}>
-                      <button type="button" className={selected === t.id ? "active" : ""} onClick={() => setSelected(t.id)}>
-                        <span className={`badge ${t.kind}`}>{t.kind}</span>
-                        <span className="id">{t.id}</span>
-                        <span className="name">{t.name}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </aside>
-              <main className="panel">
-                <h2>{selected ? `Новости · ${selected}` : "Лента"}</h2>
-                {news.length === 0 ? (
-                  <div className="empty">Пока пусто. Нажми «Опросить сейчас».</div>
-                ) : (
-                  <ul className="news-list">
-                    {news.map((n) => (
-                      <li key={n.id} className="news-item">
-                        <a href={n.url} target="_blank" rel="noreferrer">{n.title}</a>
-                        <div className="meta">
-                          <span>{n.ticker_id}</span>
-                          <span>{n.source}</span>
-                          <span>{n.published_at ? new Date(n.published_at).toLocaleString("ru-RU") : "—"}</span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </main>
-            </div>
-          </div>
-        );
       }
 
-      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+      function renderNews(items) {
+        const ul = document.getElementById("news");
+        const title = document.getElementById("newsTitle");
+        title.textContent = selected ? "Новости · " + selected : "Лента";
+        ul.innerHTML = "";
+        if (!items.length) {
+          ul.innerHTML = '<li class="empty">Пока пусто. Нажми «Опросить сейчас».</li>';
+          return;
+        }
+        for (const n of items) {
+          const li = document.createElement("li");
+          li.className = "news-item";
+          const when = n.published_at ? new Date(n.published_at).toLocaleString("ru-RU") : "—";
+          li.innerHTML =
+            '<a href="' + n.url + '" target="_blank" rel="noreferrer"></a>' +
+            '<div class="meta"><span></span><span></span><span></span></div>';
+          li.querySelector("a").textContent = n.title;
+          const spans = li.querySelectorAll(".meta span");
+          spans[0].textContent = n.ticker_id;
+          spans[1].textContent = n.source;
+          spans[2].textContent = when;
+          ul.appendChild(li);
+        }
+      }
+
+      function renderSubtitle() {
+        const equity = tickers.filter((t) => t.kind === "equity").length;
+        const bond = tickers.filter((t) => t.kind === "bond").length;
+        let text = tickers.length + " бумаг · " + equity + " акций · " + bond + " облигаций";
+        if (pollInfo) text += " · last poll +" + pollInfo.inserted;
+        document.getElementById("subtitle").textContent = text;
+      }
+
+      async function load() {
+        showError("");
+        try {
+          const [t, n] = await Promise.all([
+            getJson("/api/tickers"),
+            getJson(selected ? "/api/news?ticker=" + encodeURIComponent(selected) + "&limit=80" : "/api/news?limit=80"),
+          ]);
+          tickers = t;
+          renderTickers();
+          renderNews(n);
+          renderSubtitle();
+        } catch (e) {
+          showError(String(e.message || e));
+          document.getElementById("subtitle").textContent = "Нет связи с API";
+        }
+      }
+
+      document.getElementById("btnAll").addEventListener("click", () => {
+        selected = null;
+        load();
+      });
+      document.getElementById("btnRefresh").addEventListener("click", () => load());
+      document.getElementById("btnPoll").addEventListener("click", async () => {
+        const btn = document.getElementById("btnPoll");
+        btn.disabled = true;
+        btn.textContent = "Опрос…";
+        showError("");
+        try {
+          const res = await fetch("/api/poll?notify=true", { method: "POST" });
+          if (!res.ok) throw new Error("poll " + res.status);
+          pollInfo = await res.json();
+          await load();
+        } catch (e) {
+          showError(String(e.message || e));
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Опросить сейчас";
+        }
+      });
+
+      load();
     </script>
   </body>
 </html>
