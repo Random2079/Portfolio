@@ -1,0 +1,456 @@
+{
+  "source": "Downloads/Snowball Holdings.csv (2026-08-15)",
+  "imported_note": "symbols/names only, no qty/PnL",
+  "tickers": [
+    {
+      "id": "YDEX",
+      "name": "ЯНДЕКС",
+      "isin": "RU000A107T19",
+      "kind": "equity",
+      "category": "Информационные технологии",
+      "bond_type": null,
+      "search_query": "ЯНДЕКС"
+    },
+    {
+      "id": "X5",
+      "name": "КЦ ИКС 5",
+      "isin": "RU000A108X38",
+      "kind": "equity",
+      "category": "Товары повседневного спроса",
+      "bond_type": null,
+      "search_query": "КЦ ИКС 5"
+    },
+    {
+      "id": "TRNFP",
+      "name": "Транснефть акц.пр.",
+      "isin": "RU0009091573",
+      "kind": "equity",
+      "category": "Энергетика",
+      "bond_type": null,
+      "search_query": "Транснефть акц.пр."
+    },
+    {
+      "id": "TATNP",
+      "name": "Татнефть ап 3 вып.",
+      "isin": "RU0006944147",
+      "kind": "equity",
+      "category": "Энергетика",
+      "bond_type": null,
+      "search_query": "Татнефть ап 3 вып."
+    },
+    {
+      "id": "TATN",
+      "name": "Татнефть",
+      "isin": "RU0009033591",
+      "kind": "equity",
+      "category": "Энергетика",
+      "bond_type": null,
+      "search_query": "Татнефть"
+    },
+    {
+      "id": "T",
+      "name": "Т-Технологии",
+      "isin": "RU000A107UL4",
+      "kind": "equity",
+      "category": "Финансы",
+      "bond_type": null,
+      "search_query": "Т-Технологии"
+    },
+    {
+      "id": "SVCB",
+      "name": "Совкомбанк",
+      "isin": "RU000A0ZZAC4",
+      "kind": "equity",
+      "category": "Финансы",
+      "bond_type": null,
+      "search_query": "Совкомбанк"
+    },
+    {
+      "id": "SPBE",
+      "name": "СПБ Биржа",
+      "isin": "RU000A0JQ9P9",
+      "kind": "equity",
+      "category": "Финансы",
+      "bond_type": null,
+      "search_query": "СПБ Биржа"
+    },
+    {
+      "id": "SIBN",
+      "name": "Газпром нефть",
+      "isin": "RU0009062467",
+      "kind": "equity",
+      "category": "Энергетика",
+      "bond_type": null,
+      "search_query": "Газпром нефть"
+    },
+    {
+      "id": "SBER",
+      "name": "Сбербанк России",
+      "isin": "RU0009029540",
+      "kind": "equity",
+      "category": "Финансы",
+      "bond_type": null,
+      "search_query": "Сбербанк России"
+    },
+    {
+      "id": "RU000A10EF52",
+      "name": "Сбербанк 001Р-SBER52",
+      "isin": "RU000A10EF52",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Сбербанк 001Р-SBER52"
+    },
+    {
+      "id": "RU000A10DZU7",
+      "name": "А101 БО-001Р-02",
+      "isin": "RU000A10DZU7",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "А101 БО-001Р-02"
+    },
+    {
+      "id": "RU000A10DUQ6",
+      "name": "Балтийский лизинг ООО БО-П22",
+      "isin": "RU000A10DUQ6",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Балтийский лизинг ООО БО-П22"
+    },
+    {
+      "id": "RU000A10CZA1",
+      "name": "ГК Самолет БО-П20",
+      "isin": "RU000A10CZA1",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "ГК Самолет БО-П20"
+    },
+    {
+      "id": "RU000A10CLX3",
+      "name": "Уральская Сталь БО-001Р-05",
+      "isin": "RU000A10CLX3",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Уральская Сталь БО-001Р-05"
+    },
+    {
+      "id": "RU000A10CKY3",
+      "name": "Группа ЛСР БО 001Р-11",
+      "isin": "RU000A10CKY3",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Группа ЛСР БО 001Р-11"
+    },
+    {
+      "id": "RU000A10CC32",
+      "name": "Балтийский лизинг ООО БО-П19",
+      "isin": "RU000A10CC32",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Балтийский лизинг ООО БО-П19"
+    },
+    {
+      "id": "RU000A10C758",
+      "name": "ТД РКС 002Р-06",
+      "isin": "RU000A10C758",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "ТД РКС 002Р-06"
+    },
+    {
+      "id": "RU000A10C6W2",
+      "name": "Абрау – Дюрсо 002P-01",
+      "isin": "RU000A10C6W2",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Абрау – Дюрсо 002P-01"
+    },
+    {
+      "id": "RU000A10C618",
+      "name": "Магнит БО-004Р-08",
+      "isin": "RU000A10C618",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Магнит БО-004Р-08"
+    },
+    {
+      "id": "RU000A10B1N3",
+      "name": "Мобильные ТелеСистемы 002P-07",
+      "isin": "RU000A10B1N3",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Мобильные ТелеСистемы 002P-07"
+    },
+    {
+      "id": "RU000A10B0B0",
+      "name": "Группа ЛСР БО 001Р-10",
+      "isin": "RU000A10B0B0",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Группа ЛСР БО 001Р-10"
+    },
+    {
+      "id": "RU000A10AHA3",
+      "name": "ИКС 5 ФИНАНС 003P-07",
+      "isin": "RU000A10AHA3",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "ИКС 5 ФИНАНС 003P-07"
+    },
+    {
+      "id": "RU000A109874",
+      "name": "ГК Самолет БО-П15",
+      "isin": "RU000A109874",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "ГК Самолет БО-П15"
+    },
+    {
+      "id": "RU000A108C74",
+      "name": "РЕСО-Лизинг ООО БО-П-25",
+      "isin": "RU000A108C74",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "РЕСО-Лизинг ООО БО-П-25"
+    },
+    {
+      "id": "RU000A1082Y8",
+      "name": "Синара Транспортные Машины 1P4",
+      "isin": "RU000A1082Y8",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Синара Транспортные Машины 1P4"
+    },
+    {
+      "id": "RU000A107UU5",
+      "name": "Брусника 002Р-02",
+      "isin": "RU000A107UU5",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "Брусника 002Р-02"
+    },
+    {
+      "id": "RU000A107SA1",
+      "name": "ЛК Роделен БО 002P-02",
+      "isin": "RU000A107SA1",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "ЛК Роделен БО 002P-02"
+    },
+    {
+      "id": "RU000A107RZ0",
+      "name": "ГК Самолет БО-П13",
+      "isin": "RU000A107RZ0",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "ГК Самолет БО-П13"
+    },
+    {
+      "id": "RU000A107076",
+      "name": "ЛК Роделен БО 002P-01",
+      "isin": "RU000A107076",
+      "kind": "bond",
+      "category": "Облигации",
+      "bond_type": "Корпоративные",
+      "search_query": "ЛК Роделен БО 002P-01"
+    },
+    {
+      "id": "ROSN",
+      "name": "НК Роснефть",
+      "isin": "RU000A0J2Q06",
+      "kind": "equity",
+      "category": "Энергетика",
+      "bond_type": null,
+      "search_query": "НК Роснефть"
+    },
+    {
+      "id": "RAGR",
+      "name": "Русагро",
+      "isin": "RU000A0JQUZ6",
+      "kind": "equity",
+      "category": "Товары повседневного спроса",
+      "bond_type": null,
+      "search_query": "Русагро"
+    },
+    {
+      "id": "PLZL",
+      "name": "Полюс",
+      "isin": "RU000A0JNAA8",
+      "kind": "equity",
+      "category": "Материалы",
+      "bond_type": null,
+      "search_query": "Полюс"
+    },
+    {
+      "id": "OZON",
+      "name": "Озон",
+      "isin": "RU000A10CW95",
+      "kind": "equity",
+      "category": "Товары длительного потребления",
+      "bond_type": null,
+      "search_query": "Озон"
+    },
+    {
+      "id": "MTSS",
+      "name": "Мобильные ТелеСистемы",
+      "isin": "RU0007775219",
+      "kind": "equity",
+      "category": "Коммуникационные услуги",
+      "bond_type": null,
+      "search_query": "Мобильные ТелеСистемы"
+    },
+    {
+      "id": "MOEX",
+      "name": "Московская Биржа",
+      "isin": "RU000A0JR4A1",
+      "kind": "equity",
+      "category": "Финансы",
+      "bond_type": null,
+      "search_query": "Московская Биржа"
+    },
+    {
+      "id": "MDMG",
+      "name": "Мать и дитя",
+      "isin": "RU000A108KL3",
+      "kind": "equity",
+      "category": "Здравоохранение",
+      "bond_type": null,
+      "search_query": "Мать и дитя"
+    },
+    {
+      "id": "MAGN",
+      "name": "Магнитогорск.мет.комб",
+      "isin": "RU0009084396",
+      "kind": "equity",
+      "category": "Материалы",
+      "bond_type": null,
+      "search_query": "Магнитогорск.мет.комб"
+    },
+    {
+      "id": "LSNGP",
+      "name": "Россети Ленэнерго-ап",
+      "isin": "RU0009092134",
+      "kind": "equity",
+      "category": "Коммунальные услуги",
+      "bond_type": null,
+      "search_query": "Россети Ленэнерго-ап"
+    },
+    {
+      "id": "LKOH",
+      "name": "НК ЛУКОЙЛ",
+      "isin": "RU0009024277",
+      "kind": "equity",
+      "category": "Энергетика",
+      "bond_type": null,
+      "search_query": "НК ЛУКОЙЛ"
+    },
+    {
+      "id": "LEAS",
+      "name": "Европлан",
+      "isin": "RU000A0ZZFS9",
+      "kind": "equity",
+      "category": "Финансы",
+      "bond_type": null,
+      "search_query": "Европлан"
+    },
+    {
+      "id": "IRAO",
+      "name": "Интер РАО",
+      "isin": "RU000A0JPNM1",
+      "kind": "equity",
+      "category": "Коммунальные услуги",
+      "bond_type": null,
+      "search_query": "Интер РАО"
+    },
+    {
+      "id": "HNFG",
+      "name": "HENDERSON",
+      "isin": "RU000A106XF2",
+      "kind": "equity",
+      "category": "Товары длительного потребления",
+      "bond_type": null,
+      "search_query": "HENDERSON"
+    },
+    {
+      "id": "HEAD",
+      "name": "Хэдхантер",
+      "isin": "RU000A107662",
+      "kind": "equity",
+      "category": "Информационные технологии",
+      "bond_type": null,
+      "search_query": "Хэдхантер"
+    },
+    {
+      "id": "GOLD",
+      "name": "ВИМ Фонд Золото",
+      "isin": "RU000A101NZ2",
+      "kind": "equity",
+      "category": "ETF",
+      "bond_type": null,
+      "search_query": "ВИМ Фонд Золото"
+    },
+    {
+      "id": "GMKN",
+      "name": "ГМК Нор.Никель",
+      "isin": "RU0007288411",
+      "kind": "equity",
+      "category": "Материалы",
+      "bond_type": null,
+      "search_query": "ГМК Нор.Никель"
+    },
+    {
+      "id": "CHMF",
+      "name": "Северсталь",
+      "isin": "RU0009046510",
+      "kind": "equity",
+      "category": "Материалы",
+      "bond_type": null,
+      "search_query": "Северсталь"
+    },
+    {
+      "id": "BSPB",
+      "name": "Банк Санкт-Петербург",
+      "isin": "RU0009100945",
+      "kind": "equity",
+      "category": "Финансы",
+      "bond_type": null,
+      "search_query": "Банк Санкт-Петербург"
+    },
+    {
+      "id": "BELU",
+      "name": "НоваБев Групп",
+      "isin": "RU000A0HL5M1",
+      "kind": "equity",
+      "category": "Товары повседневного спроса",
+      "bond_type": null,
+      "search_query": "НоваБев Групп"
+    },
+    {
+      "id": "BCSR",
+      "name": "БПИФ БКС Индекс Росс рынка",
+      "isin": "RU000A10A0N6",
+      "kind": "equity",
+      "category": "ETF",
+      "bond_type": null,
+      "search_query": "БПИФ БКС Индекс Росс рынка"
+    }
+  ]
+}

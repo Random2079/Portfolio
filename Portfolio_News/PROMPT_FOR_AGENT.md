@@ -31,14 +31,15 @@
 
 ## Сделай по шагам
 
-1. Каркас: `README.md`, `requirements.txt`, `.env.example`, example-тикеры, `.gitignore`, пакет backend.
-2. SQLite-схема: тикеры, новости, дедуп по URL.
-3. Поллер + минимум 1–2 RU-адаптера источников; интерфейс единый.
-4. Toast при новой URL; повтор — skip.
-5. CLI: `once` / `watch` (или эквивалент через FastAPI lifespan / отдельный процесс — документируй).
-6. FastAPI API для ленты и тикеров.
-7. React (Vite): лента + тикеры на localhost.
-8. README: установка backend+frontend без облака.
+1. Каркас: `README.md`, `requirements.txt`, `.env.example`, `.gitignore`, пакет backend.
+2. Тикеры: не выдумывать SBER/GAZP. Канон — `%USERPROFILE%\Downloads\Snowball Holdings.csv` (свежий) и уже сгенерированный `tickers.example.json` (символы/имена/kind, **без** qty/PnL). Импортёр CSV → SQLite.
+3. SQLite-схема: тикеры, новости, дедуп по URL.
+4. Поллер + минимум 1–2 RU-адаптера источников; интерфейс единый. Bonds → поиск по `search_query`/эмитенту.
+5. Toast при новой URL; повтор — skip.
+6. CLI: `once` / `watch` (или эквивалент через FastAPI lifespan / отдельный процесс — документируй).
+7. FastAPI API для ленты и тикеров.
+8. React (Vite): лента + тикеры на localhost.
+9. README: установка backend+frontend без облака.
 
 ## Запреты
 

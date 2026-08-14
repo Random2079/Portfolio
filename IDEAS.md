@@ -16,7 +16,7 @@
 
 - **Один активный проект за раз.** Не начинать второй трек «заодно».
 
-- Сейчас один фокус (когда скажут кодить): **IDEA-003 Новостник портфеля** — план актуален (toast + FastAPI/SQLite/React); код по «делаем IDEA-003». IDEA-013 голос закрыт пока. TTS (002) — жить.
+- Сейчас один фокус: **IDEA-003 Новостник** — MVP в `Portfolio_News/` (serve + toast). IDEA-013 голос закрыт пока. TTS (002) — жить.
 
 - **Не трогать параллельно без команды:** IDEA-005 Discord mute, IDEA-014 VPN, IDEA-001 агент, IDEA-016 плеер.
 
@@ -92,11 +92,11 @@
 
 - Дата: 2026-07-18
 
-- Статус: запланировано (2026-08-15) — план обновлён: toast + FastAPI/SQLite/React; код по «делаем IDEA-003»
+- Статус: в работе (2026-08-15) — MVP код в `Portfolio_News/` (toast + FastAPI/SQLite/React CDN + Vite-заготовка)
 
-- Описание: Тикеры → RU-новости (Smart-Lab, эмитенты, Investing и т.п.) → дедуп URL в SQLite → Windows toast + React на localhost. Не инвест-советы. MAX/VK/TG пас. Docker позже.
+- Описание: Тикеры → RU-новости (Smart-Lab, Google News RU) → дедуп URL в SQLite → Windows toast + React на localhost. Не инвест-советы. MAX/VK/TG пас. Docker позже. Список бумаг — из Snowball CSV / `tickers.example.json`.
 
-- Следующие шаги: «делаем IDEA-003» → [`Portfolio_News/PROMPT_FOR_AGENT.md`](Portfolio_News/PROMPT_FOR_AGENT.md). План: [`.cursor/plans/IDEA-003-portfolio-news.md`](.cursor/plans/IDEA-003-portfolio-news.md).
+- Следующие шаги: `python -m portfolio_news serve` → UI на :8765; при желании Node для Vite; Investing-адаптер / Docker позже. План: [`.cursor/plans/IDEA-003-portfolio-news.md`](.cursor/plans/IDEA-003-portfolio-news.md).
 
 
 
