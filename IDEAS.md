@@ -16,7 +16,7 @@
 
 - **Один активный проект за раз.** Не начинать второй трек «заодно».
 
-- Сейчас один фокус (когда скажут кодить): **IDEA-003 Новостник портфеля** — план + промпт готовы; код не пилить без «делаем IDEA-003». IDEA-013 голос закрыт пока. TTS (002) — жить.
+- Сейчас один фокус (когда скажут кодить): **IDEA-003 Новостник портфеля** — план актуален (toast + FastAPI/SQLite/React); код по «делаем IDEA-003». IDEA-013 голос закрыт пока. TTS (002) — жить.
 
 - **Не трогать параллельно без команды:** IDEA-005 Discord mute, IDEA-014 VPN, IDEA-001 агент, IDEA-016 плеер.
 
@@ -92,11 +92,11 @@
 
 - Дата: 2026-07-18
 
-- Статус: запланировано (2026-08-15) — промпт и план готовы; код по команде «делаем IDEA-003»
+- Статус: запланировано (2026-08-15) — план обновлён: toast + FastAPI/SQLite/React; код по «делаем IDEA-003»
 
-- Описание: Следит за набором тикеров в портфеле, ищет новости и шлёт уведомления (Telegram / toast). Не инвест-советы.
+- Описание: Тикеры → RU-новости (Smart-Lab, эмитенты, Investing и т.п.) → дедуп URL в SQLite → Windows toast + React на localhost. Не инвест-советы. MAX/VK/TG пас. Docker позже.
 
-- Следующие шаги: сказать «делаем IDEA-003» → агент читает [`Portfolio_News/PROMPT_FOR_AGENT.md`](Portfolio_News/PROMPT_FOR_AGENT.md). План: [`.cursor/plans/IDEA-003-portfolio-news.md`](.cursor/plans/IDEA-003-portfolio-news.md).
+- Следующие шаги: «делаем IDEA-003» → [`Portfolio_News/PROMPT_FOR_AGENT.md`](Portfolio_News/PROMPT_FOR_AGENT.md). План: [`.cursor/plans/IDEA-003-portfolio-news.md`](.cursor/plans/IDEA-003-portfolio-news.md).
 
 
 
