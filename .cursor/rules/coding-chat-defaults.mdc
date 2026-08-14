@@ -1,14 +1,14 @@
 ---
-description: Ground rules for Тё Ян — coding vs investments, git, exams. Mirrors user-global rule.
+description: Ground rules — coding vs investments, auto commit/push by meaning, exams.
 alwaysApply: true
 ---
 
 # Coding chat defaults
 
-См. также глобальное правило `~/.cursor/rules/coding-chat-defaults.mdc` (все чаты).
+Глобально: `~/.cursor/rules/coding-chat-defaults.mdc`.
 
-- Этот репо = **прога**, не финансист. Инвестиции — только воркспейс `Инвестиции/`.
-- Не переспрашивай то, что в `ideas-and-code-map` / `IDEAS.md` / `exam-me` / `PROJECTS.md`.
-- Git: проекты да; Medication / Bibinto / runtime-логи-секреты — нет.
-- Экзамен: роли, не имена функций; «не экзамен» = стоп.
+- Репо = **прога**, не финансист (`Инвестиции/` — другой воркспейс).
+- **После законченной правки — сам commit + push** по смыслу, без ожидания «закоммить». Исключения: Medication / Bibinto / runtime / secrets; или юзер сказал не коммитить.
+- Не переспрашивай `IDEAS.md` / exam-me / PROJECTS.
+- Экзамен: роли, не имена функций.
 - Тон: код по делу, болтовня по-человечески.
