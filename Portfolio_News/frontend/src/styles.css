@@ -1,13 +1,15 @@
 :root {
-  color-scheme: dark;
-  --bg: #0f1419;
-  --panel: #1a222c;
-  --text: #e7ecf1;
-  --muted: #8b9aab;
-  --accent: #3d9cf0;
-  --border: #2a3542;
-  --equity: #3d9cf0;
-  --bond: #c9a227;
+  color-scheme: light;
+  --bg: #f4f7fb;
+  --panel: #ffffff;
+  --text: #1a2330;
+  --muted: #5c6b7a;
+  --accent: #1a6fd4;
+  --border: #d5dee8;
+  --equity: #1a6fd4;
+  --bond: #9a6b12;
+  --hover: #eaf1f8;
+  --card: #f8fafc;
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 
@@ -17,7 +19,7 @@
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 600px at 10% -10%, #1a2a3a 0%, var(--bg) 55%);
+  background: linear-gradient(165deg, #e8f0f8 0%, var(--bg) 40%, #eef3f8 100%);
   color: var(--text);
   min-height: 100vh;
 }
@@ -56,7 +58,7 @@ header p {
 
 button {
   background: var(--accent);
-  color: #041018;
+  color: #fff;
   border: none;
   border-radius: 8px;
   padding: 0.45rem 0.9rem;
@@ -70,7 +72,7 @@ button:disabled {
 }
 
 button.secondary {
-  background: transparent;
+  background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
 }
@@ -88,10 +90,11 @@ button.secondary {
 }
 
 .panel {
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 0.75rem;
+  box-shadow: 0 1px 2px rgb(26 35 48 / 4%);
 }
 
 .panel h2 {
@@ -127,7 +130,7 @@ button.secondary {
 
 .ticker-list li button:hover,
 .ticker-list li button.active {
-  background: #243140;
+  background: var(--hover);
 }
 
 .ticker-list .id {
@@ -151,12 +154,12 @@ button.secondary {
 }
 
 .badge.equity {
-  background: color-mix(in srgb, var(--equity) 25%, transparent);
+  background: color-mix(in srgb, var(--equity) 18%, white);
   color: var(--equity);
 }
 
 .badge.bond {
-  background: color-mix(in srgb, var(--bond) 25%, transparent);
+  background: color-mix(in srgb, var(--bond) 18%, white);
   color: var(--bond);
 }
 
@@ -173,7 +176,7 @@ button.secondary {
   padding: 0.75rem;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: #121920;
+  background: var(--card);
 }
 
 .news-item a {
@@ -196,7 +199,7 @@ button.secondary {
 }
 
 .error {
-  color: #ff8f8f;
+  color: #b42318;
   margin-bottom: 0.75rem;
 }
 

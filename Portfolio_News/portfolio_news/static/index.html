@@ -6,21 +6,23 @@
     <title>Portfolio News</title>
     <style>
       :root {
-        color-scheme: dark;
-        --bg: #0f1419;
-        --panel: #1a222c;
-        --text: #e7ecf1;
-        --muted: #8b9aab;
-        --accent: #3d9cf0;
-        --border: #2a3542;
-        --equity: #3d9cf0;
-        --bond: #c9a227;
+        color-scheme: light;
+        --bg: #f4f7fb;
+        --panel: #ffffff;
+        --text: #1a2330;
+        --muted: #5c6b7a;
+        --accent: #1a6fd4;
+        --border: #d5dee8;
+        --equity: #1a6fd4;
+        --bond: #9a6b12;
+        --hover: #eaf1f8;
+        --card: #f8fafc;
         font-family: "Segoe UI", system-ui, sans-serif;
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        background: radial-gradient(1200px 600px at 10% -10%, #1a2a3a 0%, var(--bg) 55%);
+        background: linear-gradient(165deg, #e8f0f8 0%, var(--bg) 40%, #eef3f8 100%);
         color: var(--text);
         min-height: 100vh;
       }
@@ -33,12 +35,12 @@
       header p { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.9rem; }
       .actions { display: flex; gap: 0.5rem; }
       button {
-        background: var(--accent); color: #041018; border: none; border-radius: 8px;
+        background: var(--accent); color: #fff; border: none; border-radius: 8px;
         padding: 0.45rem 0.9rem; font-weight: 600; cursor: pointer;
       }
       button:disabled { opacity: 0.5; }
       button.secondary {
-        background: transparent; color: var(--text); border: 1px solid var(--border);
+        background: var(--panel); color: var(--text); border: 1px solid var(--border);
       }
       .layout { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; }
       @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
@@ -56,7 +58,7 @@
         border: none; border-radius: 8px; padding: 0.5rem 0.55rem; font-weight: 500;
         display: flex; flex-direction: column; gap: 0.15rem;
       }
-      .ticker-list li button:hover, .ticker-list li button.active { background: #243140; }
+      .ticker-list li button:hover, .ticker-list li button.active { background: var(--hover); }
       .id { font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; }
       .name { color: var(--muted); font-size: 0.75rem; }
       .badge {
@@ -67,12 +69,12 @@
       .badge.bond { background: color-mix(in srgb, var(--bond) 25%, transparent); color: var(--bond); }
       .news-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
       .news-item {
-        padding: 0.75rem; border-radius: 10px; border: 1px solid var(--border); background: #121920;
+        padding: 0.75rem; border-radius: 10px; border: 1px solid var(--border); background: var(--card);
       }
       .news-item a { color: var(--text); text-decoration: none; font-weight: 600; }
       .news-item a:hover { color: var(--accent); }
       .meta { margin-top: 0.35rem; color: var(--muted); font-size: 0.8rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
-      .error { color: #ff8f8f; margin-bottom: 0.75rem; }
+      .error { color: #b42318; margin-bottom: 0.75rem; }
       .empty { color: var(--muted); padding: 1rem 0.25rem; }
     </style>
   </head>
