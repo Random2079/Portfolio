@@ -141,9 +141,13 @@
           <p id="subtitle">Загрузка…</p>
         </div>
         <div class="actions">
-          <button type="button" class="secondary" id="btnRefresh">Обновить</button>
+          <button type="button" class="secondary" id="btnRefresh" title="Только перечитать уже сохранённые новости из базы, без интернета">
+            Перечитать ленту
+          </button>
           <button type="button" class="secondary" id="btnMetrics">Метрики MOEX</button>
-          <button type="button" id="btnPoll">Опросить сейчас</button>
+          <button type="button" id="btnPoll" title="Сходить в RSS и искать свежие новости по выбранному scope">
+            Искать новости
+          </button>
         </div>
       </header>
 
@@ -226,16 +230,22 @@
         return params;
       }
 
+      function pollScopeLabel() {
+        if (selected) return "тикер " + selected + " (1)";
+        const n = filteredTickers().length;
+        if (kindFilter === "equity" && sectorFilter) return "сектор «" + sectorFilter + "» (" + n + ")";
+        if (kindFilter !== "all") return KIND_LABEL[kindFilter].toLowerCase() + " (" + n + ")";
+        return "весь портфель (" + n + ")";
+      }
+
       function updateScopeHint() {
         const el = document.getElementById("pollScopeHint");
-        const n = selected ? 1 : filteredTickers().length;
-        if (selected) {
-          el.textContent = "Опрос: только " + selected;
-        } else if (kindFilter === "all" && !sectorFilter) {
-          el.textContent = "Опрос: все " + n + " бумаг (долго). Лучше выбрать акции/сектор/тикер.";
-        } else {
-          el.textContent = "Опрос: текущий фильтр · " + n + " бумаг";
-        }
+        const btn = document.getElementById("btnPoll");
+        el.textContent =
+          "«Искать новости» = RSS по: " + pollScopeLabel() +
+          ". «Перечитать ленту» = только база, без опроса источников." +
+          (selected ? " (клик по тикеру ещё раз — снять выделение и опросить сектор/фильтр)" : "");
+        if (!btn.disabled) btn.textContent = "Искать: " + pollScopeLabel();
       }
 
       function equitySectors() {
@@ -356,7 +366,7 @@
         else title.textContent = "Лента";
         ul.innerHTML = "";
         if (!items.length) {
-          ul.innerHTML = '<li class="empty">Пока пусто. Нажми «Опросить сейчас» (по текущему фильтру).</li>';
+          ul.innerHTML = '<li class="empty">Пока пусто. Жми «Искать новости» по выбранному тикеру/сектору.</li>';
           return;
         }
         for (const n of items) {
@@ -381,7 +391,9 @@
         const fund = tickers.filter((t) => t.kind === "fund").length;
         let text =
           tickers.length + " бумаг · " + equity + " акций · " + bond + " облигаций · " + fund + " фондов";
-        if (pollInfo && pollInfo.inserted != null) text += " · last poll +" + pollInfo.inserted;
+        if (pollInfo && pollInfo.inserted != null && pollInfo.inserted !== undefined) {
+          text += " · last poll +" + pollInfo.inserted;
+        }
         document.getElementById("subtitle").textContent = text;
       }
 
@@ -488,17 +500,18 @@
         setProgress(st.running || (st.done && label), label, ratio);
         if (st.running) {
           btn.disabled = true;
-          btn.textContent = "Опрос…";
+          btn.textContent = "Ищу… " + (st.ticker_id || "");
           return;
         }
         btn.disabled = false;
-        btn.textContent = "Опросить сейчас";
+        btn.textContent = "Искать: " + pollScopeLabel();
         if (pollTimer) {
           clearInterval(pollTimer);
           pollTimer = null;
         }
         if (st.done) {
-          pollInfo = st.result || { inserted: st.inserted };
+          const ins = st.result && st.result.inserted != null ? st.result.inserted : st.inserted;
+          pollInfo = { inserted: typeof ins === "number" ? ins : 0 };
           setTimeout(() => setProgress(false, "", 0), 1500);
           await load();
         }
@@ -512,16 +525,15 @@
         const btn = document.getElementById("btnPoll");
         const n = selected ? 1 : filteredTickers().length;
         if (!selected && kindFilter === "all" && !sectorFilter && n > 20) {
-          if (!confirm("Опросить все " + n + " бумаг? Это долго. Лучше выбрать фильтр.")) return;
+          if (!confirm("Искать новости по всем " + n + " бумагам? Долго. Лучше сектор/тикер.")) return;
         }
         btn.disabled = true;
-        btn.textContent = "Опрос…";
+        btn.textContent = "Ищу…";
         showError("");
-        setProgress(true, "Старт…", 0);
+        setProgress(true, "Старт: " + pollScopeLabel(), 0);
         try {
           const q = pollQuery();
           const res = await fetch("/api/poll?" + q.toString(), { method: "POST" });
-          // 409 = уже идёт опрос — просто подключаемся к прогрессу, не орём
           if (res.status === 409) {
             showError("");
             setProgress(true, "Уже идёт опрос — следим…", 0);
@@ -542,7 +554,7 @@
         } catch (e) {
           showError(String(e.message || e));
           btn.disabled = false;
-          btn.textContent = "Опросить сейчас";
+          btn.textContent = "Искать: " + pollScopeLabel();
           setProgress(false, "", 0);
         }
       });
