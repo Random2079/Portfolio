@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
 from portfolio_news.config import get_settings
@@ -22,8 +22,7 @@ class PollJobStatus:
     result: Optional[dict[str, Any]] = None
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        return d
+        return asdict(self)
 
 
 _lock = threading.Lock()
@@ -32,6 +31,7 @@ _thread: threading.Thread | None = None
 
 
 def get_poll_status() -> dict[str, Any]:
+    _reap_dead_thread()
     with _lock:
         return _status.to_dict()
 
@@ -40,6 +40,18 @@ def _set_status(**kwargs: Any) -> None:
     with _lock:
         for k, v in kwargs.items():
             setattr(_status, k, v)
+
+
+def _reap_dead_thread() -> None:
+    """If worker died without clearing running — unlock."""
+    global _thread
+    with _lock:
+        if _status.running and _thread is not None and not _thread.is_alive():
+            _status.running = False
+            _status.done = True
+            if not _status.error:
+                _status.error = "poll_worker_died"
+            _thread = None
 
 
 def _on_progress(p: PollProgress) -> None:
@@ -62,12 +74,29 @@ def start_poll_job(
     category: Optional[str] = None,
     limit: int = 0,
     notify: str = "digest",
+    force: bool = False,
 ) -> dict[str, Any]:
-    """Start background poll; returns immediately. Rejects if already running."""
+    """Start background poll; returns immediately. Rejects if already running unless force."""
     global _thread
+    _reap_dead_thread()
+
     with _lock:
-        if _status.running:
-            return {"ok": False, "error": "poll_already_running", "status": _status.to_dict()}
+        if _status.running and not force:
+            return {
+                "ok": False,
+                "error": "poll_already_running",
+                "status": _status.to_dict(),
+            }
+        # force: mark old as superseded; cannot kill mid-request cleanly, but allow new start
+        # only if previous thread finished or force after reap
+        if _status.running and force and _thread is not None and _thread.is_alive():
+            return {
+                "ok": False,
+                "error": "poll_already_running",
+                "status": _status.to_dict(),
+                "hint": "Дождись конца текущего опроса или обнови статус",
+            }
+
         _status.running = True
         _status.current = 0
         _status.total = 0

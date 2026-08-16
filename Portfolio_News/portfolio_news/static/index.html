@@ -521,8 +521,10 @@
         try {
           const q = pollQuery();
           const res = await fetch("/api/poll?" + q.toString(), { method: "POST" });
+          // 409 = уже идёт опрос — просто подключаемся к прогрессу, не орём
           if (res.status === 409) {
-            showError("Опрос уже идёт");
+            showError("");
+            setProgress(true, "Уже идёт опрос — следим…", 0);
           } else if (!res.ok) {
             let detail = "poll " + res.status;
             try {
@@ -536,6 +538,7 @@
             watchPollStatus().catch((e) => showError(String(e.message || e)));
           }, 500);
           await watchPollStatus();
+          return;
         } catch (e) {
           showError(String(e.message || e));
           btn.disabled = false;
