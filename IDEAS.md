@@ -92,13 +92,15 @@
 
 - Дата: 2026-07-18
 
-- Статус: в работе (2026-08-16) — прототип живой, **не готово как продукт**
+- Статус: в работе (2026-08-16) — фаза 1–2 дороботок в коде; продукт не закрыт
 
-- Описание: Тикеры → RU-новости → дедуп URL в SQLite → Windows toast + UI на localhost. Не инвест-советы. MAX/VK/TG пас. Docker позже. Список бумаг — Snowball CSV / `tickers.example.json`.
+- Описание: Тикеры → RU-новости → дедуп URL → digest-toast + UI. Метрики MOEX. Не инвест-советы.
 
-- Сделано (2026-08-15): FastAPI + SQLite; Google News RU + Smart-Lab; `once`/`watch`/`serve`; toast; UI vanilla JS (CDN React не взлетел); фильтры Все/Акции/Облигации/Фонды + сектора акций; светлая тема; README.
+- Сделано (2026-08-15): каркас FastAPI/SQLite/UI/фильтры.
 
-- Следующие шаги: чистка мусора в ленте; Investing/эмитенты; авто-watch; телефон (ntfy и т.п.), когда канал живой. План: [`.cursor/plans/IDEA-003-portfolio-news.md`](.cursor/plans/IDEA-003-portfolio-news.md).
+- Сделано (2026-08-16): опрос по фильтру; прогресс poll; digest-toast; `/api/metrics` + вкладка MOEX.
+
+- Следующие шаги: ИИ-чистка шума; авто-watch; телефон; Investing/эмитенты. План: [`.cursor/plans/IDEA-003-portfolio-news.md`](.cursor/plans/IDEA-003-portfolio-news.md).
 
 
 

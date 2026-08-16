@@ -108,6 +108,29 @@
       .meta { margin-top: 0.35rem; color: var(--muted); font-size: 0.8rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
       .error { color: #b42318; margin-bottom: 0.75rem; }
       .empty { color: var(--muted); padding: 1rem 0.25rem; }
+      .progress {
+        display: none; margin-bottom: 0.85rem; padding: 0.65rem 0.85rem;
+        border: 1px solid var(--border); border-radius: 10px; background: #fff;
+      }
+      .progress.visible { display: block; }
+      .progress .bar {
+        height: 8px; border-radius: 999px; background: #e5edf5; overflow: hidden; margin-top: 0.4rem;
+      }
+      .progress .bar > span {
+        display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.2s;
+      }
+      .progress .label { font-size: 0.85rem; color: var(--muted); }
+      .view-tabs { display: flex; gap: 0.4rem; margin-bottom: 0.75rem; }
+      .metrics-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+      .metrics-table th, .metrics-table td {
+        text-align: left; padding: 0.45rem 0.35rem; border-bottom: 1px solid var(--border);
+      }
+      .metrics-table th { color: var(--muted); font-weight: 600; }
+      .chg-up { color: #0f7a5a; }
+      .chg-down { color: #b42318; }
+      .warn-all {
+        font-size: 0.8rem; color: var(--muted); margin: 0 0 0.75rem;
+      }
     </style>
   </head>
   <body>
@@ -119,15 +142,25 @@
         </div>
         <div class="actions">
           <button type="button" class="secondary" id="btnRefresh">Обновить</button>
+          <button type="button" class="secondary" id="btnMetrics">Метрики MOEX</button>
           <button type="button" id="btnPoll">Опросить сейчас</button>
         </div>
       </header>
 
       <div class="filters" id="kindFilters" role="tablist" aria-label="Тип бумаг"></div>
       <div class="sectors" id="sectorFilters" hidden></div>
+      <p class="warn-all" id="pollScopeHint"></p>
+      <div class="progress" id="progressBox">
+        <div class="label" id="progressLabel">Опрос…</div>
+        <div class="bar"><span id="progressBar"></span></div>
+      </div>
 
       <div id="error" class="error" hidden></div>
-      <div class="layout">
+      <div class="view-tabs">
+        <button type="button" class="chip active-filter" id="tabNews">Лента</button>
+        <button type="button" class="chip" id="tabMetrics">Метрики</button>
+      </div>
+      <div class="layout" id="newsLayout">
         <aside class="panel">
           <h2 id="tickersHeading">Тикеры</h2>
           <ul class="ticker-list" id="tickers"></ul>
@@ -137,17 +170,23 @@
           <ul class="news-list" id="news"></ul>
         </main>
       </div>
+      <div class="panel" id="metricsLayout" hidden>
+        <h2>Метрики (MOEX ISS)</h2>
+        <div id="metricsBody" class="empty">Нажми «Метрики MOEX» — подтянем цены по текущему фильтру.</div>
+      </div>
     </div>
     <script>
       const KIND_LABEL = { all: "Все", equity: "Акции", bond: "Облигации", fund: "Фонды" };
       const KIND_BADGE = { equity: "акция", bond: "облигация", fund: "фонд" };
 
       let selected = null;
-      let kindFilter = "all"; // all | equity | bond | fund
-      let sectorFilter = null; // null = all sectors (only for equity)
+      let kindFilter = "all";
+      let sectorFilter = null;
       let tickers = [];
       let allNews = [];
       let pollInfo = null;
+      let pollTimer = null;
+      let view = "news"; // news | metrics
 
       function showError(msg) {
         const el = document.getElementById("error");
@@ -168,13 +207,35 @@
 
       function filteredTickers() {
         let list = tickers;
-        if (kindFilter !== "all") {
-          list = list.filter((t) => t.kind === kindFilter);
-        }
+        if (kindFilter !== "all") list = list.filter((t) => t.kind === kindFilter);
         if (kindFilter === "equity" && sectorFilter) {
           list = list.filter((t) => (t.category || "") === sectorFilter);
         }
         return list;
+      }
+
+      function pollQuery() {
+        const params = new URLSearchParams();
+        params.set("notify", "digest");
+        if (selected) {
+          params.set("ticker_id", selected);
+          return params;
+        }
+        if (kindFilter !== "all") params.set("kind", kindFilter);
+        if (kindFilter === "equity" && sectorFilter) params.set("category", sectorFilter);
+        return params;
+      }
+
+      function updateScopeHint() {
+        const el = document.getElementById("pollScopeHint");
+        const n = selected ? 1 : filteredTickers().length;
+        if (selected) {
+          el.textContent = "Опрос: только " + selected;
+        } else if (kindFilter === "all" && !sectorFilter) {
+          el.textContent = "Опрос: все " + n + " бумаг (долго). Лучше выбрать акции/сектор/тикер.";
+        } else {
+          el.textContent = "Опрос: текущий фильтр · " + n + " бумаг";
+        }
       }
 
       function equitySectors() {
@@ -185,14 +246,21 @@
         return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
       }
 
+      function setProgress(visible, label, ratio) {
+        const box = document.getElementById("progressBox");
+        const bar = document.getElementById("progressBar");
+        const lab = document.getElementById("progressLabel");
+        box.classList.toggle("visible", !!visible);
+        lab.textContent = label || "";
+        bar.style.width = Math.max(0, Math.min(100, (ratio || 0) * 100)) + "%";
+      }
+
       function renderKindFilters() {
         const host = document.getElementById("kindFilters");
         host.innerHTML = "";
         for (const key of ["all", "equity", "bond", "fund"]) {
           const count =
-            key === "all"
-              ? tickers.length
-              : tickers.filter((t) => t.kind === key).length;
+            key === "all" ? tickers.length : tickers.filter((t) => t.kind === key).length;
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "chip" + (kindFilter === key ? " active-filter" : "");
@@ -200,9 +268,7 @@
           btn.addEventListener("click", () => {
             kindFilter = key;
             sectorFilter = null;
-            if (selected && !filteredTickers().some((t) => t.id === selected)) {
-              selected = null;
-            }
+            if (selected && !filteredTickers().some((t) => t.id === selected)) selected = null;
             renderAll();
           });
           host.appendChild(btn);
@@ -218,7 +284,6 @@
         }
         host.hidden = false;
         host.innerHTML = "";
-        const sectors = equitySectors();
         const allBtn = document.createElement("button");
         allBtn.type = "button";
         allBtn.className = "chip" + (!sectorFilter ? " active-filter" : "");
@@ -229,7 +294,7 @@
           renderAll();
         });
         host.appendChild(allBtn);
-        for (const sec of sectors) {
+        for (const sec of equitySectors()) {
           const n = tickers.filter((t) => t.kind === "equity" && t.category === sec).length;
           const btn = document.createElement("button");
           btn.type = "button";
@@ -247,8 +312,7 @@
       function renderTickers() {
         const ul = document.getElementById("tickers");
         const list = filteredTickers();
-        document.getElementById("tickersHeading").textContent =
-          "Тикеры · " + list.length;
+        document.getElementById("tickersHeading").textContent = "Тикеры · " + list.length;
         ul.innerHTML = "";
         if (!list.length) {
           ul.innerHTML = '<li class="empty">В этом фильтре пусто.</li>';
@@ -259,13 +323,13 @@
           const btn = document.createElement("button");
           btn.type = "button";
           if (selected === t.id) btn.classList.add("active");
-          const badge = KIND_BADGE[t.kind] || t.kind;
           btn.innerHTML =
-            '<span class="badge ' + t.kind + '">' + badge + "</span>" +
+            '<span class="badge ' + t.kind + '">' + (KIND_BADGE[t.kind] || t.kind) + "</span>" +
             '<span class="id">' + t.id + "</span>" +
-            '<span class="name">' + (t.name || "") + (t.kind === "equity" && t.category ? " · " + t.category : "") + "</span>";
+            '<span class="name">' + (t.name || "") +
+            (t.kind === "equity" && t.category ? " · " + t.category : "") + "</span>";
           btn.addEventListener("click", () => {
-            selected = t.id;
+            selected = selected === t.id ? null : t.id;
             renderAll();
           });
           li.appendChild(btn);
@@ -274,9 +338,7 @@
       }
 
       function visibleNews() {
-        if (selected) {
-          return allNews.filter((n) => n.ticker_id === selected);
-        }
+        if (selected) return allNews.filter((n) => n.ticker_id === selected);
         const ids = new Set(filteredTickers().map((t) => t.id));
         if (kindFilter === "all" && !sectorFilter) return allNews;
         return allNews.filter((n) => ids.has(n.ticker_id));
@@ -286,18 +348,15 @@
         const items = visibleNews();
         const ul = document.getElementById("news");
         const title = document.getElementById("newsTitle");
-        if (selected) {
-          title.textContent = "Новости · " + selected;
-        } else if (kindFilter === "equity" && sectorFilter) {
+        if (selected) title.textContent = "Новости · " + selected;
+        else if (kindFilter === "equity" && sectorFilter)
           title.textContent = "Лента · акции · " + sectorFilter;
-        } else if (kindFilter !== "all") {
+        else if (kindFilter !== "all")
           title.textContent = "Лента · " + KIND_LABEL[kindFilter].toLowerCase();
-        } else {
-          title.textContent = "Лента";
-        }
+        else title.textContent = "Лента";
         ul.innerHTML = "";
         if (!items.length) {
-          ul.innerHTML = '<li class="empty">Пока пусто. Нажми «Опросить сейчас» или смени фильтр.</li>';
+          ul.innerHTML = '<li class="empty">Пока пусто. Нажми «Опросить сейчас» (по текущему фильтру).</li>';
           return;
         }
         for (const n of items) {
@@ -322,8 +381,48 @@
         const fund = tickers.filter((t) => t.kind === "fund").length;
         let text =
           tickers.length + " бумаг · " + equity + " акций · " + bond + " облигаций · " + fund + " фондов";
-        if (pollInfo) text += " · last poll +" + pollInfo.inserted;
+        if (pollInfo && pollInfo.inserted != null) text += " · last poll +" + pollInfo.inserted;
         document.getElementById("subtitle").textContent = text;
+      }
+
+      function setView(next) {
+        view = next;
+        document.getElementById("newsLayout").hidden = view !== "news";
+        document.getElementById("metricsLayout").hidden = view !== "metrics";
+        document.getElementById("tabNews").classList.toggle("active-filter", view === "news");
+        document.getElementById("tabMetrics").classList.toggle("active-filter", view === "metrics");
+      }
+
+      function fmtNum(v, digits) {
+        if (v == null || Number.isNaN(v)) return "—";
+        return Number(v).toFixed(digits);
+      }
+
+      function renderMetrics(rows) {
+        const host = document.getElementById("metricsBody");
+        if (!rows || !rows.length) {
+          host.className = "empty";
+          host.textContent = "Нет данных по фильтру.";
+          return;
+        }
+        host.className = "";
+        let html =
+          "<table class='metrics-table'><thead><tr>" +
+          "<th>Тикер</th><th>Цена</th><th>Δ%</th><th>Див%</th><th>Купон%</th><th>Board</th>" +
+          "</tr></thead><tbody>";
+        for (const m of rows) {
+          const chgClass = m.changepct > 0 ? "chg-up" : m.changepct < 0 ? "chg-down" : "";
+          html +=
+            "<tr><td><strong>" + m.ticker_id + "</strong><br><span class='name'>" + (m.name || "") +
+            "</span></td><td>" + fmtNum(m.last, 2) +
+            "</td><td class='" + chgClass + "'>" + fmtNum(m.changepct, 2) +
+            "</td><td>" + fmtNum(m.div_yield, 2) +
+            "</td><td>" + fmtNum(m.coupon_percent, 2) +
+            "</td><td>" + (m.board || "—") + (m.error ? " !" : "") +
+            "</td></tr>";
+        }
+        html += "</tbody></table>";
+        host.innerHTML = html;
       }
 
       function renderAll() {
@@ -332,6 +431,7 @@
         renderTickers();
         renderNews();
         renderSubtitle();
+        updateScopeHint();
       }
 
       async function load() {
@@ -351,22 +451,91 @@
         }
       }
 
+      async function loadMetrics() {
+        showError("");
+        setView("metrics");
+        const host = document.getElementById("metricsBody");
+        host.className = "empty";
+        host.textContent = "Грузим MOEX…";
+        try {
+          const params = new URLSearchParams();
+          if (selected) params.set("ticker_id", selected);
+          else {
+            if (kindFilter !== "all") params.set("kind", kindFilter);
+            if (kindFilter === "equity" && sectorFilter) params.set("category", sectorFilter);
+          }
+          // Cap "all" to avoid 50 slow ISS calls in one click
+          if (!selected && kindFilter === "all" && !sectorFilter) params.set("limit", "15");
+          const rows = await getJson("/api/metrics?" + params.toString());
+          renderMetrics(rows);
+        } catch (e) {
+          showError(String(e.message || e));
+          host.textContent = "Ошибка метрик.";
+        }
+      }
+
+      async function watchPollStatus() {
+        const btn = document.getElementById("btnPoll");
+        const st = await getJson("/api/poll/status");
+        const total = st.total || 0;
+        const cur = st.current || 0;
+        const ratio = total ? cur / total : st.running ? 0.05 : 1;
+        const label = st.running
+          ? "Опрос " + (st.ticker_id || "…") + " · " + cur + "/" + total + " · +" + (st.inserted || 0)
+          : st.done
+            ? "Готово · +" + (st.inserted || 0)
+            : "";
+        setProgress(st.running || (st.done && label), label, ratio);
+        if (st.running) {
+          btn.disabled = true;
+          btn.textContent = "Опрос…";
+          return;
+        }
+        btn.disabled = false;
+        btn.textContent = "Опросить сейчас";
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        if (st.done) {
+          pollInfo = st.result || { inserted: st.inserted };
+          setTimeout(() => setProgress(false, "", 0), 1500);
+          await load();
+        }
+      }
+
       document.getElementById("btnRefresh").addEventListener("click", () => load());
+      document.getElementById("btnMetrics").addEventListener("click", () => loadMetrics());
+      document.getElementById("tabNews").addEventListener("click", () => setView("news"));
+      document.getElementById("tabMetrics").addEventListener("click", () => loadMetrics());
       document.getElementById("btnPoll").addEventListener("click", async () => {
         const btn = document.getElementById("btnPoll");
+        const n = selected ? 1 : filteredTickers().length;
+        if (!selected && kindFilter === "all" && !sectorFilter && n > 20) {
+          if (!confirm("Опросить все " + n + " бумаг? Это долго. Лучше выбрать фильтр.")) return;
+        }
         btn.disabled = true;
         btn.textContent = "Опрос…";
         showError("");
+        setProgress(true, "Старт…", 0);
         try {
-          const res = await fetch("/api/poll?notify=true", { method: "POST" });
-          if (!res.ok) throw new Error("poll " + res.status);
-          pollInfo = await res.json();
-          await load();
+          const q = pollQuery();
+          const res = await fetch("/api/poll?" + q.toString(), { method: "POST" });
+          if (res.status === 409) {
+            showError("Опрос уже идёт");
+          } else if (!res.ok) {
+            throw new Error("poll " + res.status);
+          }
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = setInterval(() => {
+            watchPollStatus().catch((e) => showError(String(e.message || e)));
+          }, 500);
+          await watchPollStatus();
         } catch (e) {
           showError(String(e.message || e));
-        } finally {
           btn.disabled = false;
           btn.textContent = "Опросить сейчас";
+          setProgress(false, "", 0);
         }
       });
 

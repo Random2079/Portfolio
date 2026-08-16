@@ -51,20 +51,23 @@ npm run dev
 Поллер без UI:
 
 ```powershell
-python -m portfolio_news once              # один проход + toast
-python -m portfolio_news once --limit 5    # первые 5 тикеров
-python -m portfolio_news watch             # цикл (POLL_INTERVAL_SEC)
-python -m portfolio_news once --quiet      # без toast
+python -m portfolio_news once --ticker SBER
+python -m portfolio_news once --kind equity --category Энергетика
+python -m portfolio_news once --notify digest   # один toast
+python -m portfolio_news once --quiet           # без toast
+python -m portfolio_news watch
 ```
-
-Ручной опрос из UI: кнопка «Опросить сейчас» → `POST /api/poll`.
 
 ## API
 
 - `GET /api/health`
 - `GET /api/tickers`
 - `GET /api/news?ticker=SBER&limit=50`
-- `POST /api/poll?notify=true`
+- `POST /api/poll?ticker_id=SBER&kind=equity&category=...&notify=digest` — старт фона
+- `GET /api/poll/status` — прогресс (`current/total`, `ticker_id`, `inserted`)
+- `GET /api/metrics?ticker_id=SBER` или `kind`/`category` — MOEX ISS (цена, Δ%, див/купон если есть)
+
+UI: «Опросить сейчас» шлёт **текущий фильтр/тикер**, не всегда все 50. Прогресс-бар на странице. Вкладка «Метрики».
 
 ## Дедуп
 
