@@ -423,6 +423,7 @@ class TTSPanel(QMainWindow):
         self.resize(420, 380)
         self._center()
         self._updating = False
+        self._poll_busy = False
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -532,14 +533,13 @@ class TTSPanel(QMainWindow):
         if OFF_FLAG.exists():
             set_auto_on(True)
 
-        self._reload_from_disk()
-        self._refresh_status()
-        ensure_hotkeys()
-
-        self._poll_busy = False
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_disk)
         self.timer.start(1000)
+
+        self._reload_from_disk()
+        self._refresh_status()
+        ensure_hotkeys()
 
     def _center(self) -> None:
         frame = self.frameGeometry()
