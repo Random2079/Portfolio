@@ -82,8 +82,10 @@ _progress: dict[str, object] = {
     "engine": DEFAULT_ENGINE,
     "current": 0,
     "total": 0,
+    "phase_started": time.monotonic(),
 }
 _warmup_active = False
+_warmup_started = 0.0
 
 
 def set_progress(
@@ -94,6 +96,8 @@ def set_progress(
     total: int | None = None,
 ) -> None:
     with _progress_lock:
+        old_phase = str(_progress.get("phase", "idle"))
+        old_current = int(_progress.get("current", 0) or 0)
         _progress["phase"] = phase
         if engine is not None:
             _progress["engine"] = engine
@@ -101,20 +105,50 @@ def set_progress(
             _progress["current"] = current
         if total is not None:
             _progress["total"] = total
+        if phase != old_phase or (
+            current is not None and int(current) != old_current
+        ):
+            _progress["phase_started"] = time.monotonic()
 
 
 def set_warmup_active(value: bool) -> None:
-    global _warmup_active
+    global _warmup_active, _warmup_started
     with _progress_lock:
+        if value and not _warmup_active:
+            _warmup_started = time.monotonic()
         _warmup_active = value
+
+
+def progress_percent(phase: str, current: int, total: int, *, warming: bool) -> int:
+    """Грубая доля по кускам: внутри одного куска Qwen процента не отдаёт."""
+    if warming:
+        return 0
+    if total <= 0:
+        return 0 if phase == "idle" else 5
+    cur = max(0, min(current, total))
+    if phase == "synthesizing":
+        done = max(0, cur - 1)
+        return max(1, min(99, int(100 * done / total)))
+    if phase == "playing":
+        return max(1, min(100, int(100 * cur / total)))
+    if phase == "preparing":
+        return 1
+    return 0
 
 
 def progress_snapshot() -> dict[str, object]:
     with _progress_lock:
         data = dict(_progress)
-        data["warming"] = _warmup_active
+        warming = _warmup_active
+        data["warming"] = warming
+        started = float(_warmup_started if warming else data.get("phase_started", 0.0))
+    phase = str(data.get("phase", "idle"))
+    current = int(data.get("current", 0) or 0)
+    total = int(data.get("total", 0) or 0)
     data["paused"] = is_paused()
     data["queue"] = _speech_queue.qsize()
+    data["elapsed_sec"] = max(0, int(time.monotonic() - started)) if started else 0
+    data["percent"] = progress_percent(phase, current, total, warming=warming)
     return data
 
 

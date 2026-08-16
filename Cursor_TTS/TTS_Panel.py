@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QProgressBar,
     QPushButton,
     QSlider,
     QVBoxLayout,
@@ -360,27 +361,51 @@ def format_daemon_progress(status: dict) -> str:
     current = int(status.get("current", 0) or 0)
     total = int(status.get("total", 0) or 0)
     phase = str(status.get("phase", "idle"))
+    elapsed = int(status.get("elapsed_sec", 0) or 0)
+    percent = int(status.get("percent", 0) or 0)
 
     if status.get("warming"):
-        text = f"⏳ {engine}: загрузка модели"
+        text = f"⏳ {engine}: загрузка модели · {elapsed} с"
         if total:
             text += f" · затем кусок {current or 1} из {total}"
     elif status.get("paused"):
         text = f"⏸ {engine}: пауза"
         if total:
-            text += f" · кусок {current} из {total}"
+            text += f" · кусок {current} из {total} · {percent}%"
     elif phase == "preparing":
-        text = f"⏳ {engine}: подготовка текста"
+        text = f"⏳ {engine}: подготовка текста · {elapsed} с"
     elif phase == "synthesizing":
-        text = f"🧠 {engine}: синтез {current} из {total}"
+        text = f"🧠 {engine}: синтез {current} из {total} · {percent}% · {elapsed} с"
     elif phase == "playing":
-        text = f"▶ {engine}: играет {current} из {total}"
+        text = f"▶ {engine}: играет {current} из {total} · {percent}% · {elapsed} с"
     else:
         text = f"✓ {engine}: готов"
 
     if queue_size:
         text += f" · в очереди: {queue_size}"
     return text
+
+
+def progress_bar_state(status: dict) -> tuple[int, bool, str]:
+    """value 0–100, indeterminate, window title suffix."""
+    if not status:
+        return 0, False, ""
+    phase = str(status.get("phase", "idle"))
+    current = int(status.get("current", 0) or 0)
+    total = int(status.get("total", 0) or 0)
+    percent = int(status.get("percent", 0) or 0)
+    if status.get("warming"):
+        return 0, True, "загрузка модели…"
+    if status.get("paused"):
+        suffix = f"пауза {current}/{total}" if total else "пауза"
+        return percent, False, suffix
+    if phase == "preparing":
+        return max(percent, 1), True, "подготовка…"
+    if phase == "synthesizing":
+        return percent, False, f"синтез {current}/{total} · {percent}%"
+    if phase == "playing":
+        return percent, False, f"играет {current}/{total} · {percent}%"
+    return 0, False, ""
 
 
 class TTSPanel(QMainWindow):
@@ -477,8 +502,16 @@ class TTSPanel(QMainWindow):
 
         self.progress_label = QLabel("Прогресс: ожидание демона…", self)
         self.progress_label.setWordWrap(True)
-        self.progress_label.setStyleSheet("font-weight: bold;")
+        self.progress_label.setStyleSheet("font-weight: bold; font-size: 12px;")
         layout.addWidget(self.progress_label)
+
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
+        self.progress_bar.setMinimumHeight(22)
+        layout.addWidget(self.progress_bar)
 
         layout.addWidget(
             QLabel(
@@ -497,7 +530,7 @@ class TTSPanel(QMainWindow):
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_disk)
-        self.timer.start(1000)
+        self.timer.start(400)
 
     def _center(self) -> None:
         frame = self.frameGeometry()
@@ -565,7 +598,18 @@ class TTSPanel(QMainWindow):
             f"Авто: {auto} · {engine} · {voice_label} · "
             f"{volume}% · {speaking} · {pause_txt}"
         )
-        self.progress_label.setText(format_daemon_progress(daemon_status()))
+        status = daemon_status()
+        self.progress_label.setText(format_daemon_progress(status))
+        value, indeterminate, title_suffix = progress_bar_state(status)
+        if indeterminate:
+            self.progress_bar.setRange(0, 0)
+        else:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(value)
+        if title_suffix:
+            self.setWindowTitle(f"Cursor TTS — {title_suffix}")
+        else:
+            self.setWindowTitle("Cursor TTS")
         self._apply_pause_ui(paused)
 
     def _apply_pause_ui(self, paused: bool) -> None:

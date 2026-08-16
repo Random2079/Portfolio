@@ -134,6 +134,7 @@ class ProgressStatusTests(unittest.TestCase):
         self.assertEqual(status["engine"], "qwen")
         self.assertEqual(status["current"], 3)
         self.assertEqual(status["total"], 11)
+        self.assertEqual(status["percent"], 18)  # 2/11 done while synth #3
 
     def test_panel_formats_synthesis_and_queue(self) -> None:
         import TTS_Panel as panel
@@ -147,10 +148,27 @@ class ProgressStatusTests(unittest.TestCase):
                 "queue": 2,
                 "warming": False,
                 "paused": False,
+                "elapsed_sec": 12,
+                "percent": 18,
             }
         )
         self.assertIn("синтез 3 из 11", text)
+        self.assertIn("18%", text)
+        self.assertIn("12 с", text)
         self.assertIn("в очереди: 2", text)
+        value, indeterminate, title = panel.progress_bar_state(
+            {
+                "phase": "synthesizing",
+                "current": 3,
+                "total": 11,
+                "percent": 18,
+                "warming": False,
+                "paused": False,
+            }
+        )
+        self.assertEqual(value, 18)
+        self.assertFalse(indeterminate)
+        self.assertIn("3/11", title)
 
 
 if __name__ == "__main__":
