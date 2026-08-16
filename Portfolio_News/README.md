@@ -1,6 +1,6 @@
 # Portfolio News (IDEA-003)
 
-Локальный монитор новостей по тикерам портфеля: **FastAPI + SQLite + React + Windows toast**.
+Локальный монитор новостей по тикерам портфеля: **FastAPI + SQLite + UI (vanilla JS) + Windows toast**.
 
 Не инвест-советы. Без Telegram / MAX / VK. Docker — позже.
 
@@ -11,7 +11,7 @@
 | Backend | Python 3.12+, FastAPI, SQLAlchemy 2, SQLite |
 | Sources | Google News RU RSS, Smart-Lab news RSS (фильтр по тикеру/имени) |
 | Notify | Windows toast (`winotify`) |
-| Frontend | React: сразу на `http://127.0.0.1:8765/` (CDN, без npm). Опционально Vite в `frontend/` если есть Node |
+| Frontend | Vanilla JS с FastAPI: `http://127.0.0.1:8765/`. Заготовка Vite/React в `frontend/` (нужен Node) |
 | Тикеры | `tickers.example.json` из Snowball CSV (символы/имена, без PnL) |
 
 ## Установка
@@ -31,7 +31,7 @@ python -m portfolio_news import-tickers "$env:USERPROFILE\Downloads\Snowball Hol
 
 ## Запуск
 
-API + React UI (один процесс):
+API + UI (один процесс):
 
 ```powershell
 python -m portfolio_news serve

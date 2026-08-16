@@ -16,7 +16,7 @@
 
 - **Один активный проект за раз.** Не начинать второй трек «заодно».
 
-- Сейчас один фокус: **IDEA-003 Новостник** — MVP в `Portfolio_News/` (serve + toast). IDEA-013 голос закрыт пока. TTS (002) — жить.
+- Сейчас один фокус: **IDEA-003 Новостник** — прототип в `Portfolio_News/` живой; продукт не закрыт (мусор ленты, watch, телефон). IDEA-013 голос закрыт пока. TTS (002) — жить.
 
 - **Не трогать параллельно без команды:** IDEA-005 Discord mute, IDEA-014 VPN, IDEA-001 агент, IDEA-016 плеер.
 
@@ -92,11 +92,13 @@
 
 - Дата: 2026-07-18
 
-- Статус: в работе (2026-08-15) — MVP код в `Portfolio_News/` (toast + FastAPI/SQLite/React CDN + Vite-заготовка)
+- Статус: в работе (2026-08-16) — прототип живой, **не готово как продукт**
 
-- Описание: Тикеры → RU-новости (Smart-Lab, Google News RU) → дедуп URL в SQLite → Windows toast + React на localhost. Не инвест-советы. MAX/VK/TG пас. Docker позже. Список бумаг — из Snowball CSV / `tickers.example.json`.
+- Описание: Тикеры → RU-новости → дедуп URL в SQLite → Windows toast + UI на localhost. Не инвест-советы. MAX/VK/TG пас. Docker позже. Список бумаг — Snowball CSV / `tickers.example.json`.
 
-- Следующие шаги: `python -m portfolio_news serve` → UI на :8765; при желании Node для Vite; Investing-адаптер / Docker позже. План: [`.cursor/plans/IDEA-003-portfolio-news.md`](.cursor/plans/IDEA-003-portfolio-news.md).
+- Сделано (2026-08-15): FastAPI + SQLite; Google News RU + Smart-Lab; `once`/`watch`/`serve`; toast; UI vanilla JS (CDN React не взлетел); фильтры Все/Акции/Облигации/Фонды + сектора акций; светлая тема; README.
+
+- Следующие шаги: чистка мусора в ленте; Investing/эмитенты; авто-watch; телефон (ntfy и т.п.), когда канал живой. План: [`.cursor/plans/IDEA-003-portfolio-news.md`](.cursor/plans/IDEA-003-portfolio-news.md).
 
 
 

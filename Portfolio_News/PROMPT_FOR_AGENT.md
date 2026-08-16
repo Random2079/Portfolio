@@ -25,21 +25,21 @@
 | MAX / VK / Telegram | **не делать** |
 | Источники | RU: Smart-Lab, сайты эмитентов, Investing.com и похожие (адаптеры) |
 | Бэк | Python, **FastAPI**, **SQLite** (+ SQLAlchemy 2 желательно) |
-| Фронт | **React** (Vite), localhost |
+| Фронт | UI на `http://127.0.0.1:8765/` (`static/index.html`, vanilla JS). Vite в `frontend/` — опционально |
 | Дедуп | SQLite, уникальность по **URL** |
 | Docker | **не** в MVP |
 
-## Сделай по шагам
+## Уже сделано (2026-08-15) — не переписывать с нуля
 
-1. Каркас: `README.md`, `requirements.txt`, `.env.example`, `.gitignore`, пакет backend.
-2. Тикеры: не выдумывать SBER/GAZP. Канон — `%USERPROFILE%\Downloads\Snowball Holdings.csv` (свежий) и уже сгенерированный `tickers.example.json` (символы/имена/kind, **без** qty/PnL). Импортёр CSV → SQLite.
-3. SQLite-схема: тикеры, новости, дедуп по URL.
-4. Поллер + минимум 1–2 RU-адаптера источников; интерфейс единый. Bonds → поиск по `search_query`/эмитенту.
-5. Toast при новой URL; повтор — skip.
-6. CLI: `once` / `watch` (или эквивалент через FastAPI lifespan / отдельный процесс — документируй).
-7. FastAPI API для ленты и тикеров.
-8. React (Vite): лента + тикеры на localhost.
-9. README: установка backend+frontend без облака.
+Каркас, SQLite, Snowball-тикеры, Google News RU + Smart-Lab, toast, CLI `once`/`watch`/`serve`, API, UI с фильтрами kind/сектор. План: `.cursor/plans/IDEA-003-portfolio-news.md` (чеклист).
+
+## Следующие шаги (когда скажут)
+
+1. Чистка мусора в ленте (релевантность, свежесть, бонды).
+2. Ещё источники: Investing.com RU, RSS эмитентов.
+3. Авто-watch / меньше ручного `serve`.
+4. Телефон — только если выбран живой канал (не MAX/VK вслепую).
+5. Не тащить Docker, пока не попросили.
 
 ## Запреты
 
@@ -49,12 +49,9 @@
 - Не брокерские API / котировки / «ИИ советует купить»  
 - Не коммитить секреты  
 
-## Definition of done
+## Definition of done (продукт — ещё нет)
 
-- 2–3 тикера в конфиге  
-- Новая новость → toast; тот же URL повторно → тишина  
-- React на localhost показывает ленту с FastAPI  
-- README позволяет поднять локально  
+Прототип 2026-08-15 закрыл каркас. Дальше DoD = чистая лента + привычный watch + (опционально) телефон. Не помечать IDEA-003 «готово» только за `serve` на :8765.
 
 ## Тон
 

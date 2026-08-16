@@ -5,6 +5,7 @@
 
 | Папка | Что это | Для резюме / HH |
 |-------|---------|-----------------|
+| [`Portfolio_News/`](Portfolio_News/) | Новостник портфеля: FastAPI + SQLite + toast + UI localhost | IDEA-003, прототип (не продукт) |
 | [`YouTube_Translator/`](YouTube_Translator/) | GUI субтитров YouTube (CustomTkinter) + таймкоды | **★ Герой** — показывать первым |
 | [`Cursor_TTS/`](Cursor_TTS/) | Озвучка Cursor: Edge / Silero / Piper, панель, хоткеи | Второй пример (автоматизация + GUI) |
 | [`Channel_Translator/`](Channel_Translator/) | Пакетный обход канала (на базе YouTube_*) | Опционально |
