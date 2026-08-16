@@ -76,6 +76,46 @@ _mixer_ready = False
 _speech_queue: queue.Queue[str | None] = queue.Queue()
 _worker_started = False
 _worker_lock = threading.Lock()
+_progress_lock = threading.Lock()
+_progress: dict[str, object] = {
+    "phase": "idle",
+    "engine": DEFAULT_ENGINE,
+    "current": 0,
+    "total": 0,
+}
+_warmup_active = False
+
+
+def set_progress(
+    phase: str,
+    *,
+    engine: str | None = None,
+    current: int | None = None,
+    total: int | None = None,
+) -> None:
+    with _progress_lock:
+        _progress["phase"] = phase
+        if engine is not None:
+            _progress["engine"] = engine
+        if current is not None:
+            _progress["current"] = current
+        if total is not None:
+            _progress["total"] = total
+
+
+def set_warmup_active(value: bool) -> None:
+    global _warmup_active
+    with _progress_lock:
+        _warmup_active = value
+
+
+def progress_snapshot() -> dict[str, object]:
+    with _progress_lock:
+        data = dict(_progress)
+        data["warming"] = _warmup_active
+    data["paused"] = is_paused()
+    data["queue"] = _speech_queue.qsize()
+    return data
 
 
 def load_config() -> dict:
@@ -541,8 +581,11 @@ def speak_text(text: str) -> None:
         _stop_event.clear()
         set_paused(False)
         cfg = load_config()
+        engine = str(cfg["engine"])
+        set_progress("preparing", engine=engine, current=0, total=0)
         units = _speech_units(text, cfg)
         if not units:
+            set_progress("idle", engine=engine, current=0, total=0)
             return
         hybrid = _effective_hybrid(cfg)
         debug_log(f"ENGINE={cfg['engine']} hybrid={hybrid} units={len(units)}")
@@ -574,6 +617,12 @@ def speak_text(text: str) -> None:
                     f"CHUNK_BEGIN {index + 1}/{len(units)} lang={lang} "
                     f"chars={len(part)} preview={part[:80]!r}"
                 )
+                set_progress(
+                    "synthesizing",
+                    engine=engine,
+                    current=index + 1,
+                    total=len(units),
+                )
 
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                     current_path = Path(tmp.name)
@@ -600,6 +649,12 @@ def speak_text(text: str) -> None:
                     index += 1
                     continue
 
+                set_progress(
+                    "playing",
+                    engine=engine,
+                    current=index + 1,
+                    total=len(units),
+                )
                 finished = play_file(current_path, cfg["volume"])
                 _safe_unlink(current_path)
                 current_path = None
@@ -622,6 +677,7 @@ def speak_text(text: str) -> None:
         finally:
             if current_path is not None:
                 _safe_unlink(current_path)
+            set_progress("idle", engine=engine, current=0, total=0)
 
         log_speak_done(ok_parts, fail_parts, len(units))
 
@@ -647,11 +703,10 @@ def handle_client(conn: socket.socket) -> None:
             conn.sendall(b'{"ok":true,"pong":true}\n')
             return
         if cmd == "status":
+            status = progress_snapshot()
+            status["ok"] = True
             conn.sendall(
-                json.dumps(
-                    {"ok": True, "paused": is_paused(), "queue": _speech_queue.qsize()},
-                    ensure_ascii=False,
-                ).encode("utf-8")
+                json.dumps(status, ensure_ascii=False).encode("utf-8")
                 + b"\n"
             )
             return
@@ -659,6 +714,7 @@ def handle_client(conn: socket.socket) -> None:
             cfg = load_config()
             engine = str(cfg.get("engine", DEFAULT_ENGINE))
             _prepare_engine(engine)
+            set_warmup_active(True)
             if engine == "kokoro":
                 try:
                     from speak_kokoro import warmup as warmup_kokoro
@@ -708,6 +764,7 @@ def handle_client(conn: socket.socket) -> None:
                     ).encode("utf-8")
                     + b"\n"
                 )
+            set_warmup_active(False)
             return
         if cmd == "pause":
             pause_playback()
@@ -772,9 +829,10 @@ def warmup_engine_background() -> None:
     def run() -> None:
         cfg = load_config()
         engine = cfg.get("engine")
-        _prepare_engine(str(engine or DEFAULT_ENGINE))
-        if engine == "kokoro":
-            try:
+        set_warmup_active(True)
+        try:
+            _prepare_engine(str(engine or DEFAULT_ENGINE))
+            if engine == "kokoro":
                 from speak_kokoro import warmup as warmup_kokoro
 
                 debug_log("WARMUP bg kokoro begin")
@@ -784,10 +842,7 @@ def warmup_engine_background() -> None:
                     )
                 )
                 debug_log("WARMUP bg kokoro done")
-            except Exception as error:
-                debug_log(f"WARMUP bg kokoro fail: {error}")
-        elif engine == "qwen":
-            try:
+            elif engine == "qwen":
                 micro = Path(__file__).resolve().parent / "micro_wife"
                 if str(micro) not in sys.path:
                     sys.path.insert(0, str(micro))
@@ -796,10 +851,12 @@ def warmup_engine_background() -> None:
                 debug_log("WARMUP bg qwen begin")
                 warmup_qwen(cfg.get("qwen_model", DEFAULT_QWEN_MODEL))
                 debug_log("WARMUP bg qwen done")
-            except Exception as error:
-                debug_log(f"WARMUP bg qwen fail: {error}")
-        else:
-            debug_log(f"WARMUP bg skip (engine={engine})")
+            else:
+                debug_log(f"WARMUP bg skip (engine={engine})")
+        except Exception as error:
+            debug_log(f"WARMUP bg {engine} fail: {error}")
+        finally:
+            set_warmup_active(False)
 
     threading.Thread(target=run, name="tts-warmup", daemon=True).start()
 
@@ -808,16 +865,22 @@ def main() -> int:
     if already_running():
         return 0
 
+    # Порт захватываем ДО pygame/worker/Qwen warmup. Если несколько клиентов
+    # одновременно стартуют демон, проигравшие выходят без загрузки модели и RAM.
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        server.bind((HOST, PORT))
+    except OSError:
+        server.close()
+        return 0
+    server.listen(8)
+    server.settimeout(1.0)
+
     PID_FILE.write_text(str(os.getpid()), encoding="ascii")
     ensure_mixer()
     ensure_worker()
     warmup_engine_background()
-
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((HOST, PORT))
-    server.listen(8)
-    server.settimeout(1.0)
 
     try:
         while True:

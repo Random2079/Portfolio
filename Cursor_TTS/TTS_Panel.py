@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -330,6 +331,58 @@ def is_speaking() -> bool:
     return pid in result.stdout
 
 
+def daemon_status() -> dict:
+    """Живой прогресс: warmup / synth N/M / play N/M / очередь."""
+    try:
+        raw = (json.dumps({"cmd": "status"}) + "\n").encode("utf-8")
+        with socket.create_connection(("127.0.0.1", 47391), timeout=0.4) as sock:
+            sock.settimeout(0.4)
+            sock.sendall(raw)
+            data = b""
+            while not data.endswith(b"\n"):
+                piece = sock.recv(4096)
+                if not piece:
+                    break
+                data += piece
+        if data:
+            result = json.loads(data.decode("utf-8").strip())
+            return result if isinstance(result, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def format_daemon_progress(status: dict) -> str:
+    if not status:
+        return "Прогресс: демон недоступен"
+    engine = str(status.get("engine", "")).upper() or "TTS"
+    queue_size = int(status.get("queue", 0) or 0)
+    current = int(status.get("current", 0) or 0)
+    total = int(status.get("total", 0) or 0)
+    phase = str(status.get("phase", "idle"))
+
+    if status.get("warming"):
+        text = f"⏳ {engine}: загрузка модели"
+        if total:
+            text += f" · затем кусок {current or 1} из {total}"
+    elif status.get("paused"):
+        text = f"⏸ {engine}: пауза"
+        if total:
+            text += f" · кусок {current} из {total}"
+    elif phase == "preparing":
+        text = f"⏳ {engine}: подготовка текста"
+    elif phase == "synthesizing":
+        text = f"🧠 {engine}: синтез {current} из {total}"
+    elif phase == "playing":
+        text = f"▶ {engine}: играет {current} из {total}"
+    else:
+        text = f"✓ {engine}: готов"
+
+    if queue_size:
+        text += f" · в очереди: {queue_size}"
+    return text
+
+
 class TTSPanel(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -422,6 +475,11 @@ class TTSPanel(QMainWindow):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
+        self.progress_label = QLabel("Прогресс: ожидание демона…", self)
+        self.progress_label.setWordWrap(True)
+        self.progress_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(self.progress_label)
+
         layout.addWidget(
             QLabel(
                 "Хоткеи: Ctrl+Shift+T авто · P пауза · X стоп · S выделение",
@@ -507,6 +565,7 @@ class TTSPanel(QMainWindow):
             f"Авто: {auto} · {engine} · {voice_label} · "
             f"{volume}% · {speaking} · {pause_txt}"
         )
+        self.progress_label.setText(format_daemon_progress(daemon_status()))
         self._apply_pause_ui(paused)
 
     def _apply_pause_ui(self, paused: bool) -> None:

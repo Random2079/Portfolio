@@ -124,5 +124,34 @@ class StopCancelTests(unittest.TestCase):
         self.assertGreater(sk._generation, gen_before)
 
 
+class ProgressStatusTests(unittest.TestCase):
+    def test_daemon_reports_chunk_progress(self) -> None:
+        import tts_daemon as daemon
+
+        daemon.set_progress("synthesizing", engine="qwen", current=3, total=11)
+        status = daemon.progress_snapshot()
+        self.assertEqual(status["phase"], "synthesizing")
+        self.assertEqual(status["engine"], "qwen")
+        self.assertEqual(status["current"], 3)
+        self.assertEqual(status["total"], 11)
+
+    def test_panel_formats_synthesis_and_queue(self) -> None:
+        import TTS_Panel as panel
+
+        text = panel.format_daemon_progress(
+            {
+                "phase": "synthesizing",
+                "engine": "qwen",
+                "current": 3,
+                "total": 11,
+                "queue": 2,
+                "warming": False,
+                "paused": False,
+            }
+        )
+        self.assertIn("синтез 3 из 11", text)
+        self.assertIn("в очереди: 2", text)
+
+
 if __name__ == "__main__":
     unittest.main()
