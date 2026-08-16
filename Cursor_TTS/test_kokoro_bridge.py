@@ -170,6 +170,39 @@ class ProgressStatusTests(unittest.TestCase):
         self.assertFalse(indeterminate)
         self.assertIn("3/11", title)
 
+    def test_single_chunk_synth_is_indeterminate(self) -> None:
+        import TTS_Panel as panel
+
+        text = panel.format_daemon_progress(
+            {
+                "phase": "synthesizing",
+                "engine": "kokoro",
+                "current": 1,
+                "total": 1,
+                "queue": 0,
+                "warming": False,
+                "paused": False,
+                "elapsed_sec": 22,
+                "percent": 1,
+            }
+        )
+        self.assertIn("ждём звук", text)
+        self.assertIn("22 с", text)
+        self.assertNotIn("1%", text)
+        value, indeterminate, title = panel.progress_bar_state(
+            {
+                "phase": "synthesizing",
+                "current": 1,
+                "total": 1,
+                "percent": 1,
+                "elapsed_sec": 22,
+                "warming": False,
+                "paused": False,
+            }
+        )
+        self.assertTrue(indeterminate)
+        self.assertIn("22с", title)
+
 
 if __name__ == "__main__":
     unittest.main()

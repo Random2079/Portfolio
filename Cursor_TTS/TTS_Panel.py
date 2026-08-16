@@ -312,24 +312,16 @@ def warmup_tts_backend() -> None:
     threading.Thread(target=run, name="tts-panel-warmup", daemon=True).start()
 
 
-def is_speaking() -> bool:
-    # Демон жив — не значит, что сейчас говорит; для статуса хватает «демон запущен».
-    if not DAEMON_PID_FILE.is_file():
+def daemon_busy(status: dict) -> bool:
+    """Есть ли реальная работа у демона (без tasklist)."""
+    if not status:
         return False
-    try:
-        pid = DAEMON_PID_FILE.read_text(encoding="ascii").strip()
-    except OSError:
-        return False
-    if not pid.isdigit():
-        return False
-    flags = 0x08000000 if sys.platform == "win32" else 0
-    result = subprocess.run(
-        ["tasklist", "/FI", f"PID eq {pid}"],
-        capture_output=True,
-        text=True,
-        creationflags=flags,
+    phase = str(status.get("phase", "idle")).strip().lower()
+    return (
+        phase in {"preparing", "synthesizing", "playing"}
+        or bool(status.get("warming"))
+        or int(status.get("queue", 0) or 0) > 0
     )
-    return pid in result.stdout
 
 
 def daemon_status() -> dict:
@@ -371,11 +363,20 @@ def format_daemon_progress(status: dict) -> str:
     elif status.get("paused"):
         text = f"⏸ {engine}: пауза"
         if total:
-            text += f" · кусок {current} из {total} · {percent}%"
+            text += f" · кусок {current} из {total}"
+            if total > 1:
+                text += f" · {percent}%"
     elif phase == "preparing":
         text = f"⏳ {engine}: подготовка текста · {elapsed} с"
     elif phase == "synthesizing":
-        text = f"🧠 {engine}: синтез {current} из {total} · {percent}% · {elapsed} с"
+        # % по кускам: на 1/1 врал бы «1%» всю дорогу cold load / synth.
+        chunk = f"{current} из {total}" if total else "?"
+        if total > 1:
+            text = (
+                f"🧠 {engine}: синтез {chunk} · готово кусков ~{percent}% · {elapsed} с"
+            )
+        else:
+            text = f"🧠 {engine}: синтез {chunk} · ждём звук · {elapsed} с"
     elif phase == "playing":
         text = f"▶ {engine}: играет {current} из {total} · {percent}% · {elapsed} с"
     else:
@@ -387,7 +388,11 @@ def format_daemon_progress(status: dict) -> str:
 
 
 def progress_bar_state(status: dict) -> tuple[int, bool, str]:
-    """value 0–100, indeterminate, window title suffix."""
+    """value 0–100, indeterminate, window title suffix.
+
+    Синтез одного куска не умеет отдавать % внутри модели → бегущая полоска + секунды.
+    Детерминированный % только когда уже играем / много кусков по факту готово.
+    """
     if not status:
         return 0, False, ""
     phase = str(status.get("phase", "idle"))
@@ -395,14 +400,17 @@ def progress_bar_state(status: dict) -> tuple[int, bool, str]:
     total = int(status.get("total", 0) or 0)
     percent = int(status.get("percent", 0) or 0)
     if status.get("warming"):
-        return 0, True, "загрузка модели…"
+        return 0, True, f"загрузка модели… {int(status.get('elapsed_sec', 0) or 0)}с"
     if status.get("paused"):
         suffix = f"пауза {current}/{total}" if total else "пауза"
-        return percent, False, suffix
+        return percent if total > 1 else 0, False, suffix
     if phase == "preparing":
-        return max(percent, 1), True, "подготовка…"
+        return 0, True, "подготовка…"
     if phase == "synthesizing":
-        return percent, False, f"синтез {current}/{total} · {percent}%"
+        if total > 1:
+            return percent, False, f"синтез {current}/{total} · ~{percent}%"
+        elapsed = int(status.get("elapsed_sec", 0) or 0)
+        return 0, True, f"синтез… {elapsed}с"
     if phase == "playing":
         return percent, False, f"играет {current}/{total} · {percent}%"
     return 0, False, ""
@@ -528,9 +536,10 @@ class TTSPanel(QMainWindow):
         self._refresh_status()
         ensure_hotkeys()
 
+        self._poll_busy = False
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_disk)
-        self.timer.start(400)
+        self.timer.start(1000)
 
     def _center(self) -> None:
         frame = self.frameGeometry()
@@ -588,28 +597,35 @@ class TTSPanel(QMainWindow):
 
     def _refresh_status(self) -> None:
         auto = "ON" if is_auto_on() else "OFF"
-        speaking = "демон ON" if is_speaking() else "демон OFF"
         engine = self.engine_combo.currentText()
         voice_label = self.voice_combo.currentText()
         volume = self.volume_slider.value()
         paused = is_paused_flag()
         pause_txt = "ПАУЗА" if paused else "играет"
+        status = daemon_status()
+        busy = daemon_busy(status)
+        work = "занят" if busy else "готов"
         self.status_label.setText(
             f"Авто: {auto} · {engine} · {voice_label} · "
-            f"{volume}% · {speaking} · {pause_txt}"
+            f"{volume}% · демон {work} · {pause_txt}"
         )
-        status = daemon_status()
         self.progress_label.setText(format_daemon_progress(status))
         value, indeterminate, title_suffix = progress_bar_state(status)
         if indeterminate:
-            self.progress_bar.setRange(0, 0)
+            if self.progress_bar.maximum() != 0:
+                self.progress_bar.setRange(0, 0)
         else:
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(value)
-        if title_suffix:
-            self.setWindowTitle(f"Cursor TTS — {title_suffix}")
-        else:
-            self.setWindowTitle("Cursor TTS")
+            if self.progress_bar.maximum() != 100:
+                self.progress_bar.setRange(0, 100)
+            if self.progress_bar.value() != value:
+                self.progress_bar.setValue(value)
+        want_title = f"Cursor TTS — {title_suffix}" if title_suffix else "Cursor TTS"
+        if self.windowTitle() != want_title:
+            self.setWindowTitle(want_title)
+        # Busy → чаще (секунды на полоске), idle → реже (без лишнего TCP).
+        if busy != self._poll_busy:
+            self._poll_busy = busy
+            self.timer.setInterval(400 if busy else 1000)
         self._apply_pause_ui(paused)
 
     def _apply_pause_ui(self, paused: bool) -> None:

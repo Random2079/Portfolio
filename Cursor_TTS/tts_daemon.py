@@ -282,6 +282,37 @@ def ensure_mixer() -> None:
         _mixer_ready = True
 
 
+def _rewarm_kokoro_after_stop() -> None:
+    """После Stop worker мёртв — в фоне поднять+прогреть, иначе следующий Speak = 15–60 с cold load.
+
+    Тот же Kokoro JSONL worker / тот же warmup. Не меняет метод синтеза.
+    """
+
+    def run() -> None:
+        try:
+            cfg = load_config()
+            if str(cfg.get("engine", DEFAULT_ENGINE)) != "kokoro":
+                return
+            from speak_kokoro import warmup as warmup_kokoro
+
+            set_warmup_active(True)
+            try:
+                debug_log("WARMUP rewarm-after-stop begin")
+                warmup_kokoro(
+                    _normalize_kokoro_voice(
+                        cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)
+                    )
+                )
+                debug_log("WARMUP rewarm-after-stop done")
+            finally:
+                set_warmup_active(False)
+        except Exception as error:
+            set_warmup_active(False)
+            debug_log(f"WARMUP rewarm-after-stop fail: {error}")
+
+    threading.Thread(target=run, name="tts-rewarm-kokoro", daemon=True).start()
+
+
 def stop_playback() -> None:
     """Полный stop: обрыв текущего play. Очередь чистит вызывающий."""
     set_paused(False)
@@ -293,13 +324,18 @@ def stop_playback() -> None:
             pygame.mixer.music.stop()
     except Exception:
         pass
-    # Прервать долгий Kokoro synth (убивает worker; следующий вызов поднимет снова)
+    # Прервать долгий Kokoro synth (убивает worker — иначе Stop ждёт до конца synth).
+    killed = False
     try:
         from speak_kokoro import cancel_current
 
         cancel_current()
+        killed = True
     except Exception:
         pass
+    # Сразу греем снова: иначе «Прослушать» после Стопа 20+ с на cold load модели.
+    if killed:
+        _rewarm_kokoro_after_stop()
 
 
 def _prepare_engine(engine: str) -> None:
