@@ -713,6 +713,7 @@ def handle_client(conn: socket.socket) -> None:
         if cmd == "warmup":
             cfg = load_config()
             engine = str(cfg.get("engine", DEFAULT_ENGINE))
+            set_progress("idle", engine=engine, current=0, total=0)
             _prepare_engine(engine)
             set_warmup_active(True)
             if engine == "kokoro":
@@ -829,6 +830,12 @@ def warmup_engine_background() -> None:
     def run() -> None:
         cfg = load_config()
         engine = cfg.get("engine")
+        set_progress(
+            "idle",
+            engine=str(engine or DEFAULT_ENGINE),
+            current=0,
+            total=0,
+        )
         set_warmup_active(True)
         try:
             _prepare_engine(str(engine or DEFAULT_ENGINE))
