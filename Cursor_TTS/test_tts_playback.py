@@ -1,13 +1,74 @@
 """Playback: pause не skip'ает chunk; stop рвёт файл и чистит очередь."""
 from __future__ import annotations
 
+import socket
 import threading
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import speak_edge
 import tts_daemon as daemon
+
+
+class TestSafeDaemonRestart(unittest.TestCase):
+    def test_active_speech_is_not_force_killed(self) -> None:
+        status = {
+            "ok": True,
+            "phase": "playing",
+            "current": 2,
+            "total": 10,
+            "queue": 0,
+            "warming": False,
+        }
+        with (
+            patch("speak_edge.send_command", return_value=status),
+            patch("speak_edge.subprocess.run") as taskkill,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "refusing to cut active speech"):
+                speak_edge.stop_daemon()
+
+        taskkill.assert_not_called()
+
+    def test_idle_daemon_is_not_reported_busy(self) -> None:
+        self.assertFalse(
+            speak_edge._daemon_busy(
+                {
+                    "phase": "idle",
+                    "queue": 0,
+                    "warming": False,
+                }
+            )
+        )
+
+
+class TestDaemonSocketSingleton(unittest.TestCase):
+    def test_windows_listener_uses_exclusive_address(self) -> None:
+        listener = MagicMock()
+
+        daemon._configure_server_socket(listener, platform="win32")
+
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            listener.setsockopt.assert_called_once_with(
+                socket.SOL_SOCKET,
+                exclusive,
+                1,
+            )
+        else:
+            listener.setsockopt.assert_not_called()
+
+    def test_non_windows_listener_keeps_reuseaddr(self) -> None:
+        listener = MagicMock()
+
+        daemon._configure_server_socket(listener, platform="linux")
+
+        listener.setsockopt.assert_called_once_with(
+            socket.SOL_SOCKET,
+            socket.SO_REUSEADDR,
+            1,
+        )
 
 
 class FakeMusic:

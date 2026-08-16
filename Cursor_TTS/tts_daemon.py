@@ -824,6 +824,21 @@ def already_running() -> bool:
         return False
 
 
+def _configure_server_socket(server: socket.socket, platform: str = sys.platform) -> None:
+    """Make the daemon listener exclusive, especially on Windows.
+
+    SO_REUSEADDR on Windows can let multiple processes bind the same address.
+    That creates several independent queues/stop events and makes clients reach
+    an arbitrary daemon.  EXCLUSIVEADDRUSE is the Windows singleton primitive.
+    """
+    if platform == "win32":
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            server.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        return
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+
 def warmup_engine_background() -> None:
     """Не блокирует accept: kokoro/qwen грузятся в фоне после старта."""
 
@@ -875,7 +890,7 @@ def main() -> int:
     # Порт захватываем ДО pygame/worker/Qwen warmup. Если несколько клиентов
     # одновременно стартуют демон, проигравшие выходят без загрузки модели и RAM.
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    _configure_server_socket(server)
     try:
         server.bind((HOST, PORT))
     except OSError:

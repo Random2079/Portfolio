@@ -85,6 +85,26 @@ class TestTablesStillWork(unittest.TestCase):
         self.assertIn("Столбцы", joined)
 
 
+class TestQwenChunkIntegrity(unittest.TestCase):
+    def test_decimal_date_example_survives_preparation_and_chunking(self) -> None:
+        import tts_daemon as daemon
+
+        source = (
+            "Цифра ~2,7 трлн на 13.08.2026 совпадает с данными ЦБ "
+            "(Коммерсант / РБК). Максимум с марта 2022, "
+            "но ЦБ сам это не считает аварией."
+        )
+        cfg = {"engine": "qwen", "hybrid_mode": "dict_only"}
+        with patch("text_prep.normalize_tts", side_effect=lambda text: text):
+            prepared = finalize_speech_text(source)
+            units = daemon._speech_units(source, cfg)
+
+        self.assertEqual(units, [(prepared, "ru")])
+        self.assertIn("2,7 трлн на 13.08.2026", prepared)
+        self.assertIn("Максимум с марта 2022", prepared)
+        self.assertTrue(prepared.endswith("не считает аварией."))
+
+
 class TestMissingEnModel(unittest.TestCase):
     def test_hybrid_falls_back_without_en_file(self) -> None:
         import tts_daemon as daemon

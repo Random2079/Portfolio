@@ -48,8 +48,31 @@ def daemon_alive() -> bool:
         return False
 
 
-def stop_daemon() -> None:
+def _daemon_busy(status: dict) -> bool:
+    phase = str(status.get("phase", "idle")).strip().lower()
+    return (
+        phase in {"preparing", "synthesizing", "playing"}
+        or bool(status.get("warming"))
+        or int(status.get("queue", 0) or 0) > 0
+    )
+
+
+def stop_daemon(*, force: bool = False) -> None:
     """Убить процесс демона, чтобы следующий ensure подхватил новый код."""
+    if not force:
+        try:
+            status = send_command({"cmd": "status"}, timeout=0.5)
+        except (OSError, ValueError, json.JSONDecodeError):
+            status = {}
+        if status.get("ok") and _daemon_busy(status):
+            phase = str(status.get("phase", "busy"))
+            current = int(status.get("current", 0) or 0)
+            total = int(status.get("total", 0) or 0)
+            chunk = f" chunk={current}/{total}" if total else ""
+            raise RuntimeError(
+                f"TTS daemon is {phase}{chunk}; refusing to cut active speech"
+            )
+
     pid_file = ROOT / "tts_daemon.pid"
     pid = ""
     if pid_file.is_file():
