@@ -135,16 +135,29 @@ def run_poll(
     ticker_id: Optional[str] = Query(None),
     kind: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
-    notify: str = Query("digest", pattern="^(off|each|digest)$"),
+    notify: str = Query("digest"),
     cfg: Settings = Depends(get_cfg),
 ):
     """Start background poll scoped to filter. Returns immediately."""
+    raw = (notify or "digest").strip().lower()
+    if raw in ("true", "1", "each", "yes"):
+        mode = "each"
+    elif raw in ("false", "0", "off", "quiet", "no"):
+        mode = "off"
+    elif raw == "digest":
+        mode = "digest"
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail=f"notify must be digest|off|each (got {notify!r})",
+        )
+
     started = start_poll_job(
         ticker_id=ticker_id or None,
         kind=kind or None,
         category=category or None,
         limit=cfg.poll_limit,
-        notify=notify,
+        notify=mode,
     )
     if not started.get("ok"):
         raise HTTPException(status_code=409, detail=started)

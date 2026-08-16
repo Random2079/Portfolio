@@ -524,7 +524,12 @@
           if (res.status === 409) {
             showError("Опрос уже идёт");
           } else if (!res.ok) {
-            throw new Error("poll " + res.status);
+            let detail = "poll " + res.status;
+            try {
+              const body = await res.json();
+              if (body && body.detail) detail += " · " + JSON.stringify(body.detail);
+            } catch (_) {}
+            throw new Error(detail);
           }
           if (pollTimer) clearInterval(pollTimer);
           pollTimer = setInterval(() => {
