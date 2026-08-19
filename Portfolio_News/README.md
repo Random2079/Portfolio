@@ -65,9 +65,22 @@ python -m portfolio_news watch
 - `GET /api/news?ticker=SBER&limit=50`
 - `POST /api/poll?ticker_id=SBER&kind=equity&category=...&notify=digest` — старт фона
 - `GET /api/poll/status` — прогресс (`current/total`, `ticker_id`, `inserted`)
-- `GET /api/metrics?ticker_id=SBER` или `kind`/`category` — MOEX ISS (цена, Δ%, див/купон если есть)
+- `GET /api/metrics?ticker_id=SBER` или `kind`/`category` — сырые котировки MOEX ISS
+- `GET /api/dividends?...` — история дивов (`dividends.json`)
+- `GET /api/coupons?...` — график купонов (`bondization.json`)
+- Без `ticker_id` и при `limit=0` сервер режет до **15** бумаг (анти-долбёжка ISS)
 
-UI: «Опросить сейчас» шлёт **текущий фильтр/тикер**, не всегда все 50. Прогресс-бар на странице. Вкладка «Метрики».
+- `GET /api/holdings` — позиции БКС (нужен `BCS_TRADE_REFRESH_TOKEN` в `.env`)
+- `GET /api/holdings/status` — настроен ли токен
+
+UI: «Искать новости» шлёт **текущий фильтр/тикер**. Вкладки: Лента / Котировки / Дивы / Купоны / **Позиции БКС**.
+
+### БКС (read-only)
+
+1. Кабинет «БКС Мир инвестиций» → профиль/счёт → токены API → **refresh token** с правом `trade-api-read` (не write).
+2. Скопируй `Portfolio_News/.env.example` → `.env`, вставь токен в `BCS_TRADE_REFRESH_TOKEN=...`
+3. Перезапусти `python -m portfolio_news serve`, вкладка «Позиции БКС».
+4. Токен **не коммитить**. Живёт ~90 дней, потом новый из кабинета.
 
 ## Дедуп
 

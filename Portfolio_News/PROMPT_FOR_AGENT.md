@@ -19,16 +19,18 @@
 - **Опрос по scope** (`ticker_id` / `kind` / `category`)  
 - **Фоновый poll** + `GET /api/poll/status` + прогресс в UI  
 - **Digest-toast** (`notify=digest|off|each`)  
-- **MOEX metrics** `GET /api/metrics` + вкладка в UI  
+- **MOEX сырой ISS**: `GET /api/metrics` / `dividends` / `coupons` + вкладки. Без PnL.  
+- **БКС read-only** (опционально): `BCS_TRADE_REFRESH_TOKEN` → `GET /api/holdings` + вкладка «Позиции БКС». Не trade-api-write.  
 
 ## Следующие шаги (когда скажут)
 
-1. ИИ-чистка шума новостей  
-2. Авто-watch / Task Scheduler  
-3. Телефон (живой канал)  
-4. Investing / эмитенты  
-5. Docker — только по просьбе  
+1. UI: live-лента во время poll; купоны human (даты/past-future)  
+2. ИИ-чистка шума новостей  
+3. Авто-watch / Task Scheduler  
+4. Телефон (живой канал)  
+5. Investing / эмитенты  
+6. Docker — только по просьбе  
 
 ## Запреты
 
-MAX/VK/Telegram вслепую; VPS; брокер «купи/продай»; секреты в git.
+MAX/VK/Telegram вслепую; VPS; брокер «купи/продай» / `trade-api-write`; секреты и токены БКС в git.

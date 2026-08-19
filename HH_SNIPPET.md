@@ -9,7 +9,7 @@
 ```
 Python, автоматизация, GUI, API. Пет-проекты: утилита YouTube → субтитры (CustomTkinter + yt-dlp), озвучка ответов IDE (очередь TTS). Ищу junior / стажировку, remote ок. Сургут, англ. C1.
 
-Герой-проект:
+Основной проект:
 https://github.com/Random2079/Portfolio/tree/main/YouTube_Translator
 
 Портфель:
@@ -28,7 +28,7 @@ https://github.com/Random2079/Portfolio
 Пример: YouTube Translator — приложение на CustomTkinter: ссылка на ролик → субтитры и текст с таймкодами через yt-dlp (есть запасной путь через Whisper).
 https://github.com/Random2079/Portfolio/tree/main/YouTube_Translator
 
-Также: локальная озвучка ответов в IDE (Edge/Silero/Piper, очередь, хоткеи).
+Также: локальная озвучка ответов в IDE (Kokoro/Qwen, очередь, хоткеи).
 Общий репозиторий: https://github.com/Random2079/Portfolio
 
 Ищу junior / стажировку, удобна удалёнка. Готов разобрать тестовое и объяснить свой код.

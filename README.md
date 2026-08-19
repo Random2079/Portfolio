@@ -12,13 +12,13 @@
 
 | Приоритет | Проект | За 15 секунд |
 |-----------|--------|----------------|
-| **1. Герой** | [**YouTube_Translator**](YouTube_Translator/) | GUI: ссылка на YouTube → субтитры + текст + таймкоды (`yt-dlp`, CustomTkinter). Есть fallback через Whisper. |
-| **2** | [**Cursor_TTS**](Cursor_TTS/) | Озвучка ответов IDE: очередь, панель, Edge / Silero / Piper, хоткеи. |
-| **3** | [**DeepSeek_IA**](DeepSeek_IA/) | Пример клиента к LLM API (OpenAI-совместимый). |
+| **1. Основной проект** | [**YouTube_Translator**](YouTube_Translator/) | GUI: ссылка на YouTube → субтитры + текст + таймкоды (`yt-dlp`, CustomTkinter). Есть fallback через Whisper. |
+| **2** | [**Cursor_TTS**](Cursor_TTS/) | Озвучка ответов IDE: очередь, панель, Kokoro / Qwen, хоткеи. |
+| **3 (опц.)** | [**DeepSeek_IA**](DeepSeek_IA/) | Черновой CLI-клиент к DeepSeek API (в разработке, не готовый продукт). |
 
 Остальное — вспомогательные скрипты (EPUB→TXT, макросы игр) и черновики.
 
-**Прямая ссылка на героя:**  
+**Прямая ссылка на основной проект:**  
 https://github.com/Random2079/Portfolio/tree/main/YouTube_Translator
 
 ---
@@ -46,10 +46,10 @@ Portfolio/
 ├── README.md                 ← ты здесь
 ├── PROJECTS.md               ← карта проектов
 ├── HH_SNIPPET.md             ← текст для отклика на HH (копипаст)
-├── YouTube_Translator/       ← ★ герой: субтитры YouTube
+├── YouTube_Translator/       ← ★ основной проект: субтитры YouTube
 ├── Cursor_TTS/               ← озвучка Cursor
 ├── Channel_Translator/       ← пакетный обход канала
-├── DeepSeek_IA/              ← пример LLM API
+├── DeepSeek_IA/              ← черновой пример LLM API
 ├── Epub2txt/ · Book_Parter/  ← мелкие текстовые утилиты
 ├── MountBlade2_AHK/          ← макросы AHK (не для резюме)
 └── …
@@ -64,9 +64,9 @@ Portfolio/
 | Папка | Зачем | Как запустить | Зависимости |
 |-------|--------|---------------|-------------|
 | **YouTube_Translator** | GUI: ссылка → субтитры + таймкоды | `python YouTube_Translator/Subtitle_App.py` | customtkinter, **yt-dlp** в PATH; опц. faster-whisper |
-| **Cursor_TTS** | Озвучка ответов Cursor (Edge / Silero / Piper) | `Start_TTS_Panel.vbs` / см. README | см. `Cursor_TTS/requirements.txt`, AutoHotkey v1 |
+| **Cursor_TTS** | Озвучка ответов Cursor (Kokoro / Qwen) | `Start_TTS_Panel.vbs` / см. README | см. `Cursor_TTS/requirements.txt`, AutoHotkey v1 |
 | **Channel_Translator** | Список видео канала → пакетная обработка | `python Channel_Translator/channel_ripper.py` | yt-dlp + модули YouTube_Translator |
-| **DeepSeek_IA** | Запросы к DeepSeek API | см. README в папке | openai, python-dotenv |
+| **DeepSeek_IA** | Черновой CLI для запросов к DeepSeek API | см. README в папке | openai, python-dotenv |
 | **Epub2txt** | EPUB → TXT | `python Epub2txt/epub2txt.py` | ebooklib |
 | **Book_Parter** | Мелкие правки TXT | см. папку | stdlib |
 | **MountBlade2_AHK** | Макросы M&B II | AutoHotkey v1 | без Python |

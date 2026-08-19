@@ -20,6 +20,8 @@
 - [x] Фоновый poll job + `GET /api/poll/status` + прогресс-бар в UI
 - [x] Digest-toast: один пуш на прогон (`notify=digest`)
 - [x] Метрики MOEX ISS: `GET /api/metrics` + вкладка «Метрики» в UI
+- [x] Сырой ISS dump: расширенные котировки + `GET /api/dividends` + `GET /api/coupons` + вкладки «Котировки / Дивы / Купоны» (без PnL/анализа)
+- [x] БКС Trade API read-only каркас: `bcs_client` + `GET /api/holdings` + вкладка «Позиции БКС» (токен в `.env`, не в git)
 
 ### Ещё не сделано (фаза 3+)
 
