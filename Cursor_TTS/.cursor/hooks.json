@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterAgentResponse": [
+      {
+        "command": "cmd /c C:\\Users\\Home\\AppData\\Local\\Programs\\Python\\Python313\\python.exe C:\\Users\\Home\\OneDrive\\Desktop\\DS_Projects\\.cursor\\hooks\\tts_after_response.py",
+        "timeout": 30
+      }
+    ],
+    "stop": [
+      {
+        "command": "cmd /c C:\\Users\\Home\\AppData\\Local\\Programs\\Python\\Python313\\python.exe C:\\Users\\Home\\OneDrive\\Desktop\\DS_Projects\\.cursor\\hooks\\tts_after_response.py",
+        "timeout": 30,
+        "loop_limit": 0
+      }
+    ]
+  }
+}
