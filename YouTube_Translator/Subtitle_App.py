@@ -3,9 +3,10 @@ YouTube Subtitle Ripper — GUI (CustomTkinter) + yt-dlp.
 
 КАРТА ФАЙЛА (читай отсюда, не весь код ):
   вход:  ссылка YouTube + язык RU/EN
-  выход: папка субтитры_<title> [id]/
+  выход: папка dist/субтитры_<title> [id]/
          0_весь_текст_для_буфера.txt  — чистый текст (+ Ctrl+V)
          1_текст_с_таймкодами.txt     — [mm:ss] фраза
+         player.html                  — iframe + кнопки таймкодов
          часть_xx_N.txt               — куски, если текст огромный
 
 БЛОКИ:
@@ -28,12 +29,20 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 import customtkinter as ctk
 
+from timecode_player import PLAYER_FILENAME, write_player_html
+
 StatusCb = Callable[[str], None]
+
+# Локальный HTTP для player.html (YouTube API с file:// часто молчит)
+_player_httpd: ThreadingHTTPServer | None = None
+_player_httpd_lock = threading.Lock()
 
 
 def bind_clipboard_any_layout(entry: ctk.CTkEntry) -> None:
@@ -205,16 +214,119 @@ def fetch_video_meta(
 
 def find_output_folder(video_id: str, base_dir: str | None = None) -> str | None:
     """Находит созданную папку по уникальному ID видео."""
-    root = base_dir if base_dir is not None else os.getcwd()
+    roots = [base_dir] if base_dir is not None else _subtitle_search_roots()
     suffix = f" [{video_id}]"
-    folders = [
-        entry.path
-        for entry in os.scandir(root)
-        if entry.is_dir()
-        and entry.name.startswith("субтитры_")
-        and entry.name.endswith(suffix)
-    ]
+    folders: list[str] = []
+    for root in roots:
+        try:
+            for entry in os.scandir(root):
+                if (
+                    entry.is_dir()
+                    and entry.name.startswith("субтитры_")
+                    and entry.name.endswith(suffix)
+                ):
+                    folders.append(entry.path)
+        except OSError:
+            continue
     return max(folders, key=os.path.getmtime) if folders else None
+
+
+def find_latest_subtitle_folder(base_dir: str | None = None) -> str | None:
+    """Самая свежая папка субтитры_* (cwd, рядом со скриптом, dist/)."""
+    roots = [base_dir] if base_dir is not None else _subtitle_search_roots()
+    folders: list[str] = []
+    for root in roots:
+        try:
+            for entry in os.scandir(root):
+                if entry.is_dir() and entry.name.startswith("субтитры_"):
+                    folders.append(entry.path)
+        except OSError:
+            continue
+    return max(folders, key=os.path.getmtime) if folders else None
+
+
+def app_install_dir() -> str:
+    """Корень приложения: рядом с .exe (PyInstaller) или с Subtitle_App.py."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _subtitle_search_roots() -> list[str]:
+    """Где лежат субтитры: cwd + каталог приложения + dist/."""
+    roots: list[str] = []
+    seen: set[str] = set()
+
+    def _add(path: str) -> None:
+        try:
+            norm = os.path.normcase(os.path.abspath(path))
+        except OSError:
+            return
+        if norm in seen or not os.path.isdir(path):
+            return
+        seen.add(norm)
+        roots.append(path)
+
+    _add(os.getcwd())
+    here = app_install_dir()
+    _add(here)
+    _add(os.path.join(here, "dist"))
+    return roots
+
+
+def default_output_root() -> str:
+    """Куда писать новые прогоны: <app>/dist/ (создаёт при необходимости)."""
+    dist = os.path.join(app_install_dir(), "dist")
+    os.makedirs(dist, exist_ok=True)
+    return dist
+
+
+def open_player_http(folder: str) -> str:
+    """
+    Открывает player.html через http://127.0.0.1 — иначе YouTube IFrame API
+    часто не сикает с file://. Возвращает URL.
+    """
+    global _player_httpd
+    folder = os.path.abspath(folder)
+
+    class _Handler(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=folder, **kwargs)
+
+        def log_message(self, fmt: str, *args) -> None:  # noqa: A003
+            return
+
+    with _player_httpd_lock:
+        if _player_httpd is not None:
+            try:
+                _player_httpd.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+            _player_httpd = None
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        _player_httpd = httpd
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        port = httpd.server_address[1]
+
+    url = f"http://127.0.0.1:{port}/{PLAYER_FILENAME}"
+    webbrowser.open(url)
+    return url
+
+
+def resolve_player_target(
+    url: str, base_dir: str | None = None
+) -> tuple[str | None, str | None]:
+    """
+    Папка для Плеера + video_id для write_player_html.
+    id_for_write = None → брать id из имени папки (не из чужой ссылки в поле).
+    """
+    video_id = get_video_id(url) if url.strip() else None
+    folder_from_url = find_output_folder(video_id, base_dir) if video_id else None
+    folder_name = folder_from_url or find_latest_subtitle_folder(base_dir)
+    if not folder_name:
+        return None, None
+    id_for_write = video_id if folder_from_url else None
+    return folder_name, id_for_write
 
 
 def _find_srt(folder: str, *lang_candidates: str) -> str | None:
@@ -549,7 +661,7 @@ def download_and_split(
     """
     Весь пайплайн без GUI: meta → скачать субы → plain + таймкоды → части.
     True = ок, False = ошибка (текст в stderr / status_cb).
-    Без os.chdir — только абсолютные пути от текущего cwd на старте.
+    Без os.chdir — пишет в default_output_root() (…/dist).
     """
     video_id = get_video_id(url)
     if not video_id:
@@ -560,7 +672,7 @@ def download_and_split(
 
     creation_flags = 0x08000000 if os.name == "nt" else 0
     timings: dict[str, float] = {}
-    work_root = os.getcwd()
+    work_root = default_output_root()
 
     # --- 1) метаданные: title + какие субы есть (один сетевой проход) ---
     _emit(status_cb, f"Статус: [1/3] метаданные ({lang_code.upper()})…")
@@ -693,6 +805,10 @@ def download_and_split(
     n_parts = write_output_texts(
         folder_path, clean_text, timed_text, lang_code, max_chars=max_chars
     )
+    try:
+        write_player_html(folder_path, video_id)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"Предупреждение: player.html не записался: {exc}\n")
     timings["parse"] = time.perf_counter() - t2
     total = sum(timings.values())
     timing_line = (
@@ -784,6 +900,11 @@ class SubtitleApp(ctk.CTk):
         )
         self.download_btn.pack(side="left", padx=(0, 8))
 
+        self.player_btn = ctk.CTkButton(
+            btn_row, text="Плеер", command=self.on_open_player, width=100
+        )
+        self.player_btn.pack(side="left", padx=(0, 8))
+
         ctk.CTkButton(
             btn_row,
             text="Очистить",
@@ -796,6 +917,7 @@ class SubtitleApp(ctk.CTk):
         self._busy = busy
         state = "disabled" if busy else "normal"
         self.download_btn.configure(state=state)
+        self.player_btn.configure(state=state)
         self.lang_seg.configure(state=state)
         self.url_input.configure(state=state)
 
@@ -807,6 +929,43 @@ class SubtitleApp(ctk.CTk):
             return
         self.url_input.delete(0, "end")
         self._set_status("Статус: ожидание ссылки…")
+
+    def on_open_player(self) -> None:
+        if self._busy:
+            return
+        url = self.url_input.get().strip()
+        folder_name, id_for_write = resolve_player_target(url)
+        if not folder_name:
+            self._set_status("Статус: нет папки субтитров — сначала скачай")
+            return
+
+        # Всегда пересобираем: иначе stale HTML (чужой id / старые метки)
+        try:
+            write_player_html(folder_name, id_for_write)
+        except (OSError, ValueError) as exc:
+            self._set_status(
+                f"Статус: нет {PLAYER_FILENAME}, пересобрать не вышло: {exc}"
+            )
+            return
+        player_path = os.path.join(folder_name, PLAYER_FILENAME)
+        if not os.path.isfile(player_path):
+            self._set_status(f"Статус: нет {PLAYER_FILENAME}")
+            return
+
+        short = os.path.basename(folder_name)
+        if len(short) > 42:
+            short = short[:39] + "…"
+        try:
+            open_player_http(folder_name)
+        except OSError as exc:
+            try:
+                os.startfile(player_path)  # type: ignore[attr-defined]
+            except OSError as exc2:
+                self._set_status(f"Статус: не открылся плеер: {exc}; {exc2}")
+                return
+            self._set_status(f"Статус: плеер (file) · {short}")
+            return
+        self._set_status(f"Статус: плеер · {short}")
 
     def on_download(self) -> None:
         if self._busy:
@@ -893,6 +1052,8 @@ class SubtitleApp(ctk.CTk):
             os.path.join(folder_name, "1_текст_с_таймкодами.txt")
         ):
             timed_note = "\n+ файл с таймкодами: 1_текст_с_таймкодами.txt"
+        if folder_name and os.path.exists(os.path.join(folder_name, PLAYER_FILENAME)):
+            timed_note += f"\n+ плеер: {PLAYER_FILENAME}"
         self._set_status(
             f"Готово! Папка: {shown}{clipboard_msg}{timed_note}\n{timing_hint}"
         )

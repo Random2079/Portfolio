@@ -29,16 +29,20 @@ PID_FILE = ROOT / "tts_daemon.pid"
 HOST = "127.0.0.1"
 PORT = 47391
 DEFAULT_VOLUME = 45
-DEFAULT_ENGINE = "kokoro"  # kokoro | qwen
+DEFAULT_ENGINE = "local"  # local (Silero) | kokoro | qwen
 DEFAULT_PAUSE_MS = 350  # пауза между кусками (реф: ~300–500ms между предложениями)
 DEFAULT_HYBRID_MODE = "dict_only"
 DEFAULT_LANG_SWITCH_PAUSE_MS = 80
 DEFAULT_KOKORO_VOICE = "sveta"
+DEFAULT_LOCAL_SPEAKER = "xenia"
 DEFAULT_QWEN_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
 DEFAULT_QWEN_SPEAKER = "serena"
 DEFAULT_QWEN_DESIGN = "micro_wife/voice_design.txt"
-_ENGINES = {"kokoro", "qwen"}
+_ENGINES = {"local", "kokoro", "qwen"}
 _HYBRID_MODES = {"off", "dict_only"}
+# Живой Qwen на 3050: 20–30с / до ~160с если тесно. Дальше CUDA стоит — процесс надо убить.
+WARMUP_STALE_SEC = 240
+WARMUP_BUSY_OTHER = -1
 
 try:
     from tts_debug import (
@@ -83,9 +87,14 @@ _progress: dict[str, object] = {
     "current": 0,
     "total": 0,
     "phase_started": time.monotonic(),
+    "paused_accum": 0.0,
+    "pause_mark": 0.0,
 }
 _warmup_active = False
 _warmup_started = 0.0
+_warmup_token = 0
+_warmup_engine = ""
+_warmup_gate = threading.Lock()
 
 
 def set_progress(
@@ -109,31 +118,74 @@ def set_progress(
             current is not None and int(current) != old_current
         ):
             _progress["phase_started"] = time.monotonic()
+            _progress["paused_accum"] = 0.0
+            _progress["pause_mark"] = 0.0
 
 
-def set_warmup_active(value: bool) -> None:
-    global _warmup_active, _warmup_started
+def set_warmup_active(value: bool, *, engine: str | None = None) -> int:
+    """Вкл: всегда новый отсчёт (смена движка / повторный warmup). Возвращает token."""
+    global _warmup_active, _warmup_started, _warmup_token, _warmup_engine
     with _progress_lock:
-        if value and not _warmup_active:
+        if value:
+            _warmup_token += 1
             _warmup_started = time.monotonic()
-        _warmup_active = value
+            _warmup_active = True
+            if engine:
+                _warmup_engine = str(engine)
+                _progress["engine"] = str(engine)
+            return _warmup_token
+        _warmup_active = False
+        return _warmup_token
 
 
-def progress_percent(phase: str, current: int, total: int, *, warming: bool) -> int:
-    """Грубая доля по кускам: внутри одного куска Qwen процента не отдаёт."""
-    if warming:
+def end_warmup(token: int) -> None:
+    """Снять warming только если это всё ещё актуальная загрузка."""
+    global _warmup_active
+    with _progress_lock:
+        if token == _warmup_token:
+            _warmup_active = False
+
+
+def warmup_in_progress(engine: str | None = None) -> bool:
+    with _progress_lock:
+        if not _warmup_active:
+            return False
+        if engine is None:
+            return True
+        return str(_warmup_engine) == str(engine)
+
+
+def try_begin_warmup(engine: str) -> int | None:
+    """token / None (тот же движок уже грузится) / WARMUP_BUSY_OTHER."""
+    engine = str(engine or DEFAULT_ENGINE)
+    with _warmup_gate:
+        if warmup_in_progress(engine):
+            return None
+        if warmup_in_progress():
+            return WARMUP_BUSY_OTHER
+        return set_warmup_active(True, engine=engine)
+
+
+def _exit_process_soon() -> None:
+    time.sleep(0.15)
+    try:
+        PID_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
+    os._exit(0)
+
+
+def _elapsed_seconds_locked(*, warming: bool) -> int:
+    """Секунды фазы; на паузе не тикают (pause_mark замораживает конец интервала)."""
+    started = float(
+        _warmup_started if warming else _progress.get("phase_started", 0.0)
+    )
+    if not started:
         return 0
-    if total <= 0:
-        return 0 if phase == "idle" else 5
-    cur = max(0, min(current, total))
-    if phase == "synthesizing":
-        done = max(0, cur - 1)
-        return max(1, min(99, int(100 * done / total)))
-    if phase == "playing":
-        return max(1, min(100, int(100 * cur / total)))
-    if phase == "preparing":
-        return 1
-    return 0
+    accum = float(_progress.get("paused_accum", 0.0) or 0.0)
+    mark = float(_progress.get("pause_mark", 0.0) or 0.0)
+    end = mark if mark > 0 else time.monotonic()
+    return max(0, int(end - started - accum))
 
 
 def progress_snapshot() -> dict[str, object]:
@@ -141,14 +193,20 @@ def progress_snapshot() -> dict[str, object]:
         data = dict(_progress)
         warming = _warmup_active
         data["warming"] = warming
-        started = float(_warmup_started if warming else data.get("phase_started", 0.0))
+        elapsed = _elapsed_seconds_locked(warming=warming)
+        data["elapsed_sec"] = elapsed
+        data["warmup_stale"] = bool(warming and elapsed >= WARMUP_STALE_SEC)
     phase = str(data.get("phase", "idle"))
     current = int(data.get("current", 0) or 0)
     total = int(data.get("total", 0) or 0)
     data["paused"] = is_paused()
     data["queue"] = _speech_queue.qsize()
-    data["elapsed_sec"] = max(0, int(time.monotonic() - started)) if started else 0
-    data["percent"] = progress_percent(phase, current, total, warming=warming)
+    # % больше не для UI (модель не отдаёт); оставляем грубый индикатор кусков для отладки.
+    data["percent"] = 0
+    if total > 0 and phase == "playing":
+        data["percent"] = max(1, min(100, int(100 * current / total)))
+    elif total > 1 and phase == "synthesizing":
+        data["percent"] = max(0, min(99, int(100 * max(0, current - 1) / total)))
     return data
 
 
@@ -156,6 +214,7 @@ def load_config() -> dict:
     data = {
         "engine": DEFAULT_ENGINE,
         "kokoro_voice": DEFAULT_KOKORO_VOICE,
+        "local_speaker": DEFAULT_LOCAL_SPEAKER,
         "hybrid_mode": DEFAULT_HYBRID_MODE,
         "lang_switch_pause_ms": DEFAULT_LANG_SWITCH_PAUSE_MS,
         "qwen_model": DEFAULT_QWEN_MODEL,
@@ -171,6 +230,10 @@ def load_config() -> dict:
             data["engine"] = engine if engine in _ENGINES else DEFAULT_ENGINE
             kokoro_voice = str(raw.get("kokoro_voice", DEFAULT_KOKORO_VOICE)).strip().lower()
             data["kokoro_voice"] = kokoro_voice or DEFAULT_KOKORO_VOICE
+            local_speaker = str(
+                raw.get("local_speaker", DEFAULT_LOCAL_SPEAKER)
+            ).strip().lower()
+            data["local_speaker"] = local_speaker or DEFAULT_LOCAL_SPEAKER
             hybrid = str(raw.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
             if hybrid == "dict_and_en":
                 hybrid = "dict_only"
@@ -238,8 +301,21 @@ def is_paused() -> bool:
 def set_paused(value: bool) -> None:
     global _paused
     with _pause_lock:
+        was = _paused
         _paused = value
     _sync_pause_flag(value)
+    # Таймер фазы не должен тикать на паузе (иначе «22 с» растёт, пока звук стоит).
+    with _progress_lock:
+        if value and not was:
+            if float(_progress.get("pause_mark", 0.0) or 0.0) <= 0:
+                _progress["pause_mark"] = time.monotonic()
+        elif not value and was:
+            mark = float(_progress.get("pause_mark", 0.0) or 0.0)
+            if mark > 0:
+                _progress["paused_accum"] = float(
+                    _progress.get("paused_accum", 0.0) or 0.0
+                ) + (time.monotonic() - mark)
+            _progress["pause_mark"] = 0.0
 
 
 def wait_while_paused() -> bool:
@@ -282,39 +358,14 @@ def ensure_mixer() -> None:
         _mixer_ready = True
 
 
-def _rewarm_kokoro_after_stop() -> None:
-    """После Stop worker мёртв — в фоне поднять+прогреть, иначе следующий Speak = 15–60 с cold load.
-
-    Тот же Kokoro JSONL worker / тот же warmup. Не меняет метод синтеза.
-    """
-
-    def run() -> None:
-        try:
-            cfg = load_config()
-            if str(cfg.get("engine", DEFAULT_ENGINE)) != "kokoro":
-                return
-            from speak_kokoro import warmup as warmup_kokoro
-
-            set_warmup_active(True)
-            try:
-                debug_log("WARMUP rewarm-after-stop begin")
-                warmup_kokoro(
-                    _normalize_kokoro_voice(
-                        cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)
-                    )
-                )
-                debug_log("WARMUP rewarm-after-stop done")
-            finally:
-                set_warmup_active(False)
-        except Exception as error:
-            set_warmup_active(False)
-            debug_log(f"WARMUP rewarm-after-stop fail: {error}")
-
-    threading.Thread(target=run, name="tts-rewarm-kokoro", daemon=True).start()
-
-
 def stop_playback() -> None:
-    """Полный stop: обрыв текущего play. Очередь чистит вызывающий."""
+    """Полный stop: обрыв текущего play. Очередь чистит вызывающий.
+
+    Worker Kokoro убиваем ТОЛЬКО на phase=synthesizing.
+    Раньше убивали ещё и на warmup / любом Stop → каждый interrupt и Стоп
+    срывали прогрев, Speak снова грузил модель 20–60 с («44 секунды» и рост).
+    Играет wav → pygame.stop + stop_event, worker живой.
+    """
     set_paused(False)
     _stop_event.set()
     try:
@@ -324,23 +375,24 @@ def stop_playback() -> None:
             pygame.mixer.music.stop()
     except Exception:
         pass
-    # Прервать долгий Kokoro synth (убивает worker — иначе Stop ждёт до конца synth).
-    killed = False
-    try:
-        from speak_kokoro import cancel_current
 
-        cancel_current()
-        killed = True
-    except Exception:
-        pass
-    # Сразу греем снова: иначе «Прослушать» после Стопа 20+ с на cold load модели.
-    if killed:
-        _rewarm_kokoro_after_stop()
+    with _progress_lock:
+        phase = str(_progress.get("phase", "idle"))
+    if phase == "synthesizing":
+        try:
+            from speak_kokoro import cancel_current
+
+            cancel_current()
+            debug_log("STOP kill_kokoro_worker phase=synthesizing")
+        except Exception as error:
+            debug_log(f"STOP kill_kokoro_worker skip: {error}")
+    else:
+        debug_log(f"STOP keep_kokoro_worker phase={phase}")
 
 
 def _prepare_engine(engine: str) -> None:
     """При смене движка освобождаем чужой runtime (VRAM / worker RAM)."""
-    if engine == "kokoro":
+    if engine in {"local", "kokoro"}:
         try:
             micro = Path(__file__).resolve().parent / "micro_wife"
             if str(micro) not in sys.path:
@@ -350,7 +402,7 @@ def _prepare_engine(engine: str) -> None:
             unload_qwen()
         except Exception as error:
             debug_log(f"unload qwen skip: {error}")
-    elif engine == "qwen":
+    if engine in {"local", "qwen"}:
         try:
             from speak_kokoro import stop_worker
 
@@ -363,6 +415,15 @@ def _normalize_kokoro_voice(voice: str | None) -> str:
     from speak_kokoro import normalize_voice
 
     return normalize_voice(voice)
+
+
+def _normalize_local_speaker(speaker: str | None) -> str:
+    from speak_local import DEFAULT_LOCAL_SPEAKER as silero_default
+    from speak_local import LOCAL_SPEAKERS
+
+    known = {code for code, _ in LOCAL_SPEAKERS}
+    v = (speaker or silero_default).strip().lower() or silero_default
+    return v if v in known else silero_default
 
 
 def pause_playback() -> None:
@@ -570,11 +631,20 @@ def _audio_suffix(engine: str) -> str:
 
 
 def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None:
-    """kokoro / qwen → wav. lang оставлен для совместимости (всегда ru).
+    """local / kokoro / qwen → wav. lang оставлен для совместимости (всегда ru).
     Смену движка (_prepare_engine) делает speak_text/warmup один раз — не на каждый chunk.
     """
     del lang  # EN hybrid убран вместе с Piper
     engine = cfg["engine"]
+    if engine == "local":
+        from speak_local import synthesize_wav as synthesize_local
+
+        synthesize_local(
+            part,
+            _normalize_local_speaker(cfg.get("local_speaker", DEFAULT_LOCAL_SPEAKER)),
+            out_path,
+        )
+        return
     if engine == "kokoro":
         from speak_kokoro import synthesize_wav as synthesize_kokoro
 
@@ -616,6 +686,9 @@ def _looks_like_table_speech(text: str) -> bool:
 
 def _parts_for_engine(text: str, engine: str) -> list[str]:
     table_like = _looks_like_table_speech(text)
+    if engine == "local":
+        # Silero режет длинные куски сам (~900); держим умеренно.
+        return split_into_chunks(text, target=140 if table_like else 280)
     if engine == "kokoro":
         return split_into_chunks(text, target=160 if table_like else 400)
     if engine == "qwen":
@@ -752,6 +825,39 @@ def speak_text(text: str) -> None:
         log_speak_done(ok_parts, fail_parts, len(units))
 
 
+def _run_engine_warmup(engine: str, cfg: dict, *, bg: bool) -> None:
+    """Реальная загрузка. Вызывать только после try_begin_warmup."""
+    prefix = "WARMUP bg" if bg else "WARMUP"
+    _prepare_engine(engine)
+    if engine == "local":
+        from speak_local import warmup as warmup_local
+
+        debug_log(f"{prefix} local begin")
+        warmup_local()
+        debug_log(f"{prefix} local done")
+        return
+    if engine == "kokoro":
+        from speak_kokoro import warmup as warmup_kokoro
+
+        debug_log(f"{prefix} kokoro begin")
+        warmup_kokoro(
+            _normalize_kokoro_voice(cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE))
+        )
+        debug_log(f"{prefix} kokoro done")
+        return
+    if engine == "qwen":
+        micro = Path(__file__).resolve().parent / "micro_wife"
+        if str(micro) not in sys.path:
+            sys.path.insert(0, str(micro))
+        from speak_qwen import warmup as warmup_qwen
+
+        debug_log(f"{prefix} qwen begin")
+        warmup_qwen(cfg.get("qwen_model", DEFAULT_QWEN_MODEL))
+        debug_log(f"{prefix} qwen done")
+        return
+    debug_log(f"{prefix} skip (engine={engine})")
+
+
 def handle_client(conn: socket.socket) -> None:
     with conn:
         raw = b""
@@ -784,58 +890,50 @@ def handle_client(conn: socket.socket) -> None:
             cfg = load_config()
             engine = str(cfg.get("engine", DEFAULT_ENGINE))
             set_progress("idle", engine=engine, current=0, total=0)
-            _prepare_engine(engine)
-            set_warmup_active(True)
-            if engine == "kokoro":
-                try:
-                    from speak_kokoro import warmup as warmup_kokoro
-
-                    debug_log("WARMUP kokoro begin")
-                    warmup_kokoro(
-                        _normalize_kokoro_voice(
-                            cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)
-                        )
-                    )
-                    debug_log("WARMUP kokoro done")
-                    conn.sendall(b'{"ok":true,"warmed":true,"engine":"kokoro"}\n')
-                except Exception as error:
-                    debug_log(f"WARMUP kokoro fail: {error}")
-                    conn.sendall(
-                        json.dumps(
-                            {"ok": False, "error": str(error)},
-                            ensure_ascii=False,
-                        ).encode("utf-8")
-                        + b"\n"
-                    )
-            elif engine == "qwen":
-                try:
-                    micro = Path(__file__).resolve().parent / "micro_wife"
-                    if str(micro) not in sys.path:
-                        sys.path.insert(0, str(micro))
-                    from speak_qwen import warmup as warmup_qwen
-
-                    debug_log("WARMUP qwen begin")
-                    warmup_qwen(cfg.get("qwen_model", DEFAULT_QWEN_MODEL))
-                    debug_log("WARMUP qwen done")
-                    conn.sendall(b'{"ok":true,"warmed":true,"engine":"qwen"}\n')
-                except Exception as error:
-                    debug_log(f"WARMUP qwen fail: {error}")
-                    conn.sendall(
-                        json.dumps(
-                            {"ok": False, "error": str(error)},
-                            ensure_ascii=False,
-                        ).encode("utf-8")
-                        + b"\n"
-                    )
-            else:
+            token = try_begin_warmup(engine)
+            if token is None:
                 conn.sendall(
                     json.dumps(
-                        {"ok": False, "error": f"unknown engine: {engine}"},
+                        {"ok": True, "warmed": "in_progress", "engine": engine},
                         ensure_ascii=False,
                     ).encode("utf-8")
                     + b"\n"
                 )
-            set_warmup_active(False)
+                return
+            if token == WARMUP_BUSY_OTHER:
+                debug_log(f"WARMUP skip other engine in flight want={engine}")
+                conn.sendall(
+                    json.dumps(
+                        {
+                            "ok": False,
+                            "error": "engine_switch_needs_restart",
+                            "warming_engine": _warmup_engine,
+                        },
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+                return
+            try:
+                _run_engine_warmup(engine, cfg, bg=False)
+                conn.sendall(
+                    json.dumps(
+                        {"ok": True, "warmed": True, "engine": engine},
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+            except Exception as error:
+                debug_log(f"WARMUP {engine} fail: {error}")
+                conn.sendall(
+                    json.dumps(
+                        {"ok": False, "error": str(error)},
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+            finally:
+                end_warmup(token)
             return
         if cmd == "pause":
             pause_playback()
@@ -860,8 +958,15 @@ def handle_client(conn: socket.socket) -> None:
         if cmd == "stop":
             cleared = clear_speech_queue()
             stop_playback()
-            debug_log(f"STOP cleared_queue={cleared}")
+            warming = warmup_in_progress()
+            debug_log(f"STOP cleared_queue={cleared} warming={warming}")
             conn.sendall(b'{"ok":true,"stopped":true}\n')
+            if warming:
+                # CUDA from_pretrained не прерывается из Python — убиваем процесс.
+                debug_log("STOP abort warmup — process exit")
+                threading.Thread(
+                    target=_exit_process_soon, name="tts-abort-warmup", daemon=True
+                ).start()
             return
         if cmd == "speak":
             text = str(data.get("text", "")).strip()
@@ -910,47 +1015,46 @@ def _configure_server_socket(server: socket.socket, platform: str = sys.platform
 
 
 def warmup_engine_background() -> None:
-    """Не блокирует accept: kokoro/qwen грузятся в фоне после старта."""
+    """Не блокирует accept: Silero/kokoro/qwen грузятся в фоне после старта."""
 
     def run() -> None:
         cfg = load_config()
-        engine = cfg.get("engine")
-        set_progress(
-            "idle",
-            engine=str(engine or DEFAULT_ENGINE),
-            current=0,
-            total=0,
-        )
-        set_warmup_active(True)
+        engine = str(cfg.get("engine") or DEFAULT_ENGINE)
+        set_progress("idle", engine=engine, current=0, total=0)
+        token = try_begin_warmup(engine)
+        if token is None:
+            debug_log(f"WARMUP bg skip in_progress engine={engine}")
+            return
+        if token == WARMUP_BUSY_OTHER:
+            debug_log(f"WARMUP bg skip other engine want={engine}")
+            return
         try:
-            _prepare_engine(str(engine or DEFAULT_ENGINE))
-            if engine == "kokoro":
-                from speak_kokoro import warmup as warmup_kokoro
-
-                debug_log("WARMUP bg kokoro begin")
-                warmup_kokoro(
-                    _normalize_kokoro_voice(
-                        cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)
-                    )
-                )
-                debug_log("WARMUP bg kokoro done")
-            elif engine == "qwen":
-                micro = Path(__file__).resolve().parent / "micro_wife"
-                if str(micro) not in sys.path:
-                    sys.path.insert(0, str(micro))
-                from speak_qwen import warmup as warmup_qwen
-
-                debug_log("WARMUP bg qwen begin")
-                warmup_qwen(cfg.get("qwen_model", DEFAULT_QWEN_MODEL))
-                debug_log("WARMUP bg qwen done")
-            else:
-                debug_log(f"WARMUP bg skip (engine={engine})")
+            _run_engine_warmup(engine, cfg, bg=True)
         except Exception as error:
             debug_log(f"WARMUP bg {engine} fail: {error}")
         finally:
-            set_warmup_active(False)
+            end_warmup(token)
 
     threading.Thread(target=run, name="tts-warmup", daemon=True).start()
+
+
+def _warmup_watchdog() -> None:
+    """Если загрузка живая дольше лимита — процесс мёртвый, GPU надо отдать."""
+    while True:
+        time.sleep(1.0)
+        try:
+            snap = progress_snapshot()
+        except Exception:
+            continue
+        if snap.get("warmup_stale"):
+            debug_log(
+                f"WARMUP stale {snap.get('elapsed_sec')}s engine={snap.get('engine')} — process exit"
+            )
+            try:
+                PID_FILE.unlink(missing_ok=True)
+            except OSError:
+                pass
+            os._exit(1)
 
 
 def main() -> int:
@@ -973,6 +1077,9 @@ def main() -> int:
     ensure_mixer()
     ensure_worker()
     warmup_engine_background()
+    threading.Thread(
+        target=_warmup_watchdog, name="tts-warmup-watchdog", daemon=True
+    ).start()
 
     try:
         while True:

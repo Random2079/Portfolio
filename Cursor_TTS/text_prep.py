@@ -106,6 +106,52 @@ def strip_code_and_diagrams(text: str) -> str:
     return text
 
 
+_STAGE_CUE_WORDS = (
+    "вздох",
+    "вздыхает",
+    "вдох",
+    "выдох",
+    "пауза",
+    "тишина",
+    "смеется",
+    "смеётся",
+    "смех",
+    "шепот",
+    "шёпот",
+    "кашель",
+    "всхлип",
+    "стон",
+    "sigh",
+    "pause",
+    "breath",
+    "whisper",
+    "laugh",
+)
+_STAGE_CUE_RE = re.compile(
+    r"(?i)\b(?:" + "|".join(re.escape(word) for word in _STAGE_CUE_WORDS) + r")\b"
+)
+
+
+def strip_stage_directions(text: str) -> str:
+    """Убирает короткие ремарки вида *вздох* / (pause) / [sigh]."""
+
+    def _repl(match: re.Match[str]) -> str:
+        body = match.group(1)
+        words = re.findall(r"[A-Za-zА-Яа-яЁё-]+", body)
+        if not words:
+            return " "
+        # Удаляем только короткие ремарки; длинные скобки оставляем.
+        if len(words) > 4:
+            return match.group(0)
+        joined = " ".join(words)
+        return " " if _STAGE_CUE_RE.search(joined) else match.group(0)
+
+    text = re.sub(r"\*{1,2}\s*([^*]{1,64}?)\s*\*{1,2}", _repl, text)
+    text = re.sub(r"\(\s*([^)]{1,64}?)\s*\)", _repl, text)
+    text = re.sub(r"\[\s*([^\]]{1,64}?)\s*\]", _repl, text)
+    return text
+
+
 def tables_to_speech(text: str) -> str:
     """
     Markdown-таблицы → короткие фразы.
@@ -247,6 +293,7 @@ def _latin_letter_ratio(text: str) -> float:
 
 def _prepare_base(text: str) -> str:
     text = strip_code_and_diagrams(text)
+    text = strip_stage_directions(text)
     text = tables_to_speech(text)
     return soften_symbols(text)
 

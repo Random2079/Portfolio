@@ -85,6 +85,17 @@ class TestTablesStillWork(unittest.TestCase):
         self.assertIn("Столбцы", joined)
 
 
+class TestStageDirections(unittest.TestCase):
+    def test_strips_short_stage_cues(self) -> None:
+        source = "Я иду домой. *вздох* Потом (pause) [смеётся] продолжаю."
+        out = finalize_speech_text(source, apply_dict=False).lower()
+        self.assertIn("я иду домой", out)
+        self.assertIn("потом", out)
+        self.assertNotIn("вздох", out)
+        self.assertNotIn("pause", out)
+        self.assertNotIn("смеётся", out)
+
+
 class TestQwenChunkIntegrity(unittest.TestCase):
     def test_decimal_date_example_survives_preparation_and_chunking(self) -> None:
         import tts_daemon as daemon

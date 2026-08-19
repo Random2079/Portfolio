@@ -44,33 +44,43 @@ VOICES_KOKORO = [
     ("masha", "Маша (kokoro-ru)"),
     ("dima", "Дима (kokoro-ru)"),
 ]
+VOICES_LOCAL = [
+    ("xenia", "Ксения (Silero)"),
+    ("baya", "Бая (Silero)"),
+    ("kseniya", "Ксения-2 (Silero)"),
+    ("aidar", "Айдар (Silero)"),
+    ("eugene", "Евгений (Silero)"),
+]
 DEFAULT_KOKORO_VOICE = "sveta"
+DEFAULT_LOCAL_SPEAKER = "xenia"
 DEFAULT_HYBRID_MODE = "dict_only"
 DEFAULT_VOLUME = 45
-DEFAULT_ENGINE = "kokoro"
+DEFAULT_ENGINE = "local"
 DEFAULT_PAUSE_MS = 350
 DEFAULT_QWEN_SPEAKER = "serena"
 DEFAULT_QWEN_DESIGN = "micro_wife/designs/02_soft_high_female.txt"
-_ENGINES = {"kokoro", "qwen"}
+_ENGINES = {"local", "kokoro", "qwen"}
 _HYBRID_MODES = {"off", "dict_only"}
 HYBRID_ITEMS = [
     ("off", "Как написано (без словаря)"),
     ("dict_only", "Словарь IT (fallback → фэлбэк)"),
 ]
 VOICES_QWEN = [
+    ("micro_wife/designs/06_work_male_neutral.txt", "6 · рабочий мужской (ровный)"),
     ("micro_wife/designs/02_soft_high_female.txt", "2 · мягкий высокий (micro wife)"),
     ("micro_wife/designs/05_adult_book_female.txt", "5 · взрослая книжная (не лоли)"),
-    ("micro_wife/designs/01_bright_male_theater.txt", "1 · яркий мужской (театр)"),
-    ("micro_wife/designs/03_dark_male_suspense.txt", "3 · тёмный мужской (саспенс)"),
-    ("micro_wife/designs/04_neutral_baritone.txt", "4 · баритон-чтец"),
 ]
-TEST_PHRASE = "Привет. Это проверка голоса Cursor TTS. Kokoro или Qwen."
+TEST_PHRASE = "Привет. Это проверка голоса Cursor TTS. Silero, Kokoro или Qwen."
+# По логам этой машины: Silero cold ~15–25с (раз ~74с), Kokoro ~50–70с,
+# Qwen ~20–30с на свободной 3050, до ~2.5 мин если тесно. Дальше — зависон, не «ещё грузится».
+WARMUP_STALE_SEC = 240
 
 
 def load_config() -> dict:
     data = {
         "engine": DEFAULT_ENGINE,
         "kokoro_voice": DEFAULT_KOKORO_VOICE,
+        "local_speaker": DEFAULT_LOCAL_SPEAKER,
         "hybrid_mode": DEFAULT_HYBRID_MODE,
         "micro_wife_design_file": DEFAULT_QWEN_DESIGN,
         "qwen_speaker": DEFAULT_QWEN_SPEAKER,
@@ -87,7 +97,9 @@ def load_config() -> dict:
             pass
 
     engine = str(data.get("engine", DEFAULT_ENGINE)).strip().lower()
-    # старые edge/local/piper → kokoro
+    # мёртвые edge/piper → local (быстрый Silero); неизвестное тоже
+    if engine in {"edge", "piper"}:
+        engine = "local"
     if engine not in _ENGINES:
         engine = DEFAULT_ENGINE
     data["engine"] = engine
@@ -97,6 +109,12 @@ def load_config() -> dict:
     if kokoro_voice not in known_kokoro:
         kokoro_voice = DEFAULT_KOKORO_VOICE
     data["kokoro_voice"] = kokoro_voice
+
+    local_speaker = str(data.get("local_speaker", DEFAULT_LOCAL_SPEAKER)).strip().lower()
+    known_local = {code for code, _ in VOICES_LOCAL}
+    if local_speaker not in known_local:
+        local_speaker = DEFAULT_LOCAL_SPEAKER
+    data["local_speaker"] = local_speaker
 
     hybrid = str(data.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
     if hybrid == "dict_and_en":
@@ -129,6 +147,7 @@ def save_config(
     *,
     engine: str | None = None,
     kokoro_voice: str | None = None,
+    local_speaker: str | None = None,
     hybrid_mode: str | None = None,
     micro_wife_design_file: str | None = None,
     qwen_speaker: str | None = None,
@@ -143,6 +162,10 @@ def save_config(
         voice = str(kokoro_voice).strip().lower()
         known = {code for code, _ in VOICES_KOKORO}
         data["kokoro_voice"] = voice if voice in known else DEFAULT_KOKORO_VOICE
+    if local_speaker is not None:
+        voice = str(local_speaker).strip().lower()
+        known = {code for code, _ in VOICES_LOCAL}
+        data["local_speaker"] = voice if voice in known else DEFAULT_LOCAL_SPEAKER
     if hybrid_mode is not None:
         mode = str(hybrid_mode).strip().lower()
         if mode == "dict_and_en":
@@ -169,7 +192,6 @@ def save_config(
     # вычищаем мёртвые ключи старых движков
     for dead in (
         "voice",
-        "local_speaker",
         "piper_model",
         "piper_model_en",
     ):
@@ -257,6 +279,107 @@ def stop_speech() -> None:
         )
 
 
+_tts_stack_shutting_down = False
+
+
+def _taskkill_pid(pid: int) -> None:
+    if pid <= 0:
+        return
+    flags = 0x08000000 if sys.platform == "win32" else 0
+    subprocess.run(
+        ["taskkill", "/F", "/T", "/PID", str(pid)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=flags,
+    )
+
+
+def _iter_windows_cmdlines() -> list[tuple[int, str]]:
+    """(pid, CommandLine) для python / AutoHotkey."""
+    if sys.platform != "win32":
+        return []
+    flags = 0x08000000
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process | "
+                "Where-Object { $_.Name -match 'python|autohotkey' } | "
+                "ForEach-Object { '{0}|{1}' -f $_.ProcessId, $_.CommandLine }",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=flags,
+            timeout=8,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    out: list[tuple[int, str]] = []
+    for line in (result.stdout or "").splitlines():
+        if "|" not in line:
+            continue
+        pid_s, cmd = line.split("|", 1)
+        if pid_s.isdigit() and cmd.strip():
+            out.append((int(pid_s), cmd))
+    return out
+
+
+def shutdown_tts_stack() -> None:
+    """Крест панели = выключить весь TTS (демон, kokoro, зависшие warmup, наши хоткеи).
+
+    Раньше closeEvent только снимал TTS_OFF, а pythonw-процессы жили дальше.
+    """
+    global _tts_stack_shutting_down
+    if _tts_stack_shutting_down:
+        return
+    _tts_stack_shutting_down = True
+    try:
+        stop_speech()
+    except Exception:
+        pass
+    try:
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from speak_edge import stop_daemon
+
+        stop_daemon(force=True)
+    except Exception:
+        try:
+            if DAEMON_PID_FILE.is_file():
+                pid = int(DAEMON_PID_FILE.read_text(encoding="ascii").strip())
+                _taskkill_pid(pid)
+                DAEMON_PID_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    root_norm = str(ROOT).replace("/", "\\").lower()
+    markers = (
+        "tts_daemon.py",
+        "kokoro_worker.py",
+        "speak_edge.py",
+        "hotkey_tts.ahk",
+        "tts_panel.py",
+    )
+    my_pid = os.getpid()
+    for pid, cmd in _iter_windows_cmdlines():
+        if pid == my_pid:
+            continue
+        low = cmd.replace("/", "\\").lower()
+        if root_norm not in low and "cursor_tts" not in low:
+            continue
+        if not any(m in low for m in markers):
+            continue
+        if "autohotkey" in low and "hotkey_tts.ahk" not in low:
+            continue
+        _taskkill_pid(pid)
+
+    PAUSE_FLAG.unlink(missing_ok=True)
+
+
 def is_paused_flag() -> bool:
     return PAUSE_FLAG.is_file()
 
@@ -324,6 +447,19 @@ def daemon_busy(status: dict) -> bool:
     )
 
 
+def preview_allowed(status: dict) -> bool:
+    """Прослушать во время warmup сажает фразу в очередь — Stop её уже не снимает."""
+    return not bool(status.get("warming"))
+
+
+def warmup_is_stale(status: dict) -> bool:
+    if not status.get("warming"):
+        return False
+    if status.get("warmup_stale"):
+        return True
+    return int(status.get("elapsed_sec", 0) or 0) >= WARMUP_STALE_SEC
+
+
 def daemon_status() -> dict:
     """Живой прогресс: warmup / synth N/M / play N/M / очередь."""
     try:
@@ -354,31 +490,28 @@ def format_daemon_progress(status: dict) -> str:
     total = int(status.get("total", 0) or 0)
     phase = str(status.get("phase", "idle"))
     elapsed = int(status.get("elapsed_sec", 0) or 0)
-    percent = int(status.get("percent", 0) or 0)
+    chunk = f"{current} из {total}" if total else "?"
 
     if status.get("warming"):
-        text = f"⏳ {engine}: загрузка модели · {elapsed} с"
-        if total:
-            text += f" · затем кусок {current or 1} из {total}"
+        if warmup_is_stale(status):
+            text = (
+                f"⚠ {engine}: загрузка зависла · {elapsed} с "
+                f"(лимит {WARMUP_STALE_SEC} с). Закрой панель или вернись на Silero."
+            )
+        else:
+            text = f"⏳ {engine}: загрузка модели · {elapsed} с"
+            if total:
+                text += f" · затем кусок {current or 1} из {total}"
     elif status.get("paused"):
-        text = f"⏸ {engine}: пауза"
+        text = f"⏸ {engine}: пауза · таймер стоп · {elapsed} с"
         if total:
-            text += f" · кусок {current} из {total}"
-            if total > 1:
-                text += f" · {percent}%"
+            text += f" · кусок {chunk}"
     elif phase == "preparing":
         text = f"⏳ {engine}: подготовка текста · {elapsed} с"
     elif phase == "synthesizing":
-        # % по кускам: на 1/1 врал бы «1%» всю дорогу cold load / synth.
-        chunk = f"{current} из {total}" if total else "?"
-        if total > 1:
-            text = (
-                f"🧠 {engine}: синтез {chunk} · готово кусков ~{percent}% · {elapsed} с"
-            )
-        else:
-            text = f"🧠 {engine}: синтез {chunk} · ждём звук · {elapsed} с"
+        text = f"🧠 {engine}: синтез {chunk} · ждём звук · {elapsed} с"
     elif phase == "playing":
-        text = f"▶ {engine}: играет {current} из {total} · {percent}% · {elapsed} с"
+        text = f"▶ {engine}: играет {chunk} · {elapsed} с"
     else:
         text = f"✓ {engine}: готов"
 
@@ -387,33 +520,33 @@ def format_daemon_progress(status: dict) -> str:
     return text
 
 
-def progress_bar_state(status: dict) -> tuple[int, bool, str]:
-    """value 0–100, indeterminate, window title suffix.
+def progress_bar_state(status: dict) -> tuple[int, int, bool, str]:
+    """value, maximum, indeterminate, window title.
 
-    Синтез одного куска не умеет отдавать % внутри модели → бегущая полоска + секунды.
-    Детерминированный % только когда уже играем / много кусков по факту готово.
+    Без фейковых %: либо бегущая полоска, либо честные куски N/M при play.
     """
     if not status:
-        return 0, False, ""
+        return 0, 100, False, ""
     phase = str(status.get("phase", "idle"))
     current = int(status.get("current", 0) or 0)
     total = int(status.get("total", 0) or 0)
-    percent = int(status.get("percent", 0) or 0)
+    elapsed = int(status.get("elapsed_sec", 0) or 0)
     if status.get("warming"):
-        return 0, True, f"загрузка модели… {int(status.get('elapsed_sec', 0) or 0)}с"
+        if warmup_is_stale(status):
+            return 0, 0, True, f"зависла {elapsed}с"
+        return 0, 0, True, f"загрузка… {elapsed}с"
     if status.get("paused"):
         suffix = f"пауза {current}/{total}" if total else "пауза"
-        return percent if total > 1 else 0, False, suffix
+        return 0, 0, True, suffix
     if phase == "preparing":
-        return 0, True, "подготовка…"
+        return 0, 0, True, "подготовка…"
     if phase == "synthesizing":
-        if total > 1:
-            return percent, False, f"синтез {current}/{total} · ~{percent}%"
-        elapsed = int(status.get("elapsed_sec", 0) or 0)
-        return 0, True, f"синтез… {elapsed}с"
+        return 0, 0, True, f"синтез {current}/{total} · {elapsed}с" if total else f"синтез… {elapsed}с"
     if phase == "playing":
-        return percent, False, f"играет {current}/{total} · {percent}%"
-    return 0, False, ""
+        if total > 1:
+            return current, total, False, f"играет {current}/{total}"
+        return 0, 0, True, f"играет · {elapsed}с"
+    return 0, 100, False, ""
 
 
 class TTSPanel(QMainWindow):
@@ -424,6 +557,8 @@ class TTSPanel(QMainWindow):
         self._center()
         self._updating = False
         self._poll_busy = False
+        self._preview_hold = False
+        self._stale_killed = False
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -434,7 +569,9 @@ class TTSPanel(QMainWindow):
         layout.addWidget(self.auto_checkbox)
 
         self.interrupt_checkbox = QCheckBox(
-            "Новый ответ обрывает старый (выкл = очередь)", self
+            "Обрывать старую озвучку новым ответом "
+            "(выкл = очередь, быстрее; вкл = Stop mid-synth, возможен cold load)",
+            self,
         )
         self.interrupt_checkbox.toggled.connect(self._on_interrupt_toggled)
         layout.addWidget(self.interrupt_checkbox)
@@ -442,7 +579,8 @@ class TTSPanel(QMainWindow):
         engine_row = QHBoxLayout()
         engine_row.addWidget(QLabel("Движок:", self))
         self.engine_combo = QComboBox(self)
-        self.engine_combo.addItem("Kokoro-ru (быстрый)", "kokoro")
+        self.engine_combo.addItem("Silero (быстрый, как раньше)", "local")
+        self.engine_combo.addItem("Kokoro-ru", "kokoro")
         self.engine_combo.addItem("Micro wife (Qwen)", "qwen")
         self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         engine_row.addWidget(self.engine_combo, stretch=1)
@@ -492,6 +630,7 @@ class TTSPanel(QMainWindow):
         buttons = QHBoxLayout()
         self.test_button = QPushButton("Прослушать", self)
         self.test_button.clicked.connect(self._on_test)
+        self.test_button.setToolTip("Проверка голоса. Во время загрузки модели кнопка выключена.")
         self.pause_button = QPushButton("Пауза", self)
         self.pause_button.clicked.connect(self._on_pause_toggle)
         self.stop_button = QPushButton("Стоп", self)
@@ -518,7 +657,7 @@ class TTSPanel(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("%p%")
+        self.progress_bar.setFormat("%v / %m")
         self.progress_bar.setMinimumHeight(22)
         layout.addWidget(self.progress_bar)
 
@@ -550,7 +689,12 @@ class TTSPanel(QMainWindow):
     def _fill_voices(self, engine: str, selected: str | None = None) -> None:
         self.voice_combo.blockSignals(True)
         self.voice_combo.clear()
-        items = VOICES_QWEN if engine == "qwen" else VOICES_KOKORO
+        if engine == "qwen":
+            items = VOICES_QWEN
+        elif engine == "local":
+            items = VOICES_LOCAL
+        else:
+            items = VOICES_KOKORO
         for code, label in items:
             self.voice_combo.addItem(label, code)
         if selected:
@@ -563,6 +707,8 @@ class TTSPanel(QMainWindow):
     def _selected_voice_for_engine(cfg: dict, engine: str) -> str:
         if engine == "qwen":
             return cfg.get("micro_wife_design_file", DEFAULT_QWEN_DESIGN)
+        if engine == "local":
+            return cfg.get("local_speaker", DEFAULT_LOCAL_SPEAKER)
         return cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)
 
     def _reload_from_disk(self) -> None:
@@ -603,6 +749,14 @@ class TTSPanel(QMainWindow):
         paused = is_paused_flag()
         pause_txt = "ПАУЗА" if paused else "играет"
         status = daemon_status()
+        selected = str(self.engine_combo.currentData() or "").strip().lower()
+        status_engine = str(status.get("engine", "")).strip().lower()
+        if status and selected and status_engine and selected != status_engine:
+            # Смена в комбо уже случилась, демон ещё на старом warmup — не тащим старые секунды.
+            status = dict(status)
+            status["engine"] = selected
+            if status.get("warming"):
+                status["elapsed_sec"] = 0
         busy = daemon_busy(status)
         work = "занят" if busy else "готов"
         self.status_label.setText(
@@ -610,13 +764,18 @@ class TTSPanel(QMainWindow):
             f"{volume}% · демон {work} · {pause_txt}"
         )
         self.progress_label.setText(format_daemon_progress(status))
-        value, indeterminate, title_suffix = progress_bar_state(status)
+        value, maximum, indeterminate, title_suffix = progress_bar_state(status)
         if indeterminate:
             if self.progress_bar.maximum() != 0:
                 self.progress_bar.setRange(0, 0)
+            self.progress_bar.setFormat("…")
         else:
-            if self.progress_bar.maximum() != 100:
-                self.progress_bar.setRange(0, 100)
+            if self.progress_bar.maximum() != maximum or self.progress_bar.minimum() != 0:
+                self.progress_bar.setRange(0, max(1, maximum))
+            if maximum <= 1:
+                self.progress_bar.setFormat("")
+            else:
+                self.progress_bar.setFormat("%v / %m кусков")
             if self.progress_bar.value() != value:
                 self.progress_bar.setValue(value)
         want_title = f"Cursor TTS — {title_suffix}" if title_suffix else "Cursor TTS"
@@ -626,7 +785,48 @@ class TTSPanel(QMainWindow):
         if busy != self._poll_busy:
             self._poll_busy = busy
             self.timer.setInterval(400 if busy else 1000)
+        self._apply_preview_enabled(status)
         self._apply_pause_ui(paused)
+        if warmup_is_stale(status):
+            if not self._stale_killed:
+                self._stale_killed = True
+                threading.Thread(
+                    target=self._kill_stuck_daemon, name="tts-stale-kill", daemon=True
+                ).start()
+        elif not status.get("warming"):
+            self._stale_killed = False
+
+    def _kill_stuck_daemon(self) -> None:
+        try:
+            if str(ROOT) not in sys.path:
+                sys.path.insert(0, str(ROOT))
+            from speak_edge import stop_daemon
+
+            stop_daemon(force=True)
+        except Exception:
+            pass
+
+    def _arm_preview_hold(self) -> None:
+        """Сразу после смены движка warmup ещё не в status — не даём кликнуть Прослушать."""
+        self._preview_hold = True
+        self.test_button.setEnabled(False)
+        self.test_button.setToolTip("Модель грузится — Прослушать выключено.")
+        QTimer.singleShot(2500, self._release_preview_hold_if_idle)
+
+    def _release_preview_hold_if_idle(self) -> None:
+        self._preview_hold = False
+        self._refresh_status()
+
+    def _apply_preview_enabled(self, status: dict) -> None:
+        allowed = preview_allowed(status) and not self._preview_hold
+        if self.test_button.isEnabled() != allowed:
+            self.test_button.setEnabled(allowed)
+        if allowed:
+            self.test_button.setToolTip("Проверка голоса текущим движком.")
+        else:
+            self.test_button.setToolTip(
+                "Модель ещё грузится — Прослушать выключено, иначе фраза зависает и Стоп молчит."
+            )
 
     def _apply_pause_ui(self, paused: bool) -> None:
         if paused:
@@ -673,17 +873,35 @@ class TTSPanel(QMainWindow):
         selected = self._selected_voice_for_engine(cfg, engine)
         self._fill_voices(engine, selected)
         save_config(engine=engine)
+        self._arm_preview_hold()
+        self._stale_killed = False
+        msg_prefix = (
+            "Сменил движок — убиваю старый процесс (Qwen/Kokoro иначе не отдают GPU). "
+        )
         if engine == "qwen":
             msg = (
-                "Движок: Micro wife (Qwen). Лучшее качество, 5–15 с на фразу после прогрева. "
+                f"{msg_prefix}Движок: Micro wife (Qwen). Качество, медленнее. "
                 "CUDA Graphs на старте."
+            )
+        elif engine == "local":
+            msg = (
+                f"{msg_prefix}Движок: Silero (local). Быстрый офлайн, как раньше. "
+                "Первый старт — скачает модель, дальше тепло."
             )
         else:
             msg = (
-                "Движок: Kokoro-ru. Быстрее Qwen, лучше Piper. "
-                "Первый старт ~20–30 с (Python 3.12 worker), дальше теплее."
+                f"{msg_prefix}Движок: Kokoro-ru. Качество выше Silero, cold load тяжелее."
             )
         self.status_label.setText(msg)
+        try:
+            if str(ROOT) not in sys.path:
+                sys.path.insert(0, str(ROOT))
+            from speak_edge import reboot_daemon
+
+            reboot_daemon()
+        except Exception as error:
+            self.status_label.setText(f"Не смог перезапустить демон: {error}")
+        warmup_tts_backend()
         self._refresh_status()
 
     def _on_hybrid_changed(self, _index: int) -> None:
@@ -719,6 +937,8 @@ class TTSPanel(QMainWindow):
             except Exception:
                 spk = DEFAULT_QWEN_SPEAKER
             save_config(micro_wife_design_file=str(code), qwen_speaker=spk)
+        elif engine == "local":
+            save_config(local_speaker=str(code))
         else:
             save_config(kokoro_voice=str(code))
         self._refresh_status()
@@ -744,6 +964,12 @@ class TTSPanel(QMainWindow):
         self._refresh_status()
 
     def _on_test(self) -> None:
+        if not preview_allowed(daemon_status()) or self._preview_hold:
+            self.status_label.setText(
+                "Подожди загрузку модели. Прослушать сейчас не жми — Стоп потом не спасёт."
+            )
+            self.test_button.setEnabled(False)
+            return
         if not SPEAK_EDGE.is_file():
             self.status_label.setText("Ошибка: не найден speak_edge.py")
             return
@@ -794,6 +1020,7 @@ class TTSPanel(QMainWindow):
         # авто по умолчанию снова ON (иначе хук молчит до ручного включения).
         if OFF_FLAG.exists():
             set_auto_on(True)
+        shutdown_tts_stack()
         super().closeEvent(event)
 
 
@@ -822,6 +1049,9 @@ def main() -> int:
                 "Закрой pythonw в диспетчере задач и попробуй снова.",
             )
             return 1
+    # Держим SharedMemory живым до выхода (иначе GC → «уже открыта» ломается).
+    app._tts_single_instance = guard  # type: ignore[attr-defined]
+    app.aboutToQuit.connect(shutdown_tts_stack)
 
     window = TTSPanel()
     window.show()

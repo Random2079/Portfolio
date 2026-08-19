@@ -1,20 +1,28 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, ConfigDict
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from portfolio_news.bcs_client import get_bcs_client, match_holding
 from portfolio_news.config import Settings, get_settings
 from portfolio_news.db import NewsItem, Ticker, make_session_factory
 from portfolio_news.import_tickers import load_tickers_from_json, upsert_tickers
-from portfolio_news.metrics_moex import fetch_metrics_for
+from portfolio_news.metrics_moex import (
+    effective_moex_limit,
+    fetch_coupons_for,
+    fetch_dividends_for,
+    fetch_metrics_for,
+    metric_to_dict,
+)
 from portfolio_news.poll_job import get_poll_status, start_poll_job
 
 _settings = get_settings()
@@ -73,17 +81,53 @@ class NewsOut(BaseModel):
     notified: int
 
 
-class MetricOut(BaseModel):
+class DividendOut(BaseModel):
     ticker_id: str
-    kind: str
     name: str
-    last: Optional[float] = None
-    changepct: Optional[float] = None
-    div_yield: Optional[float] = None
-    coupon_percent: Optional[float] = None
-    currency: str = "RUB"
-    board: str = ""
+    secid: str = ""
+    isin: str = ""
+    registryclosedate: str = ""
+    value: Optional[float] = None
+    currencyid: str = ""
+    extra: dict = Field(default_factory=dict)
     error: str = ""
+
+
+class CouponOut(BaseModel):
+    ticker_id: str
+    name: str
+    secid: str = ""
+    isin: str = ""
+    coupondate: str = ""
+    recorddate: str = ""
+    startdate: str = ""
+    value: Optional[float] = None
+    valueprc: Optional[float] = None
+    currencyid: str = ""
+    extra: dict = Field(default_factory=dict)
+    error: str = ""
+
+
+def _scoped_tickers(
+    db: Session,
+    *,
+    ticker_id: Optional[str],
+    kind: Optional[str],
+    category: Optional[str],
+    limit: int,
+) -> list[Ticker]:
+    q = select(Ticker).order_by(Ticker.id)
+    if ticker_id:
+        q = q.where(Ticker.id == ticker_id)
+    else:
+        if kind:
+            q = q.where(Ticker.kind == kind)
+        if category:
+            q = q.where(Ticker.category == category)
+    rows = list(db.scalars(q))
+    if limit:
+        rows = rows[:limit]
+    return rows
 
 
 @app.on_event("startup")
@@ -177,7 +221,7 @@ def poll_status():
     return get_poll_status()
 
 
-@app.get("/api/metrics", response_model=list[MetricOut])
+@app.get("/api/metrics")
 def list_metrics(
     ticker_id: Optional[str] = Query(None),
     kind: Optional[str] = Query(None),
@@ -185,31 +229,106 @@ def list_metrics(
     limit: int = Query(0, ge=0, le=100),
     db: Session = Depends(get_db),
 ):
-    q = select(Ticker).order_by(Ticker.id)
-    if ticker_id:
-        q = q.where(Ticker.id == ticker_id)
-    else:
-        if kind:
-            q = q.where(Ticker.kind == kind)
-        if category:
-            q = q.where(Ticker.category == category)
-    rows = list(db.scalars(q))
-    if limit:
-        rows = rows[:limit]
-    items = [(t.id, t.kind, t.name) for t in rows]
+    eff = effective_moex_limit(ticker_id=ticker_id, limit=limit)
+    rows = _scoped_tickers(
+        db, ticker_id=ticker_id, kind=kind, category=category, limit=eff
+    )
+    items = [(t.id, t.kind, t.name, t.isin or "") for t in rows]
     metrics = fetch_metrics_for(items)
+    return [metric_to_dict(m) for m in metrics]
+
+
+@app.get("/api/dividends", response_model=list[DividendOut])
+def list_dividends(
+    ticker_id: Optional[str] = Query(None),
+    kind: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    limit: int = Query(0, ge=0, le=100),
+    db: Session = Depends(get_db),
+):
+    eff = effective_moex_limit(ticker_id=ticker_id, limit=limit)
+    rows = _scoped_tickers(
+        db, ticker_id=ticker_id, kind=kind, category=category, limit=eff
+    )
+    items = [(t.id, t.kind, t.name) for t in rows]
     return [
-        MetricOut(
-            ticker_id=m.ticker_id,
-            kind=m.kind,
-            name=m.name,
-            last=m.last,
-            changepct=m.changepct,
-            div_yield=m.div_yield,
-            coupon_percent=m.coupon_percent,
-            currency=m.currency,
-            board=m.board,
-            error=m.error,
+        DividendOut(
+            ticker_id=d.ticker_id,
+            name=d.name,
+            secid=d.secid,
+            isin=d.isin,
+            registryclosedate=d.registryclosedate,
+            value=d.value,
+            currencyid=d.currencyid,
+            extra=d.extra,
+            error=d.error,
         )
-        for m in metrics
+        for d in fetch_dividends_for(items)
     ]
+
+
+@app.get("/api/coupons", response_model=list[CouponOut])
+def list_coupons(
+    ticker_id: Optional[str] = Query(None),
+    kind: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    limit: int = Query(0, ge=0, le=100),
+    db: Session = Depends(get_db),
+):
+    eff = effective_moex_limit(ticker_id=ticker_id, limit=limit)
+    rows = _scoped_tickers(
+        db, ticker_id=ticker_id, kind=kind, category=category, limit=eff
+    )
+    items = [(t.id, t.kind, t.name) for t in rows]
+    return [
+        CouponOut(
+            ticker_id=c.ticker_id,
+            name=c.name,
+            secid=c.secid,
+            isin=c.isin,
+            coupondate=c.coupondate,
+            recorddate=c.recorddate,
+            startdate=c.startdate,
+            value=c.value,
+            valueprc=c.valueprc,
+            currencyid=c.currencyid,
+            extra=c.extra,
+            error=c.error,
+        )
+        for c in fetch_coupons_for(items)
+    ]
+
+
+def _bcs():
+    cfg = get_settings()
+    return get_bcs_client(
+        refresh_token=cfg.bcs_trade_refresh_token,
+        client_id=cfg.bcs_trade_client_id or "trade-api-read",
+    )
+
+
+@app.get("/api/holdings")
+def list_holdings(
+    force: bool = Query(False),
+    ticker_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """BCS portfolio positions (read-only). Empty if token not configured."""
+    snap = _bcs().fetch_holdings(force=force)
+    data = snap.to_dict()
+    if ticker_id and snap.ok:
+        t = db.get(Ticker, ticker_id)
+        isin = (t.isin if t else "") or ""
+        hit = match_holding(snap.holdings, ticker_id=ticker_id, isin=isin)
+        data["match"] = asdict(hit) if hit else None
+        data["holdings"] = [asdict(hit)] if hit else []
+    return data
+
+
+@app.get("/api/holdings/status")
+def holdings_status():
+    cfg = get_settings()
+    return {
+        "configured": bool(cfg.bcs_trade_refresh_token.strip()),
+        "client_id": cfg.bcs_trade_client_id or "trade-api-read",
+    }

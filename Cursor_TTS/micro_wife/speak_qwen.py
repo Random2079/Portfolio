@@ -20,6 +20,10 @@ DESIGNS_DIR = ROOT / "designs"
 DEFAULT_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
 DEFAULT_SPEAKER = "serena"  # warm gentle young female (id lowercase)
 DEFAULT_LANGUAGE = "russian"
+ANTI_BREATH_RULE = (
+    "Читай ровно и нейтрально. "
+    "Не добавляй вздохи, охи, стоны, смешки, шепот, придыхания и сценические эффекты."
+)
 
 # Пресет design → базовый speaker CustomVoice (иначе всё звучит как Serena)
 _DESIGN_SPEAKER: dict[str, str] = {
@@ -28,6 +32,7 @@ _DESIGN_SPEAKER: dict[str, str] = {
     "03_dark_male_suspense.txt": "uncle_fu",
     "04_neutral_baritone.txt": "uncle_fu",
     "05_adult_book_female.txt": "sohee",
+    "06_work_male_neutral.txt": "ryan",
 }
 
 _lock = threading.RLock()
@@ -60,6 +65,7 @@ def list_design_presets() -> list[tuple[str, str]]:
         "03_dark_male_suspense.txt": "3 · тёмный мужской (саспенс)",
         "04_neutral_baritone.txt": "4 · баритон-чтец",
         "05_adult_book_female.txt": "5 · взрослая книжная (не лоли)",
+        "06_work_male_neutral.txt": "6 · рабочий мужской (ровный)",
     }
     for path in sorted(DESIGNS_DIR.glob("*.txt")):
         rel = f"micro_wife/designs/{path.name}"
@@ -117,10 +123,13 @@ def _enable_cuda_fast_paths() -> dict:
     }
 
 
-def unload() -> None:
-    """Снять модель с VRAM (смена движка на Kokoro / рестарт)."""
+def unload() -> bool:
+    """Снять модель с VRAM. False = load ещё держит lock, жди рестарт процесса."""
     global _model, _model_id, _model_backend
-    with _lock:
+    got = _lock.acquire(timeout=0.3)
+    if not got:
+        return False
+    try:
         _model = None
         _model_id = None
         _model_backend = None
@@ -133,6 +142,9 @@ def unload() -> None:
                 torch.cuda.empty_cache()
         except Exception:
             pass
+        return True
+    finally:
+        _lock.release()
 
 
 def warmup(
@@ -209,6 +221,10 @@ def synthesize_wav(
     instruct = design if design is not None else load_voice_design(design_file)
     if not instruct:
         instruct = load_voice_design()
+    if instruct:
+        instruct = f"{instruct}\n{ANTI_BREATH_RULE}"
+    else:
+        instruct = ANTI_BREATH_RULE
     mid = (model_id or DEFAULT_MODEL_ID).strip()
     if speaker:
         spk = speaker.strip().lower() or DEFAULT_SPEAKER

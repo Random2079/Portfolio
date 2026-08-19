@@ -153,6 +153,18 @@ def main() -> int:
         log(f"Payload failed: {type(error).__name__}: {error}")
         return 0
 
+    event = str(data.get("hook_event_name") or "")
+    gen = str(data.get("generation_id") or "")
+    status = str(data.get("status") or "")
+    if event == "stop" and status in {"aborted", "error"}:
+        log(f"skip stop status={status}")
+        return 0
+
+    stamp = ROOT / "Cursor_TTS" / ".tts_last_generation"
+    if gen and stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == gen:
+        log(f"skip duplicate generation event={event}")
+        return 0
+
     text = extract_text(data).strip()
     log_clean_result(text[:200], text[:200])
     if len(text) < 8:
@@ -165,6 +177,8 @@ def main() -> int:
 
     try:
         speak_async(text)
+        if gen:
+            stamp.write_text(gen, encoding="utf-8")
     except Exception as error:
         log(f"Speech failed: {type(error).__name__}: {error}")
         return 1

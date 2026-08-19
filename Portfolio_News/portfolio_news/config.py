@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     port: int = 8765
     tickers_json: Path = DEFAULT_TICKERS_JSON
 
+    # BCS Trade API (read-only). Never commit real token.
+    bcs_trade_refresh_token: str = ""
+    bcs_trade_client_id: str = "trade-api-read"
+
 
 def get_settings() -> Settings:
     DATA_DIR.mkdir(parents=True, exist_ok=True)

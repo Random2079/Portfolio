@@ -121,16 +121,31 @@
       }
       .progress .label { font-size: 0.85rem; color: var(--muted); }
       .view-tabs { display: flex; gap: 0.4rem; margin-bottom: 0.75rem; }
-      .metrics-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+      .metrics-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
       .metrics-table th, .metrics-table td {
-        text-align: left; padding: 0.45rem 0.35rem; border-bottom: 1px solid var(--border);
+        text-align: left; padding: 0.4rem 0.3rem; border-bottom: 1px solid var(--border);
+        white-space: nowrap;
       }
-      .metrics-table th { color: var(--muted); font-weight: 600; }
+      .metrics-table th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+      .table-scroll { overflow: auto; max-height: 70vh; }
+      .view-tabs .chip {
+        background: var(--panel); color: var(--text); border: 1px solid var(--border);
+        border-radius: 999px; padding: 0.35rem 0.85rem; font-weight: 600; font-size: 0.85rem;
+      }
+      .view-tabs .chip.active-filter { background: var(--accent); color: #fff; border-color: var(--accent); }
+      .actions-moex { display: none; }
+      .actions-moex.visible { display: flex; }
       .chg-up { color: #0f7a5a; }
       .chg-down { color: #b42318; }
-      .warn-all {
-        font-size: 0.8rem; color: var(--muted); margin: 0 0 0.75rem;
+      .holdings-box {
+        margin-bottom: 0.75rem; padding: 0.65rem 0.75rem;
+        border: 1px solid var(--border); border-radius: 10px; background: #f8fafc;
+        font-size: 0.85rem;
       }
+      .holdings-box .row { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; }
+      .holdings-box .k { color: var(--muted); font-size: 0.75rem; }
+      .holdings-box .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+      .holdings-box.muted { color: var(--muted); }
     </style>
   </head>
   <body>
@@ -144,7 +159,9 @@
           <button type="button" class="secondary" id="btnRefresh" title="Только перечитать уже сохранённые новости из базы, без интернета">
             Перечитать ленту
           </button>
-          <button type="button" class="secondary" id="btnMetrics">Метрики MOEX</button>
+          <button type="button" class="secondary" id="btnReloadMoex" hidden title="Перечитать текущую вкладку с MOEX ISS">
+            Обновить с MOEX
+          </button>
           <button type="button" id="btnPoll" title="Сходить в RSS и искать свежие новости по выбранному scope">
             Искать новости
           </button>
@@ -162,21 +179,37 @@
       <div id="error" class="error" hidden></div>
       <div class="view-tabs">
         <button type="button" class="chip active-filter" id="tabNews">Лента</button>
-        <button type="button" class="chip" id="tabMetrics">Метрики</button>
+        <button type="button" class="chip" id="tabQuotes">Котировки</button>
+        <button type="button" class="chip" id="tabDivs">Дивы</button>
+        <button type="button" class="chip" id="tabCoupons">Купоны</button>
+        <button type="button" class="chip" id="tabHoldings">Позиции БКС</button>
       </div>
-      <div class="layout" id="newsLayout">
+      <div id="holdingsBanner" class="holdings-box muted" hidden></div>
+      <div class="layout" id="mainLayout">
         <aside class="panel">
           <h2 id="tickersHeading">Тикеры</h2>
           <ul class="ticker-list" id="tickers"></ul>
         </aside>
-        <main class="panel news-panel">
+        <main class="panel news-panel" id="newsLayout">
           <h2 id="newsTitle">Лента</h2>
           <ul class="news-list" id="news"></ul>
         </main>
-      </div>
-      <div class="panel" id="metricsLayout" hidden>
-        <h2>Метрики (MOEX ISS)</h2>
-        <div id="metricsBody" class="empty">Нажми «Метрики MOEX» — подтянем цены по текущему фильтру.</div>
+        <div class="panel news-panel" id="quotesLayout" hidden>
+          <h2>Котировки (MOEX ISS, сырые)</h2>
+          <div id="quotesBody" class="empty">Выбери вкладку — подтянем по текущему фильтру.</div>
+        </div>
+        <div class="panel news-panel" id="divsLayout" hidden>
+          <h2>Дивиденды (MOEX dividends.json)</h2>
+          <div id="divsBody" class="empty">Выбери вкладку — история выплат по фильтру.</div>
+        </div>
+        <div class="panel news-panel" id="couponsLayout" hidden>
+          <h2>Купоны (MOEX bondization.json)</h2>
+          <div id="couponsBody" class="empty">Выбери вкладку — график купонов по фильтру.</div>
+        </div>
+        <div class="panel news-panel" id="holdingsLayout" hidden>
+          <h2>Позиции (БКС Trade API, read-only)</h2>
+          <div id="holdingsBody" class="empty">Нужен BCS_TRADE_REFRESH_TOKEN в .env</div>
+        </div>
       </div>
     </div>
     <script>
@@ -190,7 +223,10 @@
       let allNews = [];
       let pollInfo = null;
       let pollTimer = null;
-      let view = "news"; // news | metrics
+      let view = "news"; // news | quotes | divs | coupons | holdings
+      let moexAbort = null;
+      let moexReqId = 0;
+      let holdingsCache = null;
 
       function showError(msg) {
         const el = document.getElementById("error");
@@ -203,10 +239,29 @@
         el.textContent = "API: " + msg;
       }
 
-      async function getJson(path) {
-        const res = await fetch(path);
+      async function getJson(path, opts) {
+        const res = await fetch(path, opts || {});
         if (!res.ok) throw new Error(res.status + " " + path);
         return res.json();
+      }
+
+      function beginMoexFetch() {
+        if (moexAbort) moexAbort.abort();
+        moexAbort = typeof AbortController !== "undefined" ? new AbortController() : null;
+        moexReqId += 1;
+        return { id: moexReqId, signal: moexAbort ? moexAbort.signal : undefined };
+      }
+
+      function isStaleMoex(id) {
+        return id !== moexReqId;
+      }
+
+      function safeHttpUrl(url) {
+        try {
+          const u = new URL(String(url || ""), window.location.origin);
+          if (u.protocol === "http:" || u.protocol === "https:") return u.href;
+        } catch (_) {}
+        return "";
       }
 
       function filteredTickers() {
@@ -230,6 +285,17 @@
         return params;
       }
 
+      function moexQuery() {
+        const params = new URLSearchParams();
+        if (selected) params.set("ticker_id", selected);
+        else {
+          if (kindFilter !== "all") params.set("kind", kindFilter);
+          if (kindFilter === "equity" && sectorFilter) params.set("category", sectorFilter);
+        }
+        if (!selected && kindFilter === "all" && !sectorFilter) params.set("limit", "15");
+        return params;
+      }
+
       function pollScopeLabel() {
         if (selected) return "тикер " + selected + " (1)";
         const n = filteredTickers().length;
@@ -241,11 +307,36 @@
       function updateScopeHint() {
         const el = document.getElementById("pollScopeHint");
         const btn = document.getElementById("btnPoll");
-        el.textContent =
-          "«Искать новости» = RSS по: " + pollScopeLabel() +
-          ". «Перечитать ленту» = только база, без опроса источников." +
-          (selected ? " (клик по тикеру ещё раз — снять выделение и опросить сектор/фильтр)" : "");
-        if (!btn.disabled) btn.textContent = "Искать: " + pollScopeLabel();
+        const btnMoex = document.getElementById("btnReloadMoex");
+        const btnRefresh = document.getElementById("btnRefresh");
+        const onNews = view === "news";
+        btn.hidden = !onNews;
+        btnRefresh.hidden = !onNews;
+        btnMoex.hidden = onNews;
+        if (onNews) {
+          el.textContent =
+            "«Искать новости» = RSS по: " + pollScopeLabel() +
+            ". «Перечитать ленту» = только база, без опроса источников." +
+            (selected ? " (клик по тикеру ещё раз — снять выделение и опросить сектор/фильтр)" : "");
+          if (!btn.disabled) btn.textContent = "Искать: " + pollScopeLabel();
+        } else {
+          const tab =
+            view === "quotes"
+              ? "котировки"
+              : view === "divs"
+                ? "дивы"
+                : view === "coupons"
+                  ? "купоны"
+                  : "позиции БКС";
+          el.textContent =
+            "Вкладка «" + tab + "» — " +
+            (view === "holdings"
+              ? "позиции из БКС Trade API (read-only) по: "
+              : "сырой MOEX ISS по: ") +
+            pollScopeLabel() +
+            ". «Обновить с MOEX» = перезапрос (для БКС тоже)." +
+            (view !== "holdings" ? " Без PnL с MOEX; qty — из БКС." : "");
+        }
       }
 
       function equitySectors() {
@@ -279,7 +370,13 @@
             kindFilter = key;
             sectorFilter = null;
             if (selected && !filteredTickers().some((t) => t.id === selected)) selected = null;
+            if (kindFilter === "bond" && view === "divs") setView("news");
+            if (kindFilter === "equity" && view === "coupons") {
+              /* ok to stay */
+            }
+            updateTabVisibility();
             renderAll();
+            if (view !== "news") loadCurrentMoexView();
           });
           host.appendChild(btn);
         }
@@ -302,6 +399,7 @@
           sectorFilter = null;
           if (selected && !filteredTickers().some((t) => t.id === selected)) selected = null;
           renderAll();
+          if (view !== "news") loadCurrentMoexView();
         });
         host.appendChild(allBtn);
         for (const sec of equitySectors()) {
@@ -314,6 +412,7 @@
             sectorFilter = sec;
             if (selected && !filteredTickers().some((t) => t.id === selected)) selected = null;
             renderAll();
+            if (view !== "news") loadCurrentMoexView();
           });
           host.appendChild(btn);
         }
@@ -333,14 +432,22 @@
           const btn = document.createElement("button");
           btn.type = "button";
           if (selected === t.id) btn.classList.add("active");
+          const cat =
+            t.kind === "equity" && t.category ? " · " + t.category : "";
           btn.innerHTML =
-            '<span class="badge ' + t.kind + '">' + (KIND_BADGE[t.kind] || t.kind) + "</span>" +
-            '<span class="id">' + t.id + "</span>" +
-            '<span class="name">' + (t.name || "") +
-            (t.kind === "equity" && t.category ? " · " + t.category : "") + "</span>";
+            '<span class="badge ' + esc(t.kind) + '">' +
+            esc(KIND_BADGE[t.kind] || t.kind) +
+            "</span>" +
+            '<span class="id">' +
+            esc(t.id) +
+            "</span>" +
+            '<span class="name">' +
+            esc((t.name || "") + cat) +
+            "</span>";
           btn.addEventListener("click", () => {
             selected = selected === t.id ? null : t.id;
             renderAll();
+            if (view !== "news") loadCurrentMoexView();
           });
           li.appendChild(btn);
           ul.appendChild(li);
@@ -373,14 +480,26 @@
           const li = document.createElement("li");
           li.className = "news-item";
           const when = n.published_at ? new Date(n.published_at).toLocaleString("ru-RU") : "—";
-          li.innerHTML =
-            '<a href="' + n.url + '" target="_blank" rel="noreferrer"></a>' +
-            '<div class="meta"><span></span><span></span><span></span></div>';
-          li.querySelector("a").textContent = n.title;
-          const spans = li.querySelectorAll(".meta span");
-          spans[0].textContent = n.ticker_id;
-          spans[1].textContent = n.source;
-          spans[2].textContent = when;
+          const href = safeHttpUrl(n.url);
+          const a = document.createElement("a");
+          if (href) {
+            a.href = href;
+            a.target = "_blank";
+            a.rel = "noreferrer noopener";
+          } else {
+            a.href = "#";
+            a.addEventListener("click", (e) => e.preventDefault());
+          }
+          a.textContent = n.title || "(без заголовка)";
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          for (const text of [n.ticker_id, n.source, when]) {
+            const span = document.createElement("span");
+            span.textContent = text || "—";
+            meta.appendChild(span);
+          }
+          li.appendChild(a);
+          li.appendChild(meta);
           ul.appendChild(li);
         }
       }
@@ -398,11 +517,28 @@
       }
 
       function setView(next) {
+        if (next === "divs" && kindFilter === "bond") next = "news";
         view = next;
         document.getElementById("newsLayout").hidden = view !== "news";
-        document.getElementById("metricsLayout").hidden = view !== "metrics";
+        document.getElementById("quotesLayout").hidden = view !== "quotes";
+        document.getElementById("divsLayout").hidden = view !== "divs";
+        document.getElementById("couponsLayout").hidden = view !== "coupons";
+        document.getElementById("holdingsLayout").hidden = view !== "holdings";
         document.getElementById("tabNews").classList.toggle("active-filter", view === "news");
-        document.getElementById("tabMetrics").classList.toggle("active-filter", view === "metrics");
+        document.getElementById("tabQuotes").classList.toggle("active-filter", view === "quotes");
+        document.getElementById("tabDivs").classList.toggle("active-filter", view === "divs");
+        document.getElementById("tabCoupons").classList.toggle("active-filter", view === "coupons");
+        document.getElementById("tabHoldings").classList.toggle("active-filter", view === "holdings");
+        updateTabVisibility();
+        updateScopeHint();
+        updateHoldingsBanner();
+      }
+
+      function updateTabVisibility() {
+        const tabDivs = document.getElementById("tabDivs");
+        const tabCoupons = document.getElementById("tabCoupons");
+        tabDivs.hidden = kindFilter === "bond";
+        tabCoupons.hidden = kindFilter === "equity";
       }
 
       function fmtNum(v, digits) {
@@ -410,30 +546,165 @@
         return Number(v).toFixed(digits);
       }
 
-      function renderMetrics(rows) {
-        const host = document.getElementById("metricsBody");
-        if (!rows || !rows.length) {
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function collectIssErrors(rows) {
+        const errs = [];
+        for (const r of rows || []) {
+          if (r && r.error) errs.push((r.ticker_id || "?") + ": " + r.error);
+        }
+        return errs;
+      }
+
+      function renderQuotes(rows) {
+        const host = document.getElementById("quotesBody");
+        const list = rows || [];
+        const errs = collectIssErrors(list);
+        if (errs.length) {
+          showError("MOEX ошибки (" + errs.length + "): " + errs.slice(0, 3).join(" · "));
+        }
+        if (!list.length) {
           host.className = "empty";
           host.textContent = "Нет данных по фильтру.";
           return;
         }
-        host.className = "";
+        host.className = "table-scroll";
         let html =
           "<table class='metrics-table'><thead><tr>" +
-          "<th>Тикер</th><th>Цена</th><th>Δ%</th><th>Див%</th><th>Купон%</th><th>Board</th>" +
+          "<th>Тикер</th><th>ISIN</th><th>Board</th><th>Цена</th><th>Δ%</th><th>Open</th><th>High</th><th>Low</th>" +
+          "<th>Vol</th><th>Val</th><th>Див%</th><th>Купон%</th><th>Купон</th><th>Next</th>" +
+          "<th>НКД</th><th>YTM%</th><th>Mat</th><th>Face</th><th>Lot</th><th>Upd</th><th>Err</th>" +
           "</tr></thead><tbody>";
-        for (const m of rows) {
+        for (const m of list) {
           const chgClass = m.changepct > 0 ? "chg-up" : m.changepct < 0 ? "chg-down" : "";
           html +=
-            "<tr><td><strong>" + m.ticker_id + "</strong><br><span class='name'>" + (m.name || "") +
-            "</span></td><td>" + fmtNum(m.last, 2) +
+            "<tr><td><strong>" + esc(m.ticker_id) + "</strong><br><span class='name'>" +
+            esc(m.shortname || m.name || "") +
+            "</span></td><td>" + esc(m.isin || "—") +
+            "</td><td>" + esc(m.board || "—") +
+            "</td><td>" + fmtNum(m.last, 2) +
             "</td><td class='" + chgClass + "'>" + fmtNum(m.changepct, 2) +
+            "</td><td>" + fmtNum(m.open, 2) +
+            "</td><td>" + fmtNum(m.high, 2) +
+            "</td><td>" + fmtNum(m.low, 2) +
+            "</td><td>" + fmtNum(m.voltoday, 0) +
+            "</td><td>" + fmtNum(m.valtoday, 0) +
             "</td><td>" + fmtNum(m.div_yield, 2) +
             "</td><td>" + fmtNum(m.coupon_percent, 2) +
-            "</td><td>" + (m.board || "—") + (m.error ? " !" : "") +
+            "</td><td>" + fmtNum(m.coupon_value, 2) +
+            "</td><td>" + esc(m.next_coupon || "—") +
+            "</td><td>" + fmtNum(m.accruedint, 2) +
+            "</td><td>" + fmtNum(m.yield, 2) +
+            "</td><td>" + esc(m.matdate || "—") +
+            "</td><td>" + fmtNum(m.facevalue, 2) +
+            "</td><td>" + fmtNum(m.lotsize, 0) +
+            "</td><td>" + esc(m.updatetime || "—") +
+            "</td><td class='chg-down'>" + esc(m.error ? "ISS" : "") +
             "</td></tr>";
         }
         html += "</tbody></table>";
+        host.innerHTML = html;
+      }
+
+      function renderDivs(rows) {
+        const host = document.getElementById("divsBody");
+        const list = rows || [];
+        const real = list.filter((r) => !r.error || r.value != null || r.registryclosedate);
+        const onlyErr = list.filter((r) => r.error && r.value == null && !r.registryclosedate);
+        if (onlyErr.length) {
+          showError(
+            "MOEX dividends fail (" + onlyErr.length + "): " +
+              onlyErr
+                .slice(0, 3)
+                .map((r) => (r.ticker_id || "?") + ": " + r.error)
+                .join(" · ")
+          );
+        }
+        if (!real.length) {
+          host.className = "empty";
+          host.textContent = onlyErr.length
+            ? "Ошибки ISS по дивидендам (см. красную строку выше). Пустой календарь ≠ ошибка сети."
+            : "Нет данных (для облигаций обычно пусто).";
+          return;
+        }
+        host.className = "table-scroll";
+        let html =
+          "<table class='metrics-table'><thead><tr>" +
+          "<th>Тикер</th><th>ISIN</th><th>Реестр</th><th>Сумма</th><th>Валюта</th><th>SECID</th>" +
+          "</tr></thead><tbody>";
+        for (const r of real) {
+          html +=
+            "<tr><td><strong>" + esc(r.ticker_id) + "</strong><br><span class='name'>" +
+            esc(r.name || "") + "</span></td><td>" + esc(r.isin || "—") +
+            "</td><td>" + esc(r.registryclosedate || "—") +
+            "</td><td>" + fmtNum(r.value, 4) +
+            "</td><td>" + esc(r.currencyid || "—") +
+            "</td><td>" + esc(r.secid || "—") +
+            "</td></tr>";
+        }
+        html += "</tbody></table>";
+        if (onlyErr.length) {
+          html +=
+            "<p class='empty'>Плюс ошибок ISS: " +
+            esc(String(onlyErr.length)) +
+            " тикер(ов) без строк.</p>";
+        }
+        host.innerHTML = html;
+      }
+
+      function renderCoupons(rows) {
+        const host = document.getElementById("couponsBody");
+        const list = rows || [];
+        const real = list.filter((r) => !r.error || r.value != null || r.coupondate);
+        const onlyErr = list.filter((r) => r.error && r.value == null && !r.coupondate);
+        if (onlyErr.length) {
+          showError(
+            "MOEX coupons fail (" + onlyErr.length + "): " +
+              onlyErr
+                .slice(0, 3)
+                .map((r) => (r.ticker_id || "?") + ": " + r.error)
+                .join(" · ")
+          );
+        }
+        if (!real.length) {
+          host.className = "empty";
+          host.textContent = onlyErr.length
+            ? "Ошибки ISS по купонам (см. красную строку выше). Пустой график ≠ ошибка сети."
+            : "Нет данных (для акций обычно пусто).";
+          return;
+        }
+        host.className = "table-scroll";
+        let html =
+          "<table class='metrics-table'><thead><tr>" +
+          "<th>Тикер</th><th>ISIN</th><th>Дата купона</th><th>Record</th><th>Start</th>" +
+          "<th>Сумма</th><th>%</th><th>Валюта</th>" +
+          "</tr></thead><tbody>";
+        for (const r of real) {
+          html +=
+            "<tr><td><strong>" + esc(r.ticker_id) + "</strong><br><span class='name'>" +
+            esc(r.name || "") + "</span></td><td>" + esc(r.isin || "—") +
+            "</td><td>" + esc(r.coupondate || "—") +
+            "</td><td>" + esc(r.recorddate || "—") +
+            "</td><td>" + esc(r.startdate || "—") +
+            "</td><td>" + fmtNum(r.value, 4) +
+            "</td><td>" + fmtNum(r.valueprc, 4) +
+            "</td><td>" + esc(r.currencyid || "—") +
+            "</td></tr>";
+        }
+        html += "</tbody></table>";
+        if (onlyErr.length) {
+          html +=
+            "<p class='empty'>Плюс ошибок ISS: " +
+            esc(String(onlyErr.length)) +
+            " тикер(ов) без строк.</p>";
+        }
         host.innerHTML = html;
       }
 
@@ -443,7 +714,9 @@
         renderTickers();
         renderNews();
         renderSubtitle();
+        updateTabVisibility();
         updateScopeHint();
+        updateHoldingsBanner();
       }
 
       async function load() {
@@ -463,27 +736,274 @@
         }
       }
 
-      async function loadMetrics() {
+      async function loadQuotes() {
         showError("");
-        setView("metrics");
-        const host = document.getElementById("metricsBody");
+        setView("quotes");
+        const host = document.getElementById("quotesBody");
         host.className = "empty";
-        host.textContent = "Грузим MOEX…";
+        host.textContent = "Грузим MOEX котировки…";
+        ensureHoldings(false).then(() => updateHoldingsBanner());
+        const req = beginMoexFetch();
         try {
-          const params = new URLSearchParams();
-          if (selected) params.set("ticker_id", selected);
-          else {
-            if (kindFilter !== "all") params.set("kind", kindFilter);
-            if (kindFilter === "equity" && sectorFilter) params.set("category", sectorFilter);
-          }
-          // Cap "all" to avoid 50 slow ISS calls in one click
-          if (!selected && kindFilter === "all" && !sectorFilter) params.set("limit", "15");
-          const rows = await getJson("/api/metrics?" + params.toString());
-          renderMetrics(rows);
+          const rows = await getJson("/api/metrics?" + moexQuery().toString(), {
+            signal: req.signal,
+          });
+          if (isStaleMoex(req.id)) return;
+          renderQuotes(rows);
+        } catch (e) {
+          if (e && e.name === "AbortError") return;
+          if (isStaleMoex(req.id)) return;
+          showError(String(e.message || e));
+          host.textContent = "Ошибка котировок.";
+        }
+      }
+
+      async function loadDivs() {
+        showError("");
+        setView("divs");
+        const host = document.getElementById("divsBody");
+        host.className = "empty";
+        host.textContent = "Грузим MOEX дивиденды…";
+        ensureHoldings(false).then(() => updateHoldingsBanner());
+        const req = beginMoexFetch();
+        try {
+          const rows = await getJson("/api/dividends?" + moexQuery().toString(), {
+            signal: req.signal,
+          });
+          if (isStaleMoex(req.id)) return;
+          renderDivs(rows);
+        } catch (e) {
+          if (e && e.name === "AbortError") return;
+          if (isStaleMoex(req.id)) return;
+          showError(String(e.message || e));
+          host.textContent = "Ошибка дивидендов.";
+        }
+      }
+
+      async function loadCoupons() {
+        showError("");
+        setView("coupons");
+        const host = document.getElementById("couponsBody");
+        host.className = "empty";
+        host.textContent = "Грузим MOEX купоны…";
+        ensureHoldings(false).then(() => updateHoldingsBanner());
+        const req = beginMoexFetch();
+        try {
+          const rows = await getJson("/api/coupons?" + moexQuery().toString(), {
+            signal: req.signal,
+          });
+          if (isStaleMoex(req.id)) return;
+          renderCoupons(rows);
+        } catch (e) {
+          if (e && e.name === "AbortError") return;
+          if (isStaleMoex(req.id)) return;
+          showError(String(e.message || e));
+          host.textContent = "Ошибка купонов.";
+        }
+      }
+
+      function loadCurrentMoexView() {
+        if (view === "quotes") return loadQuotes();
+        if (view === "divs") return loadDivs();
+        if (view === "coupons") return loadCoupons();
+        if (view === "holdings") return loadHoldings();
+        updateHoldingsBanner();
+      }
+
+      function fmtMoney(v) {
+        if (v == null || Number.isNaN(v)) return "—";
+        return Number(v).toLocaleString("ru-RU", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+      }
+
+      function renderHoldingsTable(snap) {
+        const host = document.getElementById("holdingsBody");
+        if (!snap.configured) {
+          host.className = "empty";
+          host.textContent =
+            "Нет токена. В кабинете БКС выпусти refresh token (trade-api-read), " +
+            "положи BCS_TRADE_REFRESH_TOKEN в Portfolio_News/.env, перезапусти serve.";
+          return;
+        }
+        if (!snap.ok) {
+          host.className = "empty";
+          host.textContent = "Ошибка БКС: " + (snap.error || "unknown");
+          return;
+        }
+        let list = snap.holdings || [];
+        if (selected) {
+          const t = tickers.find((x) => x.id === selected);
+          const isin = (t && t.isin) || "";
+          list = list.filter((h) => {
+            const id = selected.toUpperCase();
+            return (
+              (h.ticker && h.ticker.toUpperCase() === id) ||
+              (h.sec_code && h.sec_code.toUpperCase() === id) ||
+              (h.isin && isin && h.isin.toUpperCase() === isin.toUpperCase()) ||
+              (h.isin && h.isin.toUpperCase() === id)
+            );
+          });
+        } else if (kindFilter !== "all") {
+          const ids = new Set(filteredTickers().map((t) => t.id.toUpperCase()));
+          const isins = new Set(
+            filteredTickers()
+              .map((t) => (t.isin || "").toUpperCase())
+              .filter(Boolean)
+          );
+          list = list.filter(
+            (h) =>
+              ids.has((h.ticker || "").toUpperCase()) ||
+              ids.has((h.sec_code || "").toUpperCase()) ||
+              isins.has((h.isin || "").toUpperCase())
+          );
+        }
+        if (!list.length) {
+          host.className = "empty";
+          host.textContent = "Нет позиций БКС по текущему фильтру (или пустой портфель).";
+          return;
+        }
+        const sum =
+          snap.total_value != null
+            ? "<p>Итого портфель БКС: <strong>" +
+              fmtMoney(snap.total_value) +
+              "</strong> " +
+              esc(snap.currency || "RUB") +
+              (snap.pnl != null
+                ? " · PnL " + fmtMoney(snap.pnl) + " (" + fmtNum(snap.pnl_pct, 2) + "%)"
+                : "") +
+              "</p>"
+            : "";
+        host.className = "table-scroll";
+        let html =
+          sum +
+          "<table class='metrics-table'><thead><tr>" +
+          "<th>Тикер</th><th>ISIN</th><th>Кол-во</th><th>Средняя</th><th>Цена</th>" +
+          "<th>Стоимость</th><th>Себест.</th><th>PnL</th><th>PnL%</th><th>Вал</th>" +
+          "</tr></thead><tbody>";
+        for (const h of list) {
+          const pnlClass = h.pnl > 0 ? "chg-up" : h.pnl < 0 ? "chg-down" : "";
+          html +=
+            "<tr><td><strong>" +
+            esc(h.ticker || h.sec_code) +
+            "</strong><br><span class='name'>" +
+            esc(h.name || "") +
+            "</span></td><td>" +
+            esc(h.isin || "—") +
+            "</td><td>" +
+            fmtNum(h.quantity, 0) +
+            "</td><td>" +
+            fmtMoney(h.avg_price) +
+            "</td><td>" +
+            fmtMoney(h.market_price) +
+            "</td><td>" +
+            fmtMoney(h.market_value) +
+            "</td><td>" +
+            fmtMoney(h.cost_value) +
+            "</td><td class='" +
+            pnlClass +
+            "'>" +
+            fmtMoney(h.pnl) +
+            "</td><td class='" +
+            pnlClass +
+            "'>" +
+            fmtNum(h.pnl_pct, 2) +
+            "</td><td>" +
+            esc(h.currency || "RUB") +
+            "</td></tr>";
+        }
+        html += "</tbody></table>";
+        host.innerHTML = html;
+      }
+
+      async function ensureHoldings(force) {
+        try {
+          const q = force ? "?force=1" : "";
+          holdingsCache = await getJson("/api/holdings" + q);
+          return holdingsCache;
+        } catch (e) {
+          holdingsCache = {
+            configured: false,
+            ok: false,
+            error: String(e.message || e),
+            holdings: [],
+          };
+          return holdingsCache;
+        }
+      }
+
+      async function loadHoldings() {
+        showError("");
+        setView("holdings");
+        const host = document.getElementById("holdingsBody");
+        host.className = "empty";
+        host.textContent = "Грузим позиции БКС…";
+        try {
+          const snap = await ensureHoldings(true);
+          renderHoldingsTable(snap);
+          updateHoldingsBanner();
+          if (!snap.ok && snap.error) showError(snap.error);
         } catch (e) {
           showError(String(e.message || e));
-          host.textContent = "Ошибка метрик.";
+          host.textContent = "Ошибка позиций.";
         }
+      }
+
+      function updateHoldingsBanner() {
+        const box = document.getElementById("holdingsBanner");
+        if (!box) return;
+        if (!selected || view === "holdings" || view === "news") {
+          box.hidden = true;
+          return;
+        }
+        const snap = holdingsCache;
+        if (!snap || !snap.ok) {
+          box.hidden = false;
+          box.className = "holdings-box muted";
+          box.textContent =
+            snap && !snap.configured
+              ? "Позиция БКС: токен не задан (.env BCS_TRADE_REFRESH_TOKEN)."
+              : "Позиция БКС: открой «Позиции БКС» или обнови — нет кэша.";
+          return;
+        }
+        const t = tickers.find((x) => x.id === selected);
+        const isin = (t && t.isin) || "";
+        const id = selected.toUpperCase();
+        const h = (snap.holdings || []).find(
+          (x) =>
+            (x.ticker && x.ticker.toUpperCase() === id) ||
+            (x.sec_code && x.sec_code.toUpperCase() === id) ||
+            (x.isin && isin && x.isin.toUpperCase() === isin.toUpperCase()) ||
+            (x.isin && x.isin.toUpperCase() === id)
+        );
+        box.hidden = false;
+        if (!h) {
+          box.className = "holdings-box muted";
+          box.textContent = "БКС: позиции по " + selected + " нет (или не сматчилось с ISIN).";
+          return;
+        }
+        box.className = "holdings-box";
+        box.innerHTML =
+          "<div class='row'>" +
+          "<div><div class='k'>Кол-во</div><div class='v'>" +
+          esc(fmtNum(h.quantity, 0)) +
+          "</div></div>" +
+          "<div><div class='k'>Средняя</div><div class='v'>" +
+          esc(fmtMoney(h.avg_price)) +
+          "</div></div>" +
+          "<div><div class='k'>Цена</div><div class='v'>" +
+          esc(fmtMoney(h.market_price)) +
+          "</div></div>" +
+          "<div><div class='k'>Стоимость</div><div class='v'>" +
+          esc(fmtMoney(h.market_value)) +
+          "</div></div>" +
+          "<div><div class='k'>PnL</div><div class='v'>" +
+          esc(fmtMoney(h.pnl)) +
+          " (" +
+          esc(fmtNum(h.pnl_pct, 2)) +
+          "%)</div></div>" +
+          "</div>";
       }
 
       async function watchPollStatus() {
@@ -518,9 +1038,14 @@
       }
 
       document.getElementById("btnRefresh").addEventListener("click", () => load());
-      document.getElementById("btnMetrics").addEventListener("click", () => loadMetrics());
-      document.getElementById("tabNews").addEventListener("click", () => setView("news"));
-      document.getElementById("tabMetrics").addEventListener("click", () => loadMetrics());
+      document.getElementById("btnReloadMoex").addEventListener("click", () => loadCurrentMoexView());
+      document.getElementById("tabNews").addEventListener("click", () => {
+        setView("news");
+      });
+      document.getElementById("tabQuotes").addEventListener("click", () => loadQuotes());
+      document.getElementById("tabDivs").addEventListener("click", () => loadDivs());
+      document.getElementById("tabCoupons").addEventListener("click", () => loadCoupons());
+      document.getElementById("tabHoldings").addEventListener("click", () => loadHoldings());
       document.getElementById("btnPoll").addEventListener("click", async () => {
         const btn = document.getElementById("btnPoll");
         const n = selected ? 1 : filteredTickers().length;

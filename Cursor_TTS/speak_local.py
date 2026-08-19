@@ -4,12 +4,12 @@
 """
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import numpy as np
 
-SAMPLE_RATE = 48000
+# 24k достаточно для речи и заметно быстрее 48k на CPU/GPU.
+SAMPLE_RATE = 24000
 LOCAL_SPEAKERS = [
     ("xenia", "Ксения (жен.)"),
     ("baya", "Бая (жен.)"),
@@ -33,6 +33,14 @@ def _get_synth_lock():
     return _synth_lock
 
 
+def _pick_device():
+    import torch
+
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
 def get_model():
     """Ленивая загрузка Silero. Первый раз нужен интернет (скачать модель)."""
     global _model, _device
@@ -42,7 +50,13 @@ def get_model():
 
         import torch
 
-        _device = torch.device("cpu")
+        # Не жрать все ядра ноута — иначе UI/демоны душатся.
+        try:
+            torch.set_num_threads(max(1, min(4, torch.get_num_threads())))
+        except Exception:
+            pass
+
+        _device = _pick_device()
         _model, _example = torch.hub.load(
             repo_or_dir="snakers4/silero-models",
             model="silero_tts",
@@ -55,8 +69,10 @@ def get_model():
 
 
 def synthesize_wav(text: str, speaker: str, wav_path: Path) -> None:
-    import torch
+    import time
+
     import soundfile as sf
+    import torch
 
     # Silero/torch не любят параллельные вызовы из разных потоков.
     with _get_synth_lock():
@@ -70,6 +86,7 @@ def synthesize_wav(text: str, speaker: str, wav_path: Path) -> None:
         if len(text) > 900:
             text = text[:900]
 
+        t0 = time.perf_counter()
         with torch.inference_mode():
             audio = model.apply_tts(
                 text=text,
@@ -81,8 +98,25 @@ def synthesize_wav(text: str, speaker: str, wav_path: Path) -> None:
             audio = audio.cpu().numpy()
         audio = np.asarray(audio, dtype=np.float32)
         sf.write(str(wav_path), audio, SAMPLE_RATE)
+        try:
+            from tts_debug import debug_log
+
+            debug_log(
+                f"SILERO_SYNTH chars={len(text)} sec={time.perf_counter() - t0:.2f} "
+                f"device={_device}"
+            )
+        except Exception:
+            pass
 
 
 def warmup() -> None:
-    """Прогрев модели (torch + Silero) — чтобы первая фраза не ждала загрузку."""
+    """Прогрев модели (+ крошечный synth на GPU, иначе первый Speak холодный)."""
     get_model()
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        path = Path(tmp.name)
+    try:
+        synthesize_wav("Прогрев.", DEFAULT_LOCAL_SPEAKER, path)
+    finally:
+        path.unlink(missing_ok=True)

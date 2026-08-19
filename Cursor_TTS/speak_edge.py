@@ -95,9 +95,15 @@ def stop_daemon(*, force: bool = False) -> None:
     pid_file.unlink(missing_ok=True)
 
 
+def reboot_daemon() -> None:
+    """Убить демон даже на warmup и поднять заново под текущий config."""
+    stop_daemon(force=True)
+    ensure_daemon()
+
+
 def ensure_daemon(*, restart: bool = False) -> None:
     if restart:
-        stop_daemon()
+        stop_daemon(force=True)
     elif daemon_alive():
         return
 
@@ -187,13 +193,20 @@ def main() -> int:
         return 0
 
     if args.stop:
+        warming = False
         try:
             reply = send_command({"cmd": "stop"})
+            try:
+                st = send_command({"cmd": "status"}, timeout=0.5)
+                warming = bool(st.get("warming"))
+            except OSError:
+                warming = False
         except OSError as exc:
             reply = {"ok": False, "error": str(exc)}
-        # stop снимает паузу — покажем PLAYING если ок
-        if reply.get("ok"):
-            reply = {"ok": True, "paused": False}
+            warming = True
+        if warming:
+            stop_daemon(force=True)
+        if reply.get("ok") or warming:
             print("PLAYING")
             return 0
         return 1

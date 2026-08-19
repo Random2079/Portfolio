@@ -1,5 +1,5 @@
 ---
-description: Ground rules — coding vs investments, auto commit/push by meaning, exams.
+description: Ground rules — coding vs investments, sparse git (no auto-push), exams.
 alwaysApply: true
 ---
 
@@ -8,7 +8,7 @@ alwaysApply: true
 Глобально: `~/.cursor/rules/coding-chat-defaults.mdc`.
 
 - Репо = **прога**, не финансист (`Инвестиции/` — другой воркспейс).
-- **После законченной правки — сам commit + push** по смыслу, без ожидания «закоммить». Исключения: Medication / Bibinto / runtime / secrets; или юзер сказал не коммитить.
+- **Не** коммить/пушить после каждого фикса. Коммит — по просьбе, в конце этапа/фичи, или чекпоинт для отката. **Пуш только если попросили.**
 - Не переспрашивай `IDEAS.md` / exam-me / PROJECTS.
 - Экзамен: роли, не имена функций.
 - Тон: код по делу, болтовня по-человечески.
