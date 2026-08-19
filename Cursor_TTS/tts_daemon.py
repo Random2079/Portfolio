@@ -19,6 +19,8 @@ import sys
 import tempfile
 import threading
 import time
+from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
@@ -77,7 +79,28 @@ _paused = False  # pause/resume: не чистит очередь, ждёт resu
 _pause_lock = threading.Lock()
 _speak_lock = threading.Lock()
 _mixer_ready = False
-_speech_queue: queue.Queue[str | None] = queue.Queue()
+SOURCE_AFTER_AGENT = "afterAgentResponse"
+SOURCE_STOP = "stop"
+SOURCE_MANUAL = "manual_selection"
+SOURCE_PREVIEW = "preview"
+AUTO_SOURCES = {SOURCE_AFTER_AGENT, SOURCE_STOP}
+
+
+@dataclass(frozen=True)
+class SpeechItem:
+    text: str
+    source: str = SOURCE_MANUAL
+    conversation_id: str = ""
+    generation_id: str = ""
+    priority: int = 100
+
+
+_speech_queue: queue.PriorityQueue[tuple[int, int, SpeechItem | None]] = queue.PriorityQueue()
+_queue_seq = 0
+_queue_seq_lock = threading.Lock()
+_recent_auto_ids: deque[tuple[str, str]] = deque(maxlen=128)
+_recent_auto_ids_set: set[tuple[str, str]] = set()
+_recent_auto_lock = threading.Lock()
 _worker_started = False
 _worker_lock = threading.Lock()
 _progress_lock = threading.Lock()
@@ -86,6 +109,9 @@ _progress: dict[str, object] = {
     "engine": DEFAULT_ENGINE,
     "current": 0,
     "total": 0,
+    "source": "",
+    "conversation_id": "",
+    "generation_id": "",
     "phase_started": time.monotonic(),
     "paused_accum": 0.0,
     "pause_mark": 0.0,
@@ -97,12 +123,16 @@ _warmup_engine = ""
 _warmup_gate = threading.Lock()
 
 
+
 def set_progress(
     phase: str,
     *,
     engine: str | None = None,
     current: int | None = None,
     total: int | None = None,
+    source: str | None = None,
+    conversation_id: str | None = None,
+    generation_id: str | None = None,
 ) -> None:
     with _progress_lock:
         old_phase = str(_progress.get("phase", "idle"))
@@ -114,6 +144,12 @@ def set_progress(
             _progress["current"] = current
         if total is not None:
             _progress["total"] = total
+        if source is not None:
+            _progress["source"] = source
+        if conversation_id is not None:
+            _progress["conversation_id"] = conversation_id
+        if generation_id is not None:
+            _progress["generation_id"] = generation_id
         if phase != old_phase or (
             current is not None and int(current) != old_current
         ):
@@ -461,21 +497,88 @@ def clear_speech_queue() -> int:
     return cleared
 
 
-def enqueue_speech(text: str) -> int:
-    _speech_queue.put(text)
+def _next_queue_seq() -> int:
+    global _queue_seq
+    with _queue_seq_lock:
+        _queue_seq += 1
+        return _queue_seq
+
+
+def _remember_auto(item: SpeechItem) -> None:
+    key = (item.conversation_id, item.generation_id)
+    if not key[0] or not key[1]:
+        return
+    with _recent_auto_lock:
+        if key in _recent_auto_ids_set:
+            return
+        if len(_recent_auto_ids) >= _recent_auto_ids.maxlen:
+            old = _recent_auto_ids.popleft()
+            _recent_auto_ids_set.discard(old)
+        _recent_auto_ids.append(key)
+        _recent_auto_ids_set.add(key)
+
+
+def _is_duplicate_auto(item: SpeechItem) -> bool:
+    if item.source not in AUTO_SOURCES:
+        return False
+    key = (item.conversation_id, item.generation_id)
+    if not key[0] or not key[1]:
+        return False
+    with _recent_auto_lock:
+        return key in _recent_auto_ids_set
+
+
+def _coerce_item(data: dict, *, default_source: str) -> SpeechItem:
+    text = str(data.get("text", "")).strip()
+    source = str(data.get("source") or default_source).strip() or default_source
+    conv = str(data.get("conversation_id") or "").strip()
+    gen = str(data.get("generation_id") or "").strip()
+    try:
+        priority = int(data.get("priority", 100))
+    except (TypeError, ValueError):
+        priority = 100
+    return SpeechItem(
+        text=text,
+        source=source,
+        conversation_id=conv,
+        generation_id=gen,
+        priority=priority,
+    )
+
+
+def enqueue_speech(item: SpeechItem) -> tuple[int, bool]:
+    if item.source in AUTO_SOURCES and item.conversation_id and item.generation_id:
+        with _recent_auto_lock:
+            key = (item.conversation_id, item.generation_id)
+            if key in _recent_auto_ids_set:
+                debug_log(
+                    "QUEUE_SKIP_DUP "
+                    f"source={item.source} conv={item.conversation_id[:12]} gen={item.generation_id[:12]}"
+                )
+                return _speech_queue.qsize(), True
+            if len(_recent_auto_ids) >= _recent_auto_ids.maxlen:
+                old = _recent_auto_ids.popleft()
+                _recent_auto_ids_set.discard(old)
+            _recent_auto_ids.append(key)
+            _recent_auto_ids_set.add(key)
+    _speech_queue.put((item.priority, _next_queue_seq(), item))
     size = _speech_queue.qsize()
-    debug_log(f"QUEUE_ADD chars={len(text)} queue_size={size}")
-    return size
+    debug_log(
+        "QUEUE_ADD "
+        f"source={item.source} chars={len(item.text)} queue_size={size} "
+        f"conv={item.conversation_id[:12]} gen={item.generation_id[:12]}"
+    )
+    return size, False
 
 
 def _speech_worker() -> None:
     while True:
-        text = _speech_queue.get()
+        _priority, _seq, item = _speech_queue.get()
         try:
-            if text is None:
+            if item is None:
                 return
-            if len(text) >= 2:
-                speak_text(text)
+            if len(item.text) >= 2:
+                speak_text(item)
         finally:
             _speech_queue.task_done()
 
@@ -719,20 +822,39 @@ def _speech_units(text: str, cfg: dict) -> list[tuple[str, str]]:
     return [(chunk, "ru") for chunk in _parts_for_engine(prepared, engine) if chunk]
 
 
-def speak_text(text: str) -> None:
+def speak_text(item: SpeechItem) -> None:
     with _speak_lock:
         _stop_event.clear()
         set_paused(False)
         cfg = load_config()
         engine = str(cfg["engine"])
-        set_progress("preparing", engine=engine, current=0, total=0)
-        units = _speech_units(text, cfg)
+        set_progress(
+            "preparing",
+            engine=engine,
+            current=0,
+            total=0,
+            source=item.source,
+            conversation_id=item.conversation_id,
+            generation_id=item.generation_id,
+        )
+        units = _speech_units(item.text, cfg)
         if not units:
-            set_progress("idle", engine=engine, current=0, total=0)
+            set_progress(
+                "idle",
+                engine=engine,
+                current=0,
+                total=0,
+                source="",
+                conversation_id="",
+                generation_id="",
+            )
             return
         hybrid = _effective_hybrid(cfg)
-        debug_log(f"ENGINE={cfg['engine']} hybrid={hybrid} units={len(units)}")
-        log_speak_start(len(text), len(units))
+        debug_log(
+            f"ENGINE={cfg['engine']} hybrid={hybrid} units={len(units)} "
+            f"source={item.source} conv={item.conversation_id[:12]} gen={item.generation_id[:12]}"
+        )
+        log_speak_start(len(item.text), len(units))
         ok_parts = 0
         fail_parts = 0
         suffix = _audio_suffix(cfg["engine"])
@@ -765,6 +887,9 @@ def speak_text(text: str) -> None:
                     engine=engine,
                     current=index + 1,
                     total=len(units),
+                    source=item.source,
+                    conversation_id=item.conversation_id,
+                    generation_id=item.generation_id,
                 )
 
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -797,6 +922,9 @@ def speak_text(text: str) -> None:
                     engine=engine,
                     current=index + 1,
                     total=len(units),
+                    source=item.source,
+                    conversation_id=item.conversation_id,
+                    generation_id=item.generation_id,
                 )
                 finished = play_file(current_path, cfg["volume"])
                 _safe_unlink(current_path)
@@ -820,7 +948,15 @@ def speak_text(text: str) -> None:
         finally:
             if current_path is not None:
                 _safe_unlink(current_path)
-            set_progress("idle", engine=engine, current=0, total=0)
+            set_progress(
+                "idle",
+                engine=engine,
+                current=0,
+                total=0,
+                source="",
+                conversation_id="",
+                generation_id="",
+            )
 
         log_speak_done(ok_parts, fail_parts, len(units))
 
@@ -968,20 +1104,41 @@ def handle_client(conn: socket.socket) -> None:
                     target=_exit_process_soon, name="tts-abort-warmup", daemon=True
                 ).start()
             return
-        if cmd == "speak":
-            text = str(data.get("text", "")).strip()
+        if cmd in {"enqueue_auto", "enqueue_manual", "preview", "speak"}:
             cfg = load_config()
             ensure_worker()
-            if cfg.get("interrupt_on_new"):
+            if cmd == "speak":
+                item = _coerce_item({"text": data.get("text", ""), "source": SOURCE_MANUAL}, default_source=SOURCE_MANUAL)
+            else:
+                raw_item = data.get("entry")
+                if not isinstance(raw_item, dict):
+                    raw_item = {"text": data.get("text", "")}
+                default_source = {
+                    "enqueue_auto": SOURCE_AFTER_AGENT,
+                    "enqueue_manual": SOURCE_MANUAL,
+                    "preview": SOURCE_PREVIEW,
+                }.get(cmd, SOURCE_MANUAL)
+                item = _coerce_item(raw_item, default_source=default_source)
+
+            if cfg.get("interrupt_on_new") and item.source not in AUTO_SOURCES:
                 if _speak_lock.locked() or _speech_queue.qsize() > 0:
                     log_interrupted("interrupt_on_new=true")
                 cleared = clear_speech_queue()
                 stop_playback()
                 debug_log(f"INTERRUPT cleared_queue={cleared}")
-            if len(text) >= 2:
-                size = enqueue_speech(text)
+            if len(item.text) >= 2:
+                size, duplicate = enqueue_speech(item)
                 conn.sendall(
-                    f'{{"ok":true,"queued":true,"queue_size":{size}}}\n'.encode("ascii")
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "queued": not duplicate,
+                            "duplicate": duplicate,
+                            "queue_size": size,
+                        },
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    + b"\n"
                 )
             else:
                 conn.sendall(b'{"ok":true,"queued":false}\n')

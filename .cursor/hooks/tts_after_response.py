@@ -6,7 +6,6 @@ Cursor hook: afterAgentResponse → очередь в tts_daemon.
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import tempfile
 from datetime import datetime
@@ -14,9 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]  # DS_Projects
 OFF_FLAG = ROOT / "Cursor_TTS" / "TTS_OFF"
-PID_FILE = ROOT / "Cursor_TTS" / "tts_speech.pid"
 LOG_FILE = Path(tempfile.gettempdir()) / "cursor_tts_hook.log"
-
 sys.path.insert(0, str(ROOT / "Cursor_TTS"))
 try:
     from tts_debug import log_clean_result
@@ -29,6 +26,7 @@ def log(message: str) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with LOG_FILE.open("a", encoding="utf-8") as file:
         file.write(f"[{timestamp}] {message}\n")
+
 
 
 def read_hook_payload() -> dict:
@@ -78,8 +76,34 @@ def read_last_assistant_message(path: Path) -> str:
     return ""
 
 
+# Cursor на Windows отдаёт текст как UTF-8 байты, декодированные через cp1251.
+# Такие пары встречаются в любой кириллице, покалеченной этим способом.
+_MOJIBAKE_MARKERS = ("Рµ", "Рѕ", "РЅ", "СЂ", "СЃ", "Рё", "РІ", "Р°", "вЂ")
+
+
+def fix_mojibake(text: str) -> str:
+    """Разворачивает utf-8-как-cp1251 обратно. Не трогает нормальный текст."""
+    if not any(marker in text for marker in _MOJIBAKE_MARKERS):
+        return text
+
+    # Построчно: одна нерасшифруемая строка не должна ронять весь текст.
+    out = []
+    for line in text.split("\n"):
+        try:
+            out.append(line.encode("cp1251").decode("utf-8"))
+        except UnicodeError:
+            out.append(line)
+    return "\n".join(out)
+
+
 def extract_text(data: dict) -> str:
-    """На Windows берём чистый UTF-8 текст из транскрипта."""
+    """Сначала прямой payload text, transcript — только fallback."""
+    text = str(data.get("text") or "").strip()
+    if text:
+        text = fix_mojibake(text)
+        log(f"loaded assistant text from payload: chars={len(text)}")
+        return text
+
     transcript = data.get("transcript_path")
     if transcript:
         path = Path(str(transcript))
@@ -90,7 +114,7 @@ def extract_text(data: dict) -> str:
                 return text
 
     text = str(data.get("text") or "")
-    replacement_count = text.count("�") + text.count("?")
+    replacement_count = text.count("") + text.count("?")
     if replacement_count:
         log(f"stdin text may be corrupted: bad_chars={replacement_count}")
     return text
@@ -99,45 +123,28 @@ def extract_text(data: dict) -> str:
 MAX_SPEECH_CHARS = 12000
 
 
-def speak_async(text: str) -> None:
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", suffix=".txt", delete=False
-    ) as tmp:
-        tmp.write(text)
-        tmp_path = tmp.name
+def enqueue_auto(text: str, data: dict) -> None:
+    from speak_edge import ensure_daemon, send_command
 
-    flags = 0x08000000 if sys.platform == "win32" else 0
-    speak_edge = ROOT / "Cursor_TTS" / "speak_edge.py"
-
-    if speak_edge.is_file():
-        process = subprocess.Popen(
-            [sys.executable, str(speak_edge), tmp_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=flags,
-        )
-        log(f"Edge-TTS client queued: pid={process.pid}, chars={len(text)}")
-        return
-
-    safe = tmp_path.replace("'", "''")
-    safe_pid_file = str(PID_FILE).replace("'", "''")
-    ps = (
-        "Add-Type -AssemblyName System.Speech; "
-        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-        "$s.Rate = 1; $s.Volume = 100; "
-        f"$t = Get-Content -LiteralPath '{safe}' -Raw -Encoding UTF8; "
-        "$s.Speak($t); "
-        f"Remove-Item -LiteralPath '{safe}' -Force -ErrorAction SilentlyContinue; "
-        f"Remove-Item -LiteralPath '{safe_pid_file}' -Force -ErrorAction SilentlyContinue"
+    ensure_daemon()
+    payload = {
+        "cmd": "enqueue_auto",
+        "entry": {
+            "text": text,
+            "conversation_id": str(data.get("conversation_id") or ""),
+            "generation_id": str(data.get("generation_id") or ""),
+            "source": str(data.get("hook_event_name") or "afterAgentResponse"),
+        },
+    }
+    reply = send_command(payload, timeout=5.0)
+    if not reply.get("ok"):
+        raise RuntimeError(str(reply.get("error") or "enqueue_auto failed"))
+    log(
+        "Edge-TTS auto queued: "
+        f"chars={len(text)} conv={payload['entry']['conversation_id'][:12]} "
+        f"gen={payload['entry']['generation_id'][:12]} "
+        f"source={payload['entry']['source']}"
     )
-    process = subprocess.Popen(
-        ["powershell", "-NoProfile", "-Command", ps],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=flags,
-    )
-    PID_FILE.write_text(str(process.pid), encoding="ascii")
-    log(f"SAPI fallback started: pid={process.pid}, chars={len(text)}")
 
 
 def main() -> int:
@@ -154,18 +161,21 @@ def main() -> int:
         return 0
 
     event = str(data.get("hook_event_name") or "")
-    gen = str(data.get("generation_id") or "")
     status = str(data.get("status") or "")
-    if event == "stop" and status in {"aborted", "error"}:
-        log(f"skip stop status={status}")
-        return 0
 
-    stamp = ROOT / "Cursor_TTS" / ".tts_last_generation"
-    if gen and stamp.is_file() and stamp.read_text(encoding="utf-8").strip() == gen:
-        log(f"skip duplicate generation event={event}")
+    if event == "stop":
+        try:
+            from speak_edge import ensure_daemon, send_command
+
+            ensure_daemon()
+            send_command({"cmd": "stop"}, timeout=2.0)
+            log(f"hook stop -> daemon stop (status={status})")
+        except Exception as error:
+            log(f"hook stop failed: {type(error).__name__}: {error}")
         return 0
 
     text = extract_text(data).strip()
+
     log_clean_result(text[:200], text[:200])
     if len(text) < 8:
         log(f"Text too short: chars={len(text)}")
@@ -176,9 +186,7 @@ def main() -> int:
         log(f"Text capped at {MAX_SPEECH_CHARS} chars")
 
     try:
-        speak_async(text)
-        if gen:
-            stamp.write_text(gen, encoding="utf-8")
+        enqueue_auto(text, data)
     except Exception as error:
         log(f"Speech failed: {type(error).__name__}: {error}")
         return 1

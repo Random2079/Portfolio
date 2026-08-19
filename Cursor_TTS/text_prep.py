@@ -103,6 +103,10 @@ def strip_code_and_diagrams(text: str) -> str:
     )
     text = re.sub(r"```[\s\S]*?```", " Блок кода, смотри в чате. ", text)
     text = re.sub(r"`([^`]+)`", r"\1", text)
+    # Настоящие diff-заголовки (не markdown списки)
+    text = re.sub(r"(?m)^(?:\*{3} .*|[-+]{3} .*|@@ .* @@.*|={4,}.*)$\n?", "", text)
+    # *** Begin/End Patch блоки целиком
+    text = re.sub(r"\*{3} Begin Patch[\s\S]*?\*{3} End Patch", " Есть патч, смотри в чате. ", text)
     return text
 
 
@@ -291,7 +295,22 @@ def _latin_letter_ratio(text: str) -> float:
     return latin / len(letters)
 
 
+_EMOJI_RE = re.compile(
+    "[\U00010000-\U0010ffff"   # supplementary planes (most emoji)
+    "\U00002600-\U000027BF"    # misc symbols, dingbats
+    "\U0001F300-\U0001F9FF"    # all emoji blocks
+    "\U00002702-\U000027B0"
+    "]+",
+    re.UNICODE,
+)
+
+
+def strip_emoji(text: str) -> str:
+    return _EMOJI_RE.sub("", text)
+
+
 def _prepare_base(text: str) -> str:
+    text = strip_emoji(text)
     text = strip_code_and_diagrams(text)
     text = strip_stage_directions(text)
     text = tables_to_speech(text)
