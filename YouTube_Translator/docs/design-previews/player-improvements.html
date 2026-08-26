@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Плеер — было / стало (крупно)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #111;
+      color: #eee;
+      padding: 20px;
+    }
+    h1 { font-size: 1.4rem; margin: 0 0 8px; }
+    .intro {
+      color: #aaa;
+      max-width: 52rem;
+      margin-bottom: 28px;
+      line-height: 1.45;
+    }
+    .idea {
+      margin-bottom: 48px;
+      padding: 20px;
+      background: #1a1a1a;
+      border-radius: 16px;
+      border: 1px solid #333;
+    }
+    .idea h2 {
+      margin: 0 0 6px;
+      font-size: 1.25rem;
+    }
+    .idea .why {
+      color: #fbbf24;
+      font-size: 1rem;
+      margin: 0 0 16px;
+      font-weight: 600;
+    }
+    .cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 900px) {
+      .cols { grid-template-columns: 1fr; }
+    }
+    .box {
+      border-radius: 12px;
+      overflow: hidden;
+      border: 3px solid;
+    }
+    .box.before { border-color: #ef4444; }
+    .box.after { border-color: #22c55e; }
+    .tag {
+      padding: 8px 12px;
+      font-weight: 800;
+      font-size: 0.85rem;
+      letter-spacing: 0.04em;
+    }
+    .before .tag { background: #7f1d1d; color: #fecaca; }
+    .after .tag { background: #14532d; color: #bbf7d0; }
+    .fake-ui {
+      background: #111318;
+      padding: 12px;
+      min-height: 120px;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .b {
+      border: none;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    /* BEFORE styles — intentionally loud / ugly contrast to AFTER */
+    .before .back-loud {
+      background: #059669;
+      color: #fff;
+      font-size: 1.1rem;
+      padding: 14px 22px;
+      box-shadow: 0 0 24px #059669;
+    }
+    .before .ai-quiet {
+      background: #374151;
+      color: #9ca3af;
+      font-size: 0.85rem;
+      padding: 8px 10px;
+    }
+    .before .folder-bad {
+      color: #fff;
+      font-size: 1.05rem;
+      font-family: monospace;
+      background: #000;
+      padding: 6px 8px;
+      border: 2px dashed #ef4444;
+    }
+    .before .status-loud {
+      color: #38bdf8;
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-top: 12px;
+      text-shadow: 0 0 12px #38bdf8;
+    }
+    .before .rail-bad {
+      writing-mode: vertical-rl;
+      background: #1f2937;
+      color: #6b7280;
+      padding: 20px 6px;
+      font-size: 0.75rem;
+      border-left: 1px solid #333;
+    }
+    .before .split {
+      display: grid;
+      grid-template-columns: 1fr 28px;
+      min-height: 100px;
+      background: #000;
+    }
+    .before .vid {
+      background: #222;
+      color: #555;
+      display: grid;
+      place-items: center;
+    }
+
+    /* AFTER */
+    .after .back-soft {
+      background: #1f2430;
+      color: #e2e8f0;
+      font-size: 0.95rem;
+    }
+    .after .ai-loud {
+      background: #059669;
+      color: #fff;
+      font-size: 1.05rem;
+      padding: 12px 18px;
+      box-shadow: 0 0 20px rgba(5,150,105,.5);
+    }
+    .after .folder-good {
+      color: #e2e8f0;
+      font-size: 0.95rem;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      border-bottom: 2px solid #22c55e;
+      padding-bottom: 2px;
+    }
+    .after .hint-tip {
+      display: block;
+      color: #86efac;
+      font-size: 0.8rem;
+      margin-top: 4px;
+    }
+    .after .status-quiet {
+      color: #64748b;
+      font-size: 0.85rem;
+      margin-top: 12px;
+    }
+    .after .split {
+      display: grid;
+      grid-template-columns: 1fr 48px;
+      min-height: 100px;
+      gap: 0;
+    }
+    .after .vid {
+      background: #222;
+      color: #888;
+      display: grid;
+      place-items: center;
+      border-right: 3px solid #10b981;
+    }
+    .after .rail-good {
+      writing-mode: vertical-rl;
+      background: #14532d;
+      color: #bbf7d0;
+      padding: 16px 10px;
+      font-size: 0.95rem;
+      font-weight: 800;
+      display: grid;
+      place-items: center;
+    }
+    .arrow {
+      text-align: center;
+      font-size: 2rem;
+      color: #666;
+      padding: 8px;
+      display: none;
+    }
+    .pick {
+      margin-top: 14px;
+      padding: 12px;
+      background: #0f172a;
+      border-radius: 10px;
+      color: #93c5fd;
+      font-size: 0.95rem;
+    }
+    .combo {
+      border: 3px solid #22c55e;
+      border-radius: 16px;
+      padding: 20px;
+      background: #052e16;
+    }
+    .combo h2 { color: #bbf7d0; }
+  </style>
+</head>
+<body>
+  <h1>Плеер: БЫЛО (красный) → СТАЛО (зелёный)</h1>
+  <p class="intro">
+    Отличия специально <b>утрированы</b>, чтобы было видно с первого взгляда.
+    Это не «пиксель в пиксель Qt», а смысл: что меняем и зачем.
+  </p>
+
+  <!-- IDEA 1 -->
+  <div class="idea" id="1">
+    <h2>① Имя папки</h2>
+    <p class="why">Проблема: «субтитры_Бес_» — обрубок, непонятно что за ролик.</p>
+    <div class="cols">
+      <div class="box before">
+        <div class="tag">БЫЛО — плохо</div>
+        <div class="fake-ui">
+          <div class="row">
+            <button class="b back-loud" type="button">Назад</button>
+            <span class="folder-bad">субтитры_Бес_</span>
+            <button class="b ai-quiet" type="button">ИИ</button>
+          </div>
+          <div style="color:#f87171;font-weight:700">↑ обрезано посередине слова, хрен поймёшь</div>
+        </div>
+      </div>
+      <div class="box after">
+        <div class="tag">СТАЛО — лучше</div>
+        <div class="fake-ui">
+          <div class="row">
+            <button class="b back-soft" type="button">Назад</button>
+            <div>
+              <div class="folder-good">субтитры_Бесконечные удары…</div>
+              <span class="hint-tip">наведи мышь → полный title в подсказке</span>
+            </div>
+            <button class="b ai-loud" type="button">✨ ИИ</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IDEA 2 -->
+  <div class="idea" id="2">
+    <h2>② Кто главный на панели</h2>
+    <p class="why">Проблема: зелёный «Назад» орёт как главная кнопка. А «ИИ» серый и теряется.</p>
+    <div class="cols">
+      <div class="box before">
+        <div class="tag">БЫЛО — плохо</div>
+        <div class="fake-ui">
+          <div class="row">
+            <button class="b back-loud" type="button">← НАЗАД</button>
+            <span style="flex:1"></span>
+            <button class="b ai-quiet" type="button">ИИ</button>
+            <button class="b ai-quiet" type="button">🎵</button>
+            <button class="b ai-quiet" type="button">Войти</button>
+          </div>
+          <div style="color:#f87171;font-weight:700;margin-top:8px">
+            Глаз бьётся в «Назад». ИИ — второстепенка. Криво.
+          </div>
+        </div>
+      </div>
+      <div class="box after">
+        <div class="tag">СТАЛО — лучше</div>
+        <div class="fake-ui">
+          <div class="row">
+            <button class="b back-soft" type="button">← Назад</button>
+            <span style="flex:1"></span>
+            <button class="b ai-loud" type="button">✨ ИИ</button>
+            <button class="b back-soft" type="button">🎵</button>
+            <button class="b back-soft" type="button">Войти</button>
+          </div>
+          <div style="color:#86efac;font-weight:700;margin-top:8px">
+            Главное действие = ИИ (зелёный). Назад спокойный серый.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IDEA 3 -->
+  <div class="idea" id="3">
+    <h2>③ Полоска «Разбор» сбоку</h2>
+    <p class="why">Проблема: узкая серая полоска — непонятно, что это кнопка и зачем.</p>
+    <div class="cols">
+      <div class="box before">
+        <div class="tag">БЫЛО — плохо</div>
+        <div class="fake-ui">
+          <div class="split">
+            <div class="vid">видео</div>
+            <div class="rail-bad">Разбор</div>
+          </div>
+          <div style="color:#f87171;font-weight:700;margin-top:8px">
+            Выглядит как случайный текст, не как «открой панель»
+          </div>
+        </div>
+      </div>
+      <div class="box after">
+        <div class="tag">СТАЛО — лучше</div>
+        <div class="fake-ui">
+          <div class="split">
+            <div class="vid">видео</div>
+            <div class="rail-good">◀ Разбор</div>
+          </div>
+          <div style="color:#86efac;font-weight:700;margin-top:8px">
+            Зелёная жирная кнопка + стрелка = «нажми, откроется»
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IDEA 4 -->
+  <div class="idea" id="4">
+    <h2>④ Статус внизу</h2>
+    <p class="why">Проблема: ярко-голубой статус орёт и отвлекает от видео.</p>
+    <div class="cols">
+      <div class="box before">
+        <div class="tag">БЫЛО — плохо</div>
+        <div class="fake-ui">
+          <div class="vid" style="height:70px;border-radius:8px">видео</div>
+          <div class="status-loud">Статус: встроенный плеер готов</div>
+        </div>
+      </div>
+      <div class="box after">
+        <div class="tag">СТАЛО — лучше</div>
+        <div class="fake-ui">
+          <div class="vid" style="height:70px;border-radius:8px;background:#222;display:grid;place-items:center;color:#888">видео</div>
+          <div class="status-quiet">Статус: встроенный плеер готов</div>
+          <div style="color:#86efac;font-weight:700;margin-top:8px">Серый шёпот — не конкурирует с роликом</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IDEA 5 -->
+  <div class="idea" id="5">
+    <h2>⑤ Граница видео / сайдбар</h2>
+    <p class="why">Проблема: две панели слипаются в одно чёрное пятно.</p>
+    <div class="cols">
+      <div class="box before">
+        <div class="tag">БЫЛО — плохо</div>
+        <div class="fake-ui">
+          <div class="split" style="grid-template-columns:1fr 100px">
+            <div class="vid">видео</div>
+            <div style="background:#111;color:#444;display:grid;place-items:center;font-size:0.8rem">сайдбар</div>
+          </div>
+          <div style="color:#f87171;font-weight:700;margin-top:8px">Где кончилось видео? Неясно.</div>
+        </div>
+      </div>
+      <div class="box after">
+        <div class="tag">СТАЛО — лучше</div>
+        <div class="fake-ui">
+          <div class="split" style="grid-template-columns:1fr 100px">
+            <div class="vid">видео</div>
+            <div style="background:#111;color:#86efac;display:grid;place-items:center;font-size:0.8rem;border-left:3px solid #10b981">сайдбар</div>
+          </div>
+          <div style="color:#86efac;font-weight:700;margin-top:8px">Зелёная линия = граница панелей</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="combo idea">
+    <h2>⚡ Комбо «быстро и заметно»: ① + ② + ④</h2>
+    <p class="why" style="color:#bbf7d0">Имя папки нормальное + Назад тихий / ИИ яркий + статус серый. Сайдбар не трогаем.</p>
+    <div class="fake-ui" style="background:#052e16;border-radius:12px;border:2px solid #22c55e">
+      <div class="row">
+        <button class="b back-soft" type="button">← Назад</button>
+        <div class="folder-good">субтитры_Бесконечные удары…</div>
+        <span style="flex:1"></span>
+        <button class="b ai-loud" type="button">✨ ИИ</button>
+        <button class="b back-soft" type="button">🎵</button>
+        <button class="b back-soft" type="button">Войти</button>
+      </div>
+      <div class="vid" style="height:90px;border-radius:8px;background:#111;display:grid;place-items:center;color:#666;margin:8px 0">область видео</div>
+      <div class="status-quiet">Статус: встроенный плеер готов</div>
+    </div>
+    <p class="pick">
+      Напиши в чат например: <b>«делай комбо»</b> · <b>«1 2»</b> · <b>«все 1–5»</b> · <b>«только 2»</b>
+    </p>
+  </div>
+</body>
+</html>

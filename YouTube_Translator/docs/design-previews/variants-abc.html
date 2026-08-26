@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Subtitle Ripper — 3 варианта дизайна</title>
+  <style>
+    :root {
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #1a1a1a;
+      color: #e5e5e5;
+    }
+    h1 { font-size: 1.15rem; font-weight: 600; margin: 0 0 8px; }
+    .hint { color: #9ca3af; font-size: 0.9rem; margin-bottom: 20px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 20px;
+    }
+    .card-label {
+      font-size: 0.8rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #94a3b8;
+      margin-bottom: 8px;
+    }
+    .card-label strong { color: #f8fafc; font-weight: 700; }
+
+    /* ---- shared window chrome ---- */
+    .win {
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0,0,0,.45);
+      border: 1px solid rgba(255,255,255,.08);
+      max-width: 420px;
+    }
+    .titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #a3a3a3;
+    }
+    .titlebar .dots span {
+      display: inline-block;
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      margin-right: 5px;
+      background: #3f3f46;
+    }
+    .body { padding: 18px 18px 14px; }
+    h2.app-title {
+      margin: 0 0 6px;
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+    .sub {
+      margin: 0 0 14px;
+      font-size: 0.78rem;
+      line-height: 1.35;
+      color: #94a3b8;
+    }
+    .url {
+      width: 100%;
+      border-radius: 10px;
+      padding: 11px 14px;
+      font-size: 0.85rem;
+      border: 1px solid transparent;
+      color: #cbd5e1;
+      margin-bottom: 12px;
+    }
+    .url::placeholder { color: #64748b; }
+    .lang-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+    .pill {
+      border: none;
+      border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: default;
+    }
+    .status {
+      font-size: 0.78rem;
+      color: #64748b;
+      margin-bottom: 14px;
+    }
+    .btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+    .btns button {
+      border: none;
+      border-radius: 10px;
+      padding: 9px 11px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: default;
+      white-space: nowrap;
+    }
+
+    /* ========== A — тихий инструмент ========== */
+    .a .win { background: #0f1115; }
+    .a .titlebar { background: #0c0e12; border-bottom: 1px solid #1c1f26; }
+    .a .url { background: #161a22; border-color: #2a303c; }
+    .a .pill.on { background: #3b82f6; color: #fff; }
+    .a .pill.off { background: #1c212b; color: #94a3b8; }
+    .a .btns .primary { background: #2563eb; color: #fff; }
+    .a .btns .secondary { background: #1c212b; color: #cbd5e1; }
+    .a .btns .danger { background: #1c212b; color: #94a3b8; }
+
+    /* ========== B — чуть характера ========== */
+    .b .win {
+      background: linear-gradient(165deg, #0c1220 0%, #0b1628 45%, #0a1018 100%);
+    }
+    .b .titlebar {
+      background: rgba(0,0,0,.25);
+      border-bottom: 1px solid rgba(56,189,248,.12);
+    }
+    .b .accent {
+      height: 2px;
+      background: linear-gradient(90deg, #38bdf8, transparent 70%);
+      margin: 0 0 12px;
+      border-radius: 2px;
+    }
+    .b .url {
+      background: rgba(15, 23, 42, .75);
+      border-color: rgba(56,189,248,.18);
+    }
+    .b .pill.on { background: #0ea5e9; color: #041016; }
+    .b .pill.off { background: rgba(30,41,59,.9); color: #94a3b8; }
+    .b .btns .primary {
+      background: #0284c7;
+      color: #fff;
+      box-shadow: 0 0 0 1px rgba(56,189,248,.25);
+    }
+    .b .btns .secondary {
+      background: rgba(30,41,59,.85);
+      color: #e2e8f0;
+    }
+    .b .btns .danger { background: rgba(30,41,59,.7); color: #94a3b8; }
+
+    /* ========== C — бренд-пятно ========== */
+    .c .win { background: #111318; }
+    .c .titlebar { background: #0d0f14; border-bottom: 1px solid #22262f; }
+    .c .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .c .mark {
+      width: 34px; height: 34px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, #34d399, #059669);
+      color: #042f1a;
+      font-weight: 800;
+      font-size: 0.85rem;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      letter-spacing: -0.02em;
+    }
+    .c .url { background: #1a1e27; border-color: #2d3340; }
+    .c .pill.on { background: #10b981; color: #042f1a; }
+    .c .pill.off { background: #1f2430; color: #94a3b8; }
+    .c .btns .primary { background: #059669; color: #fff; }
+    .c .btns .secondary { background: #1f2430; color: #e2e8f0; }
+    .c .btns .danger { background: #1f2430; color: #94a3b8; }
+    .c h2.app-title { font-size: 1.2rem; }
+  </style>
+</head>
+<body>
+  <h1>Subtitle Ripper Pro — 3 варианта</h1>
+  <p class="hint">Без AI-картинок: живой HTML. <strong>В Qt вкатан C (зелёный)</strong> — 2026-08-26.</p>
+
+  <div class="grid">
+    <!-- A -->
+    <div class="a">
+      <div class="card-label"><strong>A</strong> — тихий инструмент</div>
+      <div class="win">
+        <div class="titlebar">
+          <span>Subtitle Ripper Pro</span>
+          <span class="dots"><span></span><span></span><span></span></span>
+        </div>
+        <div class="body">
+          <h2 class="app-title">YouTube → субтитры</h2>
+          <p class="sub">Вставь ссылку, выбери язык, жми «Скачать». Текст уйдет в буфер.</p>
+          <input class="url" type="text" placeholder="https://youtube.com/watch?v=..." readonly />
+          <div class="lang-row">
+            Язык:
+            <button class="pill on" type="button">RU</button>
+            <button class="pill off" type="button">EN</button>
+          </div>
+          <div class="status">Статус: ожидание ссылки...</div>
+          <div class="btns">
+            <button class="primary" type="button">Скачать</button>
+            <button class="secondary" type="button">🎵 Музыка</button>
+            <button class="secondary" type="button">🎞 Фон</button>
+            <button class="primary" type="button">Плеер</button>
+            <button class="secondary" type="button">🔖 Закладки</button>
+            <button class="danger" type="button">Очистить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- B -->
+    <div class="b">
+      <div class="card-label"><strong>B</strong> — чуть характера</div>
+      <div class="win">
+        <div class="titlebar">
+          <span>Subtitle Ripper Pro</span>
+          <span class="dots"><span></span><span></span><span></span></span>
+        </div>
+        <div class="body">
+          <div class="accent"></div>
+          <h2 class="app-title">YouTube → субтитры</h2>
+          <p class="sub">Вставь ссылку, выбери язык, жми «Скачать». Текст уйдет в буфер.</p>
+          <input class="url" type="text" placeholder="https://youtube.com/watch?v=..." readonly />
+          <div class="lang-row">
+            Язык:
+            <button class="pill on" type="button">RU</button>
+            <button class="pill off" type="button">EN</button>
+          </div>
+          <div class="status">Статус: ожидание ссылки...</div>
+          <div class="btns">
+            <button class="primary" type="button">Скачать</button>
+            <button class="secondary" type="button">🎵 Музыка</button>
+            <button class="secondary" type="button">🎞 Фон</button>
+            <button class="primary" type="button">Плеер</button>
+            <button class="secondary" type="button">🔖 Закладки</button>
+            <button class="danger" type="button">Очистить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- C -->
+    <div class="c">
+      <div class="card-label"><strong>C</strong> — бренд-пятно (зелёный)</div>
+      <div class="win">
+        <div class="titlebar">
+          <span>Subtitle Ripper Pro</span>
+          <span class="dots"><span></span><span></span><span></span></span>
+        </div>
+        <div class="body">
+          <div class="brand-row">
+            <div class="mark">SR</div>
+            <h2 class="app-title">YouTube → субтитры</h2>
+          </div>
+          <p class="sub">Вставь ссылку, выбери язык, жми «Скачать». Текст уйдет в буфер.</p>
+          <input class="url" type="text" placeholder="https://youtube.com/watch?v=..." readonly />
+          <div class="lang-row">
+            Язык:
+            <button class="pill on" type="button">RU</button>
+            <button class="pill off" type="button">EN</button>
+          </div>
+          <div class="status">Статус: ожидание ссылки...</div>
+          <div class="btns">
+            <button class="primary" type="button">Скачать</button>
+            <button class="secondary" type="button">🎵 Музыка</button>
+            <button class="secondary" type="button">🎞 Фон</button>
+            <button class="primary" type="button">Плеер</button>
+            <button class="secondary" type="button">🔖 Закладки</button>
+            <button class="danger" type="button">Очистить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
