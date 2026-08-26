@@ -1,5 +1,9 @@
 # Runtime / secrets
 .env
+*.env
+!.env.example
+Key_BCS.env
+Key*.env
 data/
 *.db
 __pycache__/

@@ -1,5 +1,8 @@
 # IDEA-003 — Новостник портфеля
 
+> **Канон ТЗ (IDEA-020):** [`Portfolio_News/docs/TZ.md`](../../Portfolio_News/docs/TZ.md)  
+> Parts / промпт: [`docs/`](../../Portfolio_News/docs/README.md). Этот файл — зеркало/история; при расхождении править **docs/TZ.md**.
+
 ## Цель
 
 Список тикеров → периодический сбор **RU-новостей** → дедуп в SQLite → **Windows toast** + локальный UI на FastAPI. Без облачного хоста в MVP.
@@ -8,28 +11,31 @@
 
 Не сидеть вручную по вкладкам. Короткий дайджест «что вышло по моим бумагам» на ноуте.
 
-## Статус (2026-08-16)
+## Статус (2026-08-25)
 
-**Прототип + фаза 1–2 дороботок.** Карточка в `IDEAS.md` — **в работе**. Не «готово»: ИИ-чистка шума, авто-watch, телефон — ещё нет.
+**Прототип + слои A–D.** Карточка в `IDEAS.md` — **в работе**. Канон: [`Portfolio_News/docs/TZ.md`](../../Portfolio_News/docs/TZ.md).
 
 Код: [`Portfolio_News/`](../../Portfolio_News/). Запуск: `python -m portfolio_news serve` → http://127.0.0.1:8765/
 
-### Сделано в дороботках (2026-08-16)
+### Сделано
 
-- [x] Опрос по фильтру: `ticker_id` / `kind` / `category` (UI передаёт текущий выбор)
-- [x] Фоновый poll job + `GET /api/poll/status` + прогресс-бар в UI
-- [x] Digest-toast: один пуш на прогон (`notify=digest`)
-- [x] Метрики MOEX ISS: `GET /api/metrics` + вкладка «Метрики» в UI
-- [x] Сырой ISS dump: расширенные котировки + `GET /api/dividends` + `GET /api/coupons` + вкладки «Котировки / Дивы / Купоны» (без PnL/анализа)
-- [x] БКС Trade API read-only каркас: `bcs_client` + `GET /api/holdings` + вкладка «Позиции БКС» (токен в `.env`, не в git)
+- [x] Опрос по фильтру; фоновый poll; digest-toast
+- [x] Сырой ISS: metrics / dividends / coupons + вкладки
+- [x] БКС Trade API read-only каркас
+- [x] Docs по IDEA-020: `docs/TZ.md`, parts, PROMPT
 
-### Ещё не сделано (фаза 3+)
+### Фокус (2026-08-25): трек K «свой БКС»
 
-- ИИ-чистка шума новостей
-- Авто-`watch` внутри serve / Task Scheduler
-- Телефон (ntfy…)
-- Investing / RSS эмитентов; Docker
+- [ ] K0 токен + список UI = holdings
+- [ ] K1 история операций/сделок
+- [ ] K2 кэш в SQLite
+- [ ] K3 графики + маркеры покупок
+- [ ] K4 карточка avg / дата / PnL (факт, не совет)
+- Канон: `docs/TZ.md`, part `10-bcs-terminal.md`
 
+### Позже (E–J)
+
+- UI polish ленты; ИИ-шум; авто-watch; телефон; Investing; Docker
 ## Зафиксированные решения (2026-08-15)
 
 | Вопрос | Выбор |
@@ -107,4 +113,4 @@ flowchart LR
 
 ## Промпт агенту
 
-[`Portfolio_News/PROMPT_FOR_AGENT.md`](../../Portfolio_News/PROMPT_FOR_AGENT.md)
+[`Portfolio_News/docs/PROMPT_FOR_AGENT.md`](../../Portfolio_News/docs/PROMPT_FOR_AGENT.md)

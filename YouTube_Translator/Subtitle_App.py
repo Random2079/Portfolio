@@ -13,6 +13,8 @@ YouTube Subtitle Ripper — GUI (CustomTkinter) + yt-dlp.
   1.  имена / метаданные yt-dlp     — id, title, auto vs manual субы
   1b. разбор SRT                   — сегменты → склейка → plain / timed
   2.  download_and_split           — весь пайплайн скачивания (мозг)
+  2b. download_audio               — MP3 через yt-dlp (Music/YouTube_DL)
+  2c. overlay_player (IDEA-022)    — фон: каталог mp3/mp4, opacity, click-through
   3.  SubtitleApp                  — окно, кнопки, поток, буфер
   4.  __main__                     — GUI или CLI: python Subtitle_App.py URL lang
 
@@ -25,51 +27,69 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
 import time
-import webbrowser
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-import customtkinter as ctk
+from PySide6.QtCore import QEvent, QObject, QSize, QTimer, QUrl, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QFont,
+    QFontMetrics,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPixmap,
+    QShortcut,
+)
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QGraphicsDropShadowEffect,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QStackedWidget,
+    QTabWidget,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
-from timecode_player import PLAYER_FILENAME, write_player_html
+from ui_motion import BusyPulse, attach_many
+
+from ai_analyze import (  # DeepSeek — без доп. зависимостей
+    AnalyzeCancelled,
+    analyze_subtitles,
+    load_saved_analysis,
+)
+from overlay_player import open_overlay_player
+from timecode_player import PLAYER_FILENAME, load_player_data, write_player_html
 
 StatusCb = Callable[[str], None]
 
+
+class DownloadCancelled(Exception):
+    """yt-dlp прерван пользователем (кнопка «Отмена»)."""
+
 # Локальный HTTP для player.html (YouTube API с file:// часто молчит)
 _player_httpd: ThreadingHTTPServer | None = None
+_player_httpd_folder: str | None = None
 _player_httpd_lock = threading.Lock()
-
-
-def bind_clipboard_any_layout(entry: ctk.CTkEntry) -> None:
-    """
-    Tk/CTk на Windows: Ctrl+V при русской раскладке не срабатывает
-    (биндинг ждёт латинскую 'v', а клавиша даёт 'м').
-    Фикс: ловим физическую клавишу по keycode (V/C/X/A).
-    """
-
-    def on_ctrl_key(event):
-        # Windows virtual-key: A=65, C=67, V=86, X=88
-        if event.keycode == 86:
-            event.widget.event_generate("<<Paste>>")
-            return "break"
-        if event.keycode == 67:
-            event.widget.event_generate("<<Copy>>")
-            return "break"
-        if event.keycode == 88:
-            event.widget.event_generate("<<Cut>>")
-            return "break"
-        if event.keycode == 65:
-            event.widget.select_range(0, "end")
-            event.widget.icursor("end")
-            return "break"
-        return None
-
-    entry.bind("<Control-KeyPress>", on_ctrl_key)
 
 
 # =====================================================================
@@ -134,23 +154,34 @@ def pick_subtitle_mode(meta: dict, lang_code: str) -> str | None:
     return resolved[0] if resolved else None
 
 
+def ytdlp_argv(*args: str) -> list[str]:
+    """Команда yt-dlp без Scripts\\yt-dlp.exe.
+
+    На Windows exe-обёртка в Scripts часто даёт WinError 5 (Access denied),
+    а `python -m yt_dlp` работает. В frozen-сборке остаётся PATH-yt-dlp.
+    """
+    if getattr(sys, "frozen", False):
+        return ["yt-dlp", *args]
+    return [sys.executable, "-m", "yt_dlp", *args]
+
+
 def build_meta_yt_dlp_cmd(url: str, extra: list[str] | None = None) -> list[str]:
     """Аргументы yt-dlp для meta (для пайплайна и тестов)."""
-    return [
-        "yt-dlp",
+    return ytdlp_argv(
         "--dump-single-json",
         "--skip-download",
         "--no-warnings",
         *(extra or []),
         "--",
         url,
-    ]
+    )
 
 
 def fetch_video_meta(
     url: str,
     creation_flags: int,
     status_cb: StatusCb | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict:
     """Один проход yt-dlp: title + список субтитров (JSON UTF-8).
 
@@ -177,28 +208,35 @@ def fetch_video_meta(
     process_timeout = 55
 
     for attempt_i, extra in enumerate(attempts, start=1):
-        _emit(
-            status_cb,
-            f"Статус: [1/3] метаданные — попытка {attempt_i}/{len(attempts)}…",
-        )
+        if cancel_event and cancel_event.is_set():
+            raise DownloadCancelled()
+        prefix = f"Статус: [1/3] метаданные — попытка {attempt_i}/{len(attempts)}"
+        _emit(status_cb, f"{prefix}…")
         cmd = build_meta_yt_dlp_cmd(url, extra)
         try:
-            result = subprocess.run(
+            result = _run_ytdlp_with_heartbeat(
                 cmd,
-                capture_output=True,
-                check=True,
-                creationflags=creation_flags,
+                creation_flags,
                 timeout=process_timeout,
+                status_cb=status_cb,
+                status_prefix=prefix,
+                cancel_event=cancel_event,
             )
         except subprocess.TimeoutExpired as exc:
             # зависание handshake/API — другие player_client обычно не спасают
             last_exc = exc
             break
-        except (subprocess.CalledProcessError, OSError) as exc:
+        except OSError as exc:
             last_exc = exc
             continue
 
-        raw = result.stdout.decode("utf-8", errors="replace").strip()
+        if result.returncode != 0:
+            last_exc = subprocess.CalledProcessError(
+                result.returncode, cmd, result.stdout, result.stderr
+            )
+            continue
+
+        raw = (result.stdout or "").strip()
         if not raw:
             last_exc = ValueError("yt-dlp вернул пустой JSON метаданных")
             continue
@@ -210,6 +248,13 @@ def fetch_video_meta(
 
     assert last_exc is not None
     raise last_exc
+
+
+def _extract_id_from_folder(folder: str) -> str | None:
+    """Достаёт YouTube ID из имени папки субтитры_... [ID]."""
+    name = os.path.basename(folder)
+    m = re.search(r"\[([A-Za-z0-9_-]{11})\]$", name)
+    return m.group(1) if m else None
 
 
 def find_output_folder(video_id: str, base_dir: str | None = None) -> str | None:
@@ -252,6 +297,194 @@ def app_install_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def bookmarks_config_path() -> str:
+    """Путь к bookmarks.json рядом с приложением."""
+    return os.path.join(app_install_dir(), "bookmarks.json")
+
+
+def load_bookmarks_items() -> list[dict]:
+    """Закладки из bookmarks.json: [{title, url}, …]."""
+    path = bookmarks_config_path()
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    items = data.get("items")
+    if not isinstance(items, list):
+        return []
+    out: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict) or not item.get("url"):
+            continue
+        out.append(
+            {
+                "title": str(item.get("title") or item["url"]),
+                "url": str(item["url"]),
+            }
+        )
+    return out
+
+
+BOOKMARKS_HISTORY_MAX = 100
+
+
+def bookmarks_history_path() -> str:
+    return os.path.join(app_install_dir(), "bookmarks_history.json")
+
+
+def load_bookmarks_history() -> list[dict]:
+    path = bookmarks_history_path()
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    items = data.get("items") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        return []
+    return [i for i in items if isinstance(i, dict) and i.get("url")]
+
+
+def append_bookmarks_history(url: str, title: str) -> None:
+    url = (url or "").strip()
+    if not url or url.startswith("about:"):
+        return
+    title = (title or url).strip()[:200]
+    items = load_bookmarks_history()
+    if items and items[0].get("url") == url:
+        items[0]["title"] = title
+        items[0]["ts"] = time.time()
+    else:
+        items.insert(0, {"url": url, "title": title, "ts": time.time()})
+    items = items[:BOOKMARKS_HISTORY_MAX]
+    try:
+        with open(bookmarks_history_path(), "w", encoding="utf-8") as f:
+            json.dump({"items": items}, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+def _bookmarks_user_agent() -> str:
+    """UA близкий к реальному Chrome; версию берём из Qt WebEngine, если есть."""
+    base = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/{ver} Safari/537.36"
+    )
+    try:
+        raw = QWebEngineProfile.defaultProfile().httpUserAgent() or ""
+        m = re.search(r"Chrome/([\d.]+)", raw)
+        if m:
+            return base.format(ver=m.group(1))
+    except Exception:
+        pass
+    return base.format(ver="131.0.0.0")
+
+
+# Cloudflare Turnstile / challenge / CDN при bot-check на anime-сайтах
+_BOOKMARK_NAV_EXTRA_HOSTS = (
+    "challenges.cloudflare.com",
+    "cloudflare.com",
+    "cdnjs.cloudflare.com",
+    "static.cloudflareinsights.com",
+    "cloudflareinsights.com",
+    "turnstile.cloudflare.com",
+    "cf-assets.net",
+)
+
+
+def bookmark_allowed_hosts(items: list[dict] | None = None) -> tuple[str, ...]:
+    """Домены закладок для whitelist навигации (поддомены тоже)."""
+    if items is None:
+        items = load_bookmarks_items()
+    hosts: set[str] = set(_BOOKMARK_NAV_EXTRA_HOSTS)
+    for item in items:
+        host = QUrl(str(item.get("url") or "")).host().lower()
+        if not host:
+            continue
+        hosts.add(host)
+        if host.startswith("www."):
+            hosts.add(host[4:])
+    return tuple(sorted(hosts))
+
+
+_YT_NAV_HOSTS = (
+    "youtube.com",
+    "www.youtube.com",
+    "accounts.google.com",
+    "google.com",
+    "www.google.com",
+    "ytimg.com",
+    "yt3.ggpht.com",
+    "googlevideo.com",
+    "googleapis.com",
+    "gstatic.com",
+)
+
+
+def _nav_host_allowed(host: str, allowed: tuple[str, ...]) -> bool:
+    h = (host or "").lower()
+    return any(h == d or h.endswith("." + d) for d in allowed)
+
+
+def _make_safe_page_class(allowed_hosts: tuple[str, ...]):
+    """QWebEnginePage с whitelist только для main-frame навигации."""
+
+    class _SafePage(QWebEnginePage):
+        def acceptNavigationRequest(self, url, nav_type, is_main):
+            scheme = (url.scheme() or "").lower()
+            # blank / ошибка Chromium — иначе unload ломается
+            if scheme in ("about", "chrome", "chrome-error", "qrc"):
+                return True
+            # data/blob только во фреймах (не main) — меньше XSS-поверхности
+            if scheme in ("data", "blob") and not is_main:
+                return True
+            host = (url.host() or "").lower()
+            if not host and not is_main:
+                return True
+            if _nav_host_allowed(host, allowed_hosts):
+                return True
+            if not is_main:
+                return True
+            return False
+
+    return _SafePage
+
+
+def _find_chrome_or_edge() -> str | None:
+    """Путь к Chrome/Edge для --app= (Cloudflare там проходит, в Qt — часто нет)."""
+    candidates: list[str] = []
+    for env_key in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+        root = os.environ.get(env_key) or ""
+        if not root:
+            continue
+        candidates.extend(
+            [
+                os.path.join(root, "Google", "Chrome", "Application", "chrome.exe"),
+                os.path.join(root, "Microsoft", "Edge", "Application", "msedge.exe"),
+            ]
+        )
+    # типичный Local AppData Chrome
+    local = os.environ.get("LOCALAPPDATA") or ""
+    if local:
+        candidates.append(
+            os.path.join(local, "Google", "Chrome", "Application", "chrome.exe")
+        )
+    seen: set[str] = set()
+    for path in candidates:
+        norm = os.path.normcase(os.path.abspath(path))
+        if norm in seen:
+            continue
+        seen.add(norm)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def _subtitle_search_roots() -> list[str]:
     """Где лежат субтитры: cwd + каталог приложения + dist/."""
     roots: list[str] = []
@@ -270,23 +503,67 @@ def _subtitle_search_roots() -> list[str]:
     _add(os.getcwd())
     here = app_install_dir()
     _add(here)
-    _add(os.path.join(here, "dist"))
+    # при разработке (.py) exe ещё нет — ищем и в dist/
+    if not getattr(sys, "frozen", False):
+        _add(os.path.join(here, "dist"))
     return roots
 
 
 def default_output_root() -> str:
-    """Куда писать новые прогоны: <app>/dist/ (создаёт при необходимости)."""
-    dist = os.path.join(app_install_dir(), "dist")
+    """Куда писать новые прогоны: рядом с exe или в <script_dir>/dist/.
+
+    При разработке (.py): кладём в YouTube_Translator/dist/.
+    В exe (frozen): exe уже лежит в dist/ — кладём рядом с ним, без вложенного dist/dist/.
+    """
+    here = app_install_dir()
+    if getattr(sys, "frozen", False):
+        # exe уже в dist/ — писать рядом с ним
+        os.makedirs(here, exist_ok=True)
+        return here
+    # скрипт — писать в dist/ внутри папки проекта
+    dist = os.path.join(here, "dist")
     os.makedirs(dist, exist_ok=True)
     return dist
 
 
-def open_player_http(folder: str) -> str:
+def default_audio_output_dir() -> str:
+    """Куда класть MP3 — как в YouTube_DL (~/Music/YouTube_DL)."""
+    path = os.path.join(os.path.expanduser("~"), "Music", "YouTube_DL")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def build_audio_ytdlp_cmd(url: str, out_dir: str) -> list[str]:
+    """Аргументы yt-dlp для аудио (MP3), как download_music.py."""
+    tmpl = os.path.join(out_dir, "%(title).200B [%(id)s].%(ext)s")
+    return ytdlp_argv(
+        "--no-warnings",
+        "--retries",
+        "8",
+        "--fragment-retries",
+        "8",
+        "--extractor-args",
+        "youtube:player_client=android,web",
+        "-f",
+        "bestaudio/best",
+        "-x",
+        "--audio-format",
+        "mp3",
+        "--audio-quality",
+        "192K",
+        "-o",
+        tmpl,
+        "--",
+        url,
+    )
+
+
+def ensure_player_http_url(folder: str) -> str:
     """
-    Открывает player.html через http://127.0.0.1 — иначе YouTube IFrame API
-    часто не сикает с file://. Возвращает URL.
+    Поднимает/переиспользует локальный HTTP для player.html и возвращает URL.
+    Нужен и для встроенного webview, и для fallback в браузер.
     """
-    global _player_httpd
+    global _player_httpd, _player_httpd_folder
     folder = os.path.abspath(folder)
 
     class _Handler(SimpleHTTPRequestHandler):
@@ -297,20 +574,23 @@ def open_player_http(folder: str) -> str:
             return
 
     with _player_httpd_lock:
+        if _player_httpd is not None and _player_httpd_folder == folder:
+            port = _player_httpd.server_address[1]
+            return f"http://127.0.0.1:{port}/{PLAYER_FILENAME}"
         if _player_httpd is not None:
             try:
                 _player_httpd.shutdown()
             except Exception:  # noqa: BLE001
                 pass
             _player_httpd = None
+            _player_httpd_folder = None
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         _player_httpd = httpd
+        _player_httpd_folder = folder
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         port = httpd.server_address[1]
 
-    url = f"http://127.0.0.1:{port}/{PLAYER_FILENAME}"
-    webbrowser.open(url)
-    return url
+    return f"http://127.0.0.1:{port}/{PLAYER_FILENAME}"
 
 
 def resolve_player_target(
@@ -358,6 +638,67 @@ def _emit(status_cb: StatusCb | None, message: str) -> None:
     print(message)
     if status_cb:
         status_cb(message)
+
+
+def _run_ytdlp_with_heartbeat(
+    cmd: list[str],
+    creation_flags: int,
+    timeout: int,
+    status_cb: StatusCb | None,
+    status_prefix: str,
+    cancel_event: threading.Event | None = None,
+) -> subprocess.CompletedProcess:
+    """
+    yt-dlp с живым статусом и чтением stdout/stderr в фоне.
+
+    Без drain PIPE забивается → yt-dlp стопорится, UI вечно на «попытка N».
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=creation_flags,
+    )
+    chunks_out: list[str] = []
+    chunks_err: list[str] = []
+
+    def _read(stream, dest: list[str]) -> None:
+        try:
+            dest.append(stream.read() or "")
+        except OSError:
+            dest.append("")
+
+    t_out = threading.Thread(target=_read, args=(proc.stdout, chunks_out), daemon=True)
+    t_err = threading.Thread(target=_read, args=(proc.stderr, chunks_err), daemon=True)
+    t_out.start()
+    t_err.start()
+
+    t0 = time.monotonic()
+    last_tick = -1
+    _emit(status_cb, f"{status_prefix} — 0с / {timeout}с…")
+    while proc.poll() is None:
+        if cancel_event and cancel_event.is_set():
+            proc.kill()
+            t_out.join(timeout=2)
+            t_err.join(timeout=2)
+            raise DownloadCancelled()
+        elapsed = int(time.monotonic() - t0)
+        if elapsed != last_tick:
+            last_tick = elapsed
+            _emit(status_cb, f"{status_prefix} — {elapsed}с / {timeout}с…")
+        if elapsed >= timeout:
+            proc.kill()
+            t_out.join(timeout=2)
+            t_err.join(timeout=2)
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        time.sleep(0.2)
+
+    t_out.join(timeout=8)
+    t_err.join(timeout=8)
+    stdout = chunks_out[0] if chunks_out else ""
+    stderr = chunks_err[0] if chunks_err else ""
+    return subprocess.CompletedProcess(cmd, proc.returncode or 0, stdout, stderr)
 
 
 # =====================================================================
@@ -657,6 +998,7 @@ def download_and_split(
     lang_code: str,
     max_chars: int = 150000,
     status_cb: StatusCb | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> bool:
     """
     Весь пайплайн без GUI: meta → скачать субы → plain + таймкоды → части.
@@ -678,15 +1020,31 @@ def download_and_split(
     _emit(status_cb, f"Статус: [1/3] метаданные ({lang_code.upper()})…")
     t0 = time.perf_counter()
     try:
-        meta = fetch_video_meta(url, creation_flags, status_cb=status_cb)
+        meta = fetch_video_meta(
+            url, creation_flags, status_cb=status_cb, cancel_event=cancel_event
+        )
+    except DownloadCancelled:
+        sys.stderr.write("Отменено пользователем.\n")
+        return False
     except FileNotFoundError:
         sys.stderr.write("Ошибка: yt-dlp не установлен или не найден в PATH.\n")
+        return False
+    except PermissionError as exc:
+        sys.stderr.write(
+            "Ошибка: Windows запретил запуск yt-dlp (Access denied).\n"
+            f"{exc}\n"
+            "Обычно это блокировка Scripts\\yt-dlp.exe (Защитник/антивирус).\n"
+            "Приложение теперь зовёт python -m yt_dlp — перезапусти и повтори.\n"
+            "Если снова: разреши yt-dlp.exe в Защитнике или переустанови: "
+            "pip install -U yt-dlp\n"
+        )
         return False
     except subprocess.TimeoutExpired:
         sys.stderr.write(
             "Ошибка: yt-dlp завис на метаданных (таймаут). "
-            "Часто стратегия zapret пропускает браузер (QUIC), а CLI/TLS — нет. "
-            "Смени метод/стратегию zapret (напр. FAKE TLS AUTO) или VPN, потом повтори.\n"
+            "Браузер YouTube открывает, а CLI — нет: TUN/VPN (Hiddify) "
+            "часто не гоняет трафик python/yt-dlp так же, как Chrome. "
+            "Проверь что VPN connected, режим TUN, потом повтори.\n"
         )
         return False
     except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError) as error:
@@ -706,11 +1064,8 @@ def download_and_split(
             or "timeout" in low
         ):
             hint = (
-                "\nПодсказка: до YouTube из yt-dlp/Python соединение рвут "
-                "(браузер через zapret может жить, а CLI — нет). "
-                "Не обязательно выключать zapret: смени стратегию "
-                "(FAKE TLS AUTO / ALT…), проверь что YouTube в hostlist; "
-                "или дай yt-dlp локальный SOCKS/VPN. Ретраи в приложении уже включены.\n"
+                "\nПодсказка: Chrome жив, yt-dlp нет — это не «запрет в приложении». "
+                "TUN/VPN режет TLS у Python. Переподключи Hiddify (TUN), повтори.\n"
             )
         sys.stderr.write(
             f"Ошибка: не удалось получить метаданные видео.\n{details}\n{hint}"
@@ -742,8 +1097,7 @@ def download_and_split(
 
     write_flag = "--write-auto-subs" if mode == "auto" else "--write-subs"
     out_template = os.path.join(folder_path, "temp_subtitles")
-    cmd = [
-        "yt-dlp",
+    cmd = ytdlp_argv(
         write_flag,
         "--sub-lang",
         yt_lang,
@@ -756,19 +1110,30 @@ def download_and_split(
         out_template,
         "--",
         url,
-    ]
+    )
     try:
-        result = subprocess.run(
+        result = _run_ytdlp_with_heartbeat(
             cmd,
-            capture_output=True,
-            text=True,
-            creationflags=creation_flags,
+            creation_flags,
             timeout=180,
+            status_cb=status_cb,
+            status_prefix=f"Статус: [2/3] скачиваю {mode_label} {yt_lang}-субтитры",
+            cancel_event=cancel_event,
         )
+    except DownloadCancelled:
+        sys.stderr.write("Отменено пользователем.\n")
+        return False
+    except PermissionError as exc:
+        sys.stderr.write(
+            "Ошибка: Windows запретил запуск yt-dlp (Access denied).\n"
+            f"{exc}\n"
+            "Перезапусти приложение — оно зовёт python -m yt_dlp.\n"
+        )
+        return False
     except subprocess.TimeoutExpired:
         sys.stderr.write(
-            "Ошибка: yt-dlp завис на скачивании субтитров (таймаут). "
-            "Проверь сеть/стратегию zapret и повтори.\n"
+            "Ошибка: yt-dlp завис на скачивании субтитров (таймаут 180с). "
+            "VPN/TUN для python часто рвёт TLS, пока браузер ещё жив. Повтори.\n"
         )
         return False
     timings["subs"] = time.perf_counter() - t1
@@ -823,169 +1188,2360 @@ def download_and_split(
     return True
 
 
+def download_audio(
+    url: str,
+    status_cb: StatusCb | None = None,
+    out_dir: str | None = None,
+    cancel_event: threading.Event | None = None,
+) -> tuple[bool, str]:
+    """
+    Скачивает аудио в MP3 через yt-dlp (как YouTube_DL/download_music.py).
+    Возвращает (ok, путь_к_папке_или_текст_ошибки).
+    """
+    if not get_video_id(url):
+        return False, "Не похоже на YouTube-ссылку — проверь URL"
+
+    if shutil.which("ffmpeg") is None:
+        _emit(
+            status_cb,
+            "Предупреждение: ffmpeg не в PATH — MP3 может не получиться",
+        )
+
+    creation_flags = 0x08000000 if os.name == "nt" else 0
+    target = out_dir or default_audio_output_dir()
+    os.makedirs(target, exist_ok=True)
+
+    _emit(status_cb, "Статус: скачиваю аудио (MP3)…")
+    cmd = build_audio_ytdlp_cmd(url, target)
+    try:
+        result = _run_ytdlp_with_heartbeat(
+            cmd,
+            creation_flags,
+            timeout=600,
+            status_cb=status_cb,
+            status_prefix="Статус: аудио",
+            cancel_event=cancel_event,
+        )
+    except DownloadCancelled:
+        return False, "Отменено пользователем"
+    except FileNotFoundError:
+        return False, "yt-dlp не установлен или не найден в PATH"
+    except PermissionError as exc:
+        return False, f"Windows запретил запуск yt-dlp: {exc}"
+    except subprocess.TimeoutExpired:
+        return False, "Таймаут скачивания аудио (600с)"
+
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "").strip()
+        return False, details or f"yt-dlp завершился с кодом {result.returncode}"
+
+    return True, target
+
+
 # =====================================================================
-# 3. GUI — CustomTkinter
+# 3. GUI — PySide6
 # =====================================================================
-class SubtitleApp(ctk.CTk):
-    """Окно: поле ссылки, RU/EN, Скачать; качает в фоне, текст в буфер."""
+def apply_primary_glow(btn: QPushButton, *, strong: bool = False) -> None:
+    """Лёгкое зелёное свечение на primary-кнопках (как на моке)."""
+    effect = QGraphicsDropShadowEffect(btn)
+    effect.setBlurRadius(22 if strong else 16)
+    effect.setOffset(0, 0)
+    effect.setColor(QColor(16, 185, 129, 200 if strong else 150))
+    btn.setGraphicsEffect(effect)
+
+
+def make_app_icon() -> QIcon:
+    """Эмблема SR (зелёное пятно) вместо дефолтной иконки Python/Qt в title bar."""
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 128):
+        pm = QPixmap(size, size)
+        pm.fill(QColor(0, 0, 0, 0))
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        margin = max(1, size // 16)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#059669"))
+        painter.drawRoundedRect(
+            margin,
+            margin,
+            size - 2 * margin,
+            size - 2 * margin,
+            size * 0.22,
+            size * 0.22,
+        )
+        # лёгкий блик сверху
+        painter.setBrush(QColor(52, 211, 153, 90))
+        painter.drawRoundedRect(
+            margin,
+            margin,
+            size - 2 * margin,
+            max(1, (size - 2 * margin) // 2),
+            size * 0.22,
+            size * 0.22,
+        )
+        font = QFont("Segoe UI", max(7, int(size * 0.34)))
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#042f1a"))
+        painter.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, "SR")
+        painter.end()
+        icon.addPixmap(pm)
+    return icon
+
+
+def configure_qt_theme(app: QApplication) -> None:
+    """Тема C: тёмный фон + зелёный accent + бренд-пятно SR."""
+    app.setStyle("Fusion")
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor("#111318"))
+    palette.setColor(QPalette.WindowText, QColor("#f3f4f6"))
+    palette.setColor(QPalette.Base, QColor("#161a20"))
+    palette.setColor(QPalette.AlternateBase, QColor("#1a1e27"))
+    palette.setColor(QPalette.Text, QColor("#f3f4f6"))
+    palette.setColor(QPalette.Button, QColor("#1f2430"))
+    palette.setColor(QPalette.ButtonText, QColor("#f3f4f6"))
+    palette.setColor(QPalette.Highlight, QColor("#059669"))
+    palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    app.setPalette(palette)
+    app.setStyleSheet(
+        """
+        QWidget { background: #111318; color: #f3f4f6; font-size: 14px; }
+        QLabel[muted="true"] { color: #64748b; }
+        QLabel[status_bar="true"] { color: #64748b; font-size: 12px; }
+        QLabel[player_title="true"] { color: #e2e8f0; }
+        QLabel[brand_mark="true"] {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #34d399, stop:1 #059669);
+            color: #042f1a;
+            border-radius: 9px;
+            font-weight: 800;
+            font-size: 13px;
+        }
+        QLineEdit {
+            background: #1a1e27;
+            border: 1px solid #2d3340;
+            border-radius: 10px;
+            padding: 10px 12px;
+            selection-background-color: #059669;
+        }
+        QLineEdit:focus {
+            border: 1px solid #10b981;
+            background: #1f2430;
+        }
+        QPushButton {
+            background: #059669;
+            color: white;
+            border: 1px solid #34d399;
+            border-radius: 10px;
+            padding: 10px 14px;
+            min-height: 18px;
+        }
+        QPushButton:hover { background: #10b981; border: 1px solid #6ee7b7; }
+        QPushButton:disabled {
+            background: #3d4450;
+            color: #b7becb;
+            border: 1px solid #3d4450;
+        }
+        QPushButton[fallback="true"] {
+            background: #1f2430;
+            color: #e2e8f0;
+            border: 1px solid #2d3340;
+        }
+        QPushButton[fallback="true"]:hover {
+            background: #2a3140;
+            border: 1px solid #3d4450;
+        }
+        QPushButton[segmented="true"] {
+            background: #1f2430;
+            color: #94a3b8;
+            min-width: 52px;
+            border: 2px solid transparent;
+        }
+        QPushButton[segmented="true"]:hover {
+            background: #2a3140;
+        }
+        QPushButton[segmented="true"][selected="true"] {
+            background: #10b981;
+            color: #042f1a;
+            border: 2px solid #6ee7b7;
+        }
+        QPushButton[selected="true"] {
+            background: #059669;
+            color: white;
+        }
+        QPushButton[mark="true"] {
+            text-align: left;
+            padding-left: 10px;
+            padding-right: 8px;
+        }
+        QPushButton[compact="true"] {
+            padding: 6px 10px;
+            min-height: 14px;
+            border-radius: 8px;
+        }
+        QPushButton[sidebar_tab="true"] {
+            background: #1f2430;
+            color: #d1d5db;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 4px;
+            min-width: 28px;
+            max-width: 34px;
+        }
+        QPushButton[sidebar_tab="true"]:hover {
+            background: #2a3140;
+        }
+        QPushButton[sidebar_tab="true"][selected="true"] {
+            background: #059669;
+            color: white;
+        }
+        QTextBrowser#ai_summary {
+            padding: 8px;
+            line-height: 1.45;
+        }
+        QPushButton[cancel_busy="true"] {
+            background: #b91c1c;
+            color: white;
+            min-width: 96px;
+            padding: 8px 14px;
+            border-radius: 8px;
+        }
+        QPushButton[cancel_busy="true"]:hover {
+            background: #dc2626;
+        }
+        QPushButton[motion_busy="true"] {
+            background: #b45309;
+        }
+        QPushButton[fallback="true"][motion_busy="true"] {
+            background: #b45309;
+        }
+        QFrame[card="true"] {
+            background: #0d0f14;
+            border: 1px solid #2d3340;
+            border-radius: 12px;
+        }
+        QScrollArea { border: none; }
+        """
+    )
+
+
+class SubtitleApp(QMainWindow):
+    """Qt-окно: скачивание + плеер + закладки."""
+
+    _DOWNLOAD_SIZE = (640, 400)
+    _PLAYER_SIZE = (1120, 760)
+    # Низкий min — чтобы Win+стрелки / snap к краю работали без борьбы с Qt
+    _PLAYER_MIN_SIZE = (360, 280)
+
+    _status_signal: Signal = Signal(str)  # thread-safe статус из фонового потока
+    _player_status_signal: Signal = Signal(str)  # статус на экране плеера из фонового потока
+    _done_signal: Signal = Signal(bool, str, str, str)  # ok, url, error_text, timing_hint
 
     def __init__(self) -> None:
         super().__init__()
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
-
-        self.title("Subtitle Ripper Pro")
-        self.geometry("560x340")
-        self.minsize(480, 300)
+        self.setWindowTitle("Subtitle Ripper Pro")
+        self.setWindowIcon(make_app_icon())
+        # До любых resize/move: атрибуты + stack ещё нет → guard в _is_download_view_active
+        self._window_mode = "download"  # download = fixed · free = плеер/закладки
+        self._ignore_size_relock = False
 
         self._busy = False
+        self._lang_code = "ru"
+        self._ai_mode = "invest"  # invest | general
+        self._current_player_folder: str | None = None
+        self._player_http_url: str | None = None
+        self._last_ai_analysis: dict | None = None
+        self._all_marks: list[dict] = []
+        self._player_theater = False
+        self._sidebar_collapsed = False
+        self._splitter_sizes_normal: list[int] | None = None
+        self._splitter_sizes_with_sidebar: list[int] | None = None
+        self._player_pending_video_id: str | None = None
+        self._player_video_loaded = False
+        self._pause_retries_left = 0
+        self._pending_seek_seconds: int | None = None
+        self._ai_busy = False
+        self._player_status_core = "Статус: открой ролик через кнопку «Плеер»."
+        self._ai_busy_t0: float | None = None
+        self._ai_cancel_event = threading.Event()
+        self._ai_job_id = 0
+        self._bookmarks = load_bookmarks_items()
+        self._cancel_event = threading.Event()
+        self._cancel_context = ""  # download | player | player_subs | audio
+        # ✨ ИИ без папки: скачать субы текущего URL, затем сразу analyze
+        self._pending_ai_after_subs = False
+        # IDEA-022: отдельное overlay-окно (не в stack)
+        self._overlay_window = None
 
-        title = ctk.CTkLabel(
-            self,
-            text="YouTube → субтитры",
-            font=ctk.CTkFont(size=18, weight="bold"),
+        # подключаем сигналы: вызов из любого потока → обновление в UI-потоке
+        self._status_signal.connect(self._set_status)
+        self._player_status_signal.connect(self._set_player_status_core)
+        self._done_signal.connect(self._on_download_done)
+
+        root = QWidget()
+        self.setCentralWidget(root)
+        root_layout = QVBoxLayout(root)
+        root_layout.setContentsMargins(16, 16, 16, 16)
+
+        self.stack = QStackedWidget()
+        root_layout.addWidget(self.stack)
+
+        self.download_view = self._build_download_view()
+        self.player_view = self._build_player_view()
+        self.bookmarks_view = self._build_bookmarks_view()
+        self.stack.addWidget(self.download_view)
+        self.stack.addWidget(self.player_view)
+        self.stack.addWidget(self.bookmarks_view)
+
+        # Слой G: hover/press + пульс busy (ui_motion.py)
+        attach_many(
+            self.ru_btn,
+            self.en_btn,
+            self.download_btn,
+            self.audio_btn,
+            self.overlay_btn,
+            self.player_btn,
+            self.bookmarks_btn,
+            self.clear_btn,
+            self.back_btn,
+            self.theater_btn,
+            self.analyze_btn,
+            self.ai_btn,
+            self.load_video_btn,
+            self.player_audio_btn,
+            self.login_btn,
+            self.ai_invest_btn,
+            self.ai_general_btn,
+            self.sidebar_toggle_btn,
+            self.bookmarks_back_btn,
+            self.bookmarks_open_browser_btn,
         )
-        title.pack(padx=20, pady=(20, 4), anchor="w")
+        # Glow до BusyPulse: иначе pulse захватит opacity и потом тень его убьёт
+        apply_primary_glow(self.download_btn)
+        apply_primary_glow(self.player_btn)
+        apply_primary_glow(self.ai_btn, strong=True)
+        self._pulse_download = BusyPulse(self.download_btn, self)
+        self._pulse_ai = BusyPulse(self.ai_btn, self)
 
-        hint = ctk.CTkLabel(
-            self,
-            text="Вставь ссылку, выбери язык, жми «Скачать». Текст уйдёт в буфер.",
-            text_color="gray70",
+        # После stack: иначе resize в lock бьёт AttributeError в move/resizeEvent
+        self._lock_download_window_size()
+
+        self._status_core = "Статус: ожидание ссылки…"
+        self._busy_t0: float | None = None
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setInterval(400)
+        self._busy_timer.timeout.connect(self._refresh_busy_clock)
+        self._ai_busy_timer = QTimer(self)
+        self._ai_busy_timer.setInterval(400)
+        self._ai_busy_timer.timeout.connect(self._refresh_ai_busy_clock)
+
+    def eventFilter(self, obj, event):  # noqa: N802 — Qt API
+        # Space на сфокусированной QPushButton НЕ доходит до keyPressEvent окна —
+        # ловим на уровне приложения (installEventFilter на QApplication).
+        # Глушим Space на кнопках — иначе Qt activate'ит QPushButton.
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Space:
+            if isinstance(obj, QPushButton):
+                return True
+        if event.type() == QEvent.Type.Resize:
+            if hasattr(self, "ai_marks_area") and obj is self.ai_marks_area.viewport():
+                self._refresh_mark_button_labels(self.timed_layout_ai)
+            elif hasattr(self, "all_marks_area") and obj is self.all_marks_area.viewport():
+                self._refresh_mark_button_labels(self.timed_layout_all)
+        return super().eventFilter(obj, event)
+
+    def _ensure_window_on_screen(self) -> None:
+        """После программного resize/showNormal — frame не вылезает за монитор.
+
+        Qt resize растёт от текущего top-left: у края экрана низ/право
+        уходят за availableGeometry. Сдвигаем move; при необходимости
+        уменьшаем client size. Не трогаем maximized/fullscreen.
+        """
+        if self.isMaximized() or self.isFullScreen():
+            return
+        screen = self.screen()
+        if screen is None:
+            app = QApplication.instance()
+            screen = app.primaryScreen() if app is not None else None
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        frame = self.frameGeometry()
+        # Рамка (title bar / borders) — в client size её нет
+        chrome_w = max(0, frame.width() - self.width())
+        chrome_h = max(0, frame.height() - self.height())
+        max_w = max(1, avail.width() - chrome_w)
+        max_h = max(1, avail.height() - chrome_h)
+        tw = min(self.width(), max_w)
+        th = min(self.height(), max_h)
+        if tw != self.width() or th != self.height():
+            self.resize(tw, th)
+            frame = self.frameGeometry()
+        x = frame.x()
+        y = frame.y()
+        if frame.width() <= avail.width():
+            x = max(avail.left(), min(x, avail.left() + avail.width() - frame.width()))
+        else:
+            x = avail.left()
+        if frame.height() <= avail.height():
+            y = max(avail.top(), min(y, avail.top() + avail.height() - frame.height()))
+        else:
+            y = avail.top()
+        if x != frame.x() or y != frame.y():
+            self.move(x, y)
+
+    def _lock_download_window_size(self) -> None:
+        """Экран скачивания: держим 580×380.
+
+        ВАЖНО: НЕ через setMaximumSize/min==max — это снимает у окна
+        WS_THICKFRAME/WS_MAXIMIZEBOX, и Windows Aero Snap перестаёт работать
+        даже после «разблокировки». Вместо этого мягкий возврат размера
+        в resizeEvent (_maybe_relock_download_window_size).
+        """
+        self._window_mode = "download"
+        if self.isMaximized() or self.isFullScreen():
+            self.showNormal()
+        w, h = self._DOWNLOAD_SIZE
+        if self.size() != QSize(w, h):
+            self.resize(w, h)
+        self._ensure_window_on_screen()
+
+    def _is_download_view_active(self) -> bool:
+        if not hasattr(self, "stack") or not hasattr(self, "download_view"):
+            return False
+        return self.stack.currentWidget() is self.download_view
+
+    def _should_lock_download_size(self) -> bool:
+        if self._ignore_size_relock:
+            return False
+        if self._window_mode != "download":
+            return False
+        return self._is_download_view_active() and not self.isFullScreen()
+
+    def _maybe_relock_download_window_size(self) -> None:
+        if self._should_lock_download_size():
+            QTimer.singleShot(0, self._lock_download_window_size)
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 — Qt API
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._maybe_relock_download_window_size()
+
+    def moveEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().moveEvent(event)
+        self._maybe_relock_download_window_size()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().resizeEvent(event)
+        self._maybe_relock_download_window_size()
+        if hasattr(self, "player_title"):
+            self._refresh_player_title_elide()
+
+    def _refresh_player_title_elide(self) -> None:
+        """Имя папки по центру: ElideMiddle + полный текст в tooltip."""
+        if not hasattr(self, "player_title"):
+            return
+        full = getattr(self, "_player_title_full", "") or ""
+        if not full:
+            return
+        self.player_title.setToolTip(full)
+        w = self.player_title.width() - 8
+        if w < 60:
+            w = max(100, self.width() - 480)
+        elided = QFontMetrics(self.player_title.font()).elidedText(
+            full, Qt.TextElideMode.ElideMiddle, w
         )
-        hint.pack(padx=20, pady=(0, 12), anchor="w")
+        self.player_title.setText(elided)
 
-        self.url_input = ctk.CTkEntry(
-            self,
-            placeholder_text="https://youtube.com/watch?v=...",
-            height=36,
+    def _unlock_player_window_size(self, *, reset_geometry: bool = True) -> None:
+        """Плеер/закладки: снять фиксацию — Win-snap и ресайз работают."""
+        self._window_mode = "free"
+        self._ignore_size_relock = True
+        self.setMinimumSize(*self._PLAYER_MIN_SIZE)
+        if reset_geometry:
+            self.resize(*self._PLAYER_SIZE)
+        self._ensure_window_on_screen()
+        # отложенно: после WM-рамки frameGeometry точнее; resize/move без lock
+        QTimer.singleShot(0, self._ensure_window_on_screen)
+        QTimer.singleShot(50, self._clear_size_relock_guard)
+
+    def _clear_size_relock_guard(self) -> None:
+        self._ignore_size_relock = False
+
+    def _disable_space_button_activate(self, *buttons) -> None:
+        """Пробел не должен жать кнопки. ClickFocus мало: после клика мышью
+        фокус остаётся на кнопке → Space снова activate. NoFocus — только мышь."""
+        for btn in buttons:
+            if btn is None:
+                continue
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def _build_download_view(self) -> QWidget:
+        page = QWidget()
+        page.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        layout = QVBoxLayout(page)
+        layout.setSpacing(10)
+
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(10)
+        mark = QLabel("SR")
+        mark.setProperty("brand_mark", True)
+        mark.setFixedSize(34, 34)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.setToolTip("Subtitle Ripper")
+        brand_row.addWidget(mark)
+        title = QLabel("YouTube → субтитры")
+        title.setFont(QFont("", 19, QFont.Weight.Bold))
+        brand_row.addWidget(title)
+        brand_row.addStretch(1)
+        layout.addLayout(brand_row)
+
+        hint = QLabel("Вставь ссылку, выбери язык, жми «Скачать». Текст уйдёт в буфер.")
+        hint.setProperty("muted", True)
+        layout.addWidget(hint)
+
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("https://youtube.com/watch?v=...")
+        self.url_input.setMinimumHeight(42)
+        layout.addWidget(self.url_input)
+
+        lang_row = QHBoxLayout()
+        lang_row.addWidget(QLabel("Язык:"))
+        self.ru_btn = QPushButton("RU")
+        self.ru_btn.setProperty("segmented", True)
+        self.en_btn = QPushButton("EN")
+        self.en_btn.setProperty("segmented", True)
+        self.ru_btn.clicked.connect(lambda: self._set_lang("ru"))
+        self.en_btn.clicked.connect(lambda: self._set_lang("en"))
+        lang_row.addWidget(self.ru_btn)
+        lang_row.addWidget(self.en_btn)
+        lang_row.addStretch()
+        layout.addLayout(lang_row)
+        self._set_lang("ru")
+
+        self.download_status = QLabel("Статус: ожидание ссылки…")
+        self.download_status.setWordWrap(True)
+        self.download_status.setProperty("muted", True)
+        self.download_status.setProperty("status_bar", True)
+        layout.addWidget(self.download_status)
+
+        self.cancel_busy_btn = QPushButton("✕ Отмена")
+        self.cancel_busy_btn.setProperty("fallback", True)
+        self.cancel_busy_btn.setToolTip("Остановить скачивание субтитров или аудио")
+        self.cancel_busy_btn.clicked.connect(self.on_cancel_download)
+        self.cancel_busy_btn.setVisible(False)
+        layout.addWidget(self.cancel_busy_btn)
+
+        btn_row = QHBoxLayout()
+        self.download_btn = QPushButton("Скачать")
+        self.download_btn.clicked.connect(self.on_download)
+        apply_primary_glow(self.download_btn)
+        btn_row.addWidget(self.download_btn)
+
+        self.audio_btn = QPushButton("🎵 Музыка")
+        self.audio_btn.setProperty("fallback", True)
+        self.audio_btn.setToolTip("Скачать аудио (MP3) в Music\\YouTube_DL")
+        self.audio_btn.clicked.connect(self.on_download_audio)
+        btn_row.addWidget(self.audio_btn)
+
+        self.overlay_btn = QPushButton("🎞 Фон")
+        self.overlay_btn.setProperty("fallback", True)
+        self.overlay_btn.setToolTip(
+            "Overlay: каталог музыки/mp4 поверх окон (прозрачность + клики насквозь). Ctrl+Shift+O"
         )
-        self.url_input.pack(fill="x", padx=20, pady=4)
-        bind_clipboard_any_layout(self.url_input)
+        self.overlay_btn.clicked.connect(self.on_open_overlay)
+        btn_row.addWidget(self.overlay_btn)
 
-        lang_row = ctk.CTkFrame(self, fg_color="transparent")
-        lang_row.pack(fill="x", padx=20, pady=(12, 4))
+        self.player_btn = QPushButton("Плеер")
+        self.player_btn.clicked.connect(self.on_open_player)
+        apply_primary_glow(self.player_btn)
+        btn_row.addWidget(self.player_btn)
 
-        ctk.CTkLabel(lang_row, text="Язык:").pack(side="left", padx=(0, 8))
-        self.lang_seg = ctk.CTkSegmentedButton(
-            lang_row,
-            values=["RU", "EN"],
-            width=140,
+        self.bookmarks_btn = QPushButton("🔖 Закладки")
+        self.bookmarks_btn.setProperty("fallback", True)
+        self.bookmarks_btn.setToolTip("Частые сайты (аниме и т.д.)")
+        self.bookmarks_btn.clicked.connect(self.show_bookmarks_view)
+        btn_row.addWidget(self.bookmarks_btn)
+
+        self.clear_btn = QPushButton("Очистить")
+        self.clear_btn.setProperty("fallback", True)
+        self.clear_btn.clicked.connect(self.on_clear)
+        btn_row.addWidget(self.clear_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        self._disable_space_button_activate(
+            self.ru_btn,
+            self.en_btn,
+            self.cancel_busy_btn,
+            self.download_btn,
+            self.audio_btn,
+            self.overlay_btn,
+            self.player_btn,
+            self.bookmarks_btn,
+            self.clear_btn,
         )
-        self.lang_seg.set("RU")
-        self.lang_seg.pack(side="left")
+        return page
 
-        self.theme_seg = ctk.CTkSegmentedButton(
-            lang_row,
-            values=["dark", "light"],
-            command=lambda m: ctk.set_appearance_mode(m),
-            width=140,
+    def _build_player_view(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        # Одна строка chrome; Инвест/Обычный — в шапке сайдбара
+        # Обёртка — чтобы в immersive спрятать панель целиком
+        self.player_chrome_row1 = QWidget()
+        row1 = QHBoxLayout(self.player_chrome_row1)
+        row1.setContentsMargins(0, 0, 0, 0)
+        row1.setSpacing(8)
+        self.back_btn = QPushButton("← Назад")
+        self.back_btn.setProperty("fallback", True)
+        self.back_btn.setToolTip("К экрану скачивания")
+        self.back_btn.clicked.connect(self.show_download_view)
+        row1.addWidget(self.back_btn)
+
+        self.theater_btn = QPushButton("⛶")
+        self.theater_btn.setProperty("fallback", True)
+        self.theater_btn.setToolTip(self._theater_btn_tooltip_idle())
+        self.theater_btn.clicked.connect(self._toggle_player_theater)
+        row1.addWidget(self.theater_btn)
+
+        self.analyze_btn = QPushButton("📥")
+        self.analyze_btn.setProperty("fallback", True)
+        self.analyze_btn.setToolTip(
+            "Скачать / обновить субтитры текущего ролика (без ИИ)"
         )
-        self.theme_seg.set("dark")
-        self.theme_seg.pack(side="right")
+        self.analyze_btn.clicked.connect(self.on_analyze_current_video)
+        row1.addWidget(self.analyze_btn)
 
-        self.status = ctk.CTkLabel(
-            self,
-            text="Статус: ожидание ссылки…",
-            anchor="w",
-            justify="left",
-            wraplength=500,
+        self.player_title = QLabel("Плеер таймкодов")
+        self.player_title.setProperty("player_title", True)
+        self.player_title.setFont(QFont("", 12, QFont.Weight.DemiBold))
+        self.player_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.player_title.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
-        self.status.pack(fill="x", padx=20, pady=(16, 4))
+        self._player_title_full = "Плеер таймкодов"
+        row1.addWidget(self.player_title, 1)
 
-        btn_row = ctk.CTkFrame(self, fg_color="transparent")
-        btn_row.pack(fill="x", padx=20, pady=16)
-
-        self.download_btn = ctk.CTkButton(
-            btn_row, text="Скачать", command=self.on_download, width=120
+        self.ai_btn = QPushButton("✨ ИИ")
+        self.ai_btn.setToolTip(
+            "ИИ-разбор текущего ролика в плеере (по URL WebView)"
         )
-        self.download_btn.pack(side="left", padx=(0, 8))
+        self.ai_btn.clicked.connect(self.on_ai_analyze)
+        apply_primary_glow(self.ai_btn, strong=True)
+        row1.addWidget(self.ai_btn)
 
-        self.player_btn = ctk.CTkButton(
-            btn_row, text="Плеер", command=self.on_open_player, width=100
+        self.player_audio_btn = QPushButton("🎵")
+        self.player_audio_btn.setProperty("fallback", True)
+        self.player_audio_btn.setToolTip("Скачать аудио текущего видео (MP3)")
+        self.player_audio_btn.clicked.connect(self.on_download_audio_from_player)
+        row1.addWidget(self.player_audio_btn)
+
+        self.player_cancel_btn = QPushButton("✕ Отмена")
+        self.player_cancel_btn.setProperty("fallback", True)
+        self.player_cancel_btn.setMinimumWidth(96)
+        self.player_cancel_btn.setToolTip("Отменить скачивание")
+        self.player_cancel_btn.clicked.connect(self.on_cancel_download)
+        self.player_cancel_btn.setVisible(False)
+        row1.addWidget(self.player_cancel_btn)
+
+        self.login_btn = QPushButton("Войти")
+        self.login_btn.setProperty("fallback", True)
+        self.login_btn.setToolTip("Войти в YouTube / назад к видео")
+        self._login_mode = False  # False=войти, True=назад к видео
+        self.login_btn.clicked.connect(self._login_btn_clicked)
+        row1.addWidget(self.login_btn)
+        layout.addWidget(self.player_chrome_row1)
+
+        self._player_page_layout = layout
+
+        self.player_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.player_splitter.setHandleWidth(6)
+        self.player_splitter.setStyleSheet(
+            "QSplitter::handle { background: #10b981; border-radius: 3px; }"
         )
-        self.player_btn.pack(side="left", padx=(0, 8))
 
-        ctk.CTkButton(
-            btn_row,
-            text="Очистить",
-            command=self.on_clear,
-            width=100,
-            fg_color="gray35",
-        ).pack(side="left")
+        video_card = QFrame()
+        video_card.setProperty("card", True)
+        self._player_video_card = video_card
+        video_layout = QVBoxLayout(video_card)
+        self._player_video_layout = video_layout
+        video_layout.setContentsMargins(8, 8, 8, 8)
+        # Постоянный профиль — куки YouTube сохраняются между запусками
+        profile_path = os.path.join(app_install_dir(), "yt_profile")
+        self._yt_profile = QWebEngineProfile("yt_player", self)
+        self._yt_profile.setPersistentStoragePath(profile_path)
+        self._yt_profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
+        )
+        settings = self._yt_profile.settings()
+        # Не автоплеить при загрузке страницы — только по жесту (▶ / seek / клик).
+        settings.setAttribute(
+            QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, True
+        )
+
+        self.web_view = QWebEngineView()
+        _SafePage = _make_safe_page_class(_YT_NAV_HOSTS)
+        self._yt_page = _SafePage(self._yt_profile, self.web_view)
+        self.web_view.setPage(self._yt_page)
+        self.web_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.web_view.loadFinished.connect(self._on_webview_loaded)
+        video_layout.addWidget(self.web_view)
+
+        self.load_video_btn = QPushButton("▶ Загрузить видео")
+        self.load_video_btn.setProperty("fallback", True)
+        self.load_video_btn.setToolTip(
+            "YouTube не грузится сам при открытии плеера — только по кнопке"
+        )
+        self.load_video_btn.clicked.connect(self.on_load_player_video)
+        video_layout.addWidget(self.load_video_btn)
+
+        sidebar = QFrame()
+        sidebar.setProperty("card", True)
+        self.player_sidebar = sidebar
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(10, 10, 10, 10)
+        sidebar_layout.setSpacing(6)
+
+        mode_row = QHBoxLayout()
+        mode_row.setContentsMargins(0, 0, 0, 0)
+        mode_row.setSpacing(6)
+        mode_lbl = QLabel("ИИ:")
+        mode_lbl.setProperty("muted", True)
+        mode_row.addWidget(mode_lbl)
+
+        self.ai_invest_btn = QPushButton("Инвест")
+        self.ai_invest_btn.setProperty("segmented", True)
+        self.ai_invest_btn.setProperty("selected", True)
+        self.ai_invest_btn.setToolTip("Режим ИИ: инвест-фильтр (чекпоинт)")
+        self.ai_invest_btn.clicked.connect(lambda: self._set_ai_mode("invest"))
+        mode_row.addWidget(self.ai_invest_btn)
+
+        self.ai_general_btn = QPushButton("Обычный")
+        self.ai_general_btn.setProperty("segmented", True)
+        self.ai_general_btn.setProperty("selected", False)
+        self.ai_general_btn.setToolTip("Режим ИИ: обычный разбор")
+        self.ai_general_btn.clicked.connect(lambda: self._set_ai_mode("general"))
+        mode_row.addWidget(self.ai_general_btn)
+        mode_row.addStretch()
+        sidebar_layout.addLayout(mode_row)
+        self._ai_mode_lbl = mode_lbl
+
+        self.sidebar_tabs = QTabWidget()
+        self.sidebar_tabs.setDocumentMode(True)
+
+        analysis_tab = QWidget()
+        analysis_layout = QVBoxLayout(analysis_tab)
+        analysis_layout.setContentsMargins(6, 10, 6, 6)
+        self.ai_summary = QTextBrowser()
+        self.ai_summary.setObjectName("ai_summary")
+        self.ai_summary.setOpenExternalLinks(False)
+        self.ai_summary.setPlaceholderText("Нажми «✨ ИИ» или открой ролик с сохранённым разбором")
+        analysis_layout.addWidget(self.ai_summary)
+        self.sidebar_tabs.addTab(analysis_tab, "Разбор")
+
+        ai_marks_tab = QWidget()
+        ai_marks_outer = QVBoxLayout(ai_marks_tab)
+        ai_marks_outer.setContentsMargins(0, 0, 0, 0)
+        self.ai_marks_area = QScrollArea()
+        self.ai_marks_area.setWidgetResizable(True)
+        self.ai_marks_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.ai_marks_inner = QWidget()
+        self.timed_layout_ai = QVBoxLayout(self.ai_marks_inner)
+        self.timed_layout_ai.setContentsMargins(0, 0, 0, 0)
+        self.timed_layout_ai.setSpacing(6)
+        self.ai_marks_area.setWidget(self.ai_marks_inner)
+        self.ai_marks_area.viewport().installEventFilter(self)
+        ai_marks_outer.addWidget(self.ai_marks_area)
+        self.sidebar_tabs.addTab(ai_marks_tab, "ИИ-моменты")
+
+        all_marks_tab = QWidget()
+        all_marks_outer = QVBoxLayout(all_marks_tab)
+        all_marks_outer.setContentsMargins(0, 0, 0, 0)
+        self.all_marks_area = QScrollArea()
+        self.all_marks_area.setWidgetResizable(True)
+        self.all_marks_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.all_marks_inner = QWidget()
+        self.timed_layout_all = QVBoxLayout(self.all_marks_inner)
+        self.timed_layout_all.setContentsMargins(0, 0, 0, 0)
+        self.timed_layout_all.setSpacing(6)
+        self.all_marks_area.setWidget(self.all_marks_inner)
+        self.all_marks_area.viewport().installEventFilter(self)
+        all_marks_outer.addWidget(self.all_marks_area)
+        self.sidebar_tabs.addTab(all_marks_tab, "Все")
+
+        sidebar_layout.addWidget(self.sidebar_tabs)
+
+        self.player_splitter.addWidget(video_card)
+        self.player_splitter.addWidget(sidebar)
+        self.player_splitter.setStretchFactor(0, 4)
+        self.player_splitter.setStretchFactor(1, 1)
+        self.player_splitter.setSizes([800, 200])
+        self._splitter_sizes_with_sidebar = [800, 200]
+
+        # Вкладка справа: свернуть/развернуть панель разбора (не theater)
+        self.sidebar_toggle_btn = QPushButton("«")
+        self.sidebar_toggle_btn.setProperty("sidebar_tab", True)
+        self.sidebar_toggle_btn.setProperty("fallback", True)
+        self.sidebar_toggle_btn.setToolTip("Панель разбора (R)")
+        self.sidebar_toggle_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
+        )
+        self.sidebar_toggle_btn.clicked.connect(self._toggle_player_sidebar)
+
+        split_row = QWidget()
+        split_row_layout = QHBoxLayout(split_row)
+        split_row_layout.setContentsMargins(0, 0, 0, 0)
+        split_row_layout.setSpacing(4)
+        split_row_layout.addWidget(self.player_splitter, 1)
+        split_row_layout.addWidget(self.sidebar_toggle_btn)
+        layout.addWidget(split_row, 1)
+
+        self._set_ai_mode("invest")
+        self._disable_space_button_activate(
+            self.back_btn,
+            self.theater_btn,
+            self.analyze_btn,
+            self.ai_btn,
+            self.load_video_btn,
+            self.player_audio_btn,
+            self.player_cancel_btn,
+            self.login_btn,
+            self.ai_invest_btn,
+            self.ai_general_btn,
+            self.sidebar_toggle_btn,
+        )
+
+        self._theater_esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), page)
+        self._theater_esc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._theater_esc.activated.connect(self._on_theater_escape)
+        # T = theater (не F: на YouTube F — их «fullscreen», в WebEngine бесполезен)
+        self._theater_t = QShortcut(QKeySequence(Qt.Key.Key_T), page)
+        self._theater_t.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._theater_t.activated.connect(self._on_theater_hotkey)
+        self._theater_f11 = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
+        self._theater_f11.activated.connect(self._toggle_os_fullscreen)
+        # R = свернуть/показать правую панель (в окне, не fullscreen)
+        self._sidebar_r = QShortcut(QKeySequence(Qt.Key.Key_R), page)
+        self._sidebar_r.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._sidebar_r.activated.connect(self._on_sidebar_hotkey)
+
+        self.player_status = QLabel("Статус: открой ролик через кнопку «Плеер».")
+        self.player_status.setProperty("muted", True)
+        self.player_status.setProperty("status_bar", True)
+        layout.addWidget(self.player_status)
+        self._theater_hide_widgets = (
+            self.player_chrome_row1,
+            self.sidebar_toggle_btn,
+            self.player_status,
+        )
+        return page
+
+    def _build_bookmarks_view(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setSpacing(10)
+
+        top = QHBoxLayout()
+        self.bookmarks_back_btn = QPushButton("← Назад")
+        self.bookmarks_back_btn.setProperty("fallback", True)
+        self.bookmarks_back_btn.clicked.connect(self.show_download_view)
+        top.addWidget(self.bookmarks_back_btn)
+
+        title = QLabel("Закладки")
+        title.setFont(QFont("", 14, QFont.Weight.DemiBold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addStretch()
+        top.addWidget(title)
+        top.addStretch()
+        layout.addLayout(top)
+
+        self.bookmarks_tabs = QTabWidget()
+        self.bookmarks_tabs.setDocumentMode(True)
+        for item in self._bookmarks:
+            self.bookmarks_tabs.addTab(QWidget(), item["title"])
+        self.bookmarks_tabs.currentChanged.connect(self._on_bookmark_tab_changed)
+        layout.addWidget(self.bookmarks_tabs)
+
+        self.bookmarks_content_stack = QStackedWidget()
+
+        web_card = QFrame()
+        web_card.setProperty("card", True)
+        web_layout = QVBoxLayout(web_card)
+        web_layout.setContentsMargins(8, 8, 8, 8)
+
+        profile_path = os.path.join(app_install_dir(), "bookmarks_profile")
+        self._bookmarks_profile = QWebEngineProfile("bookmarks", self)
+        self._bookmarks_profile.setPersistentStoragePath(profile_path)
+        self._bookmarks_profile.setPersistentCookiesPolicy(
+            QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
+        )
+        self._bookmarks_profile.setHttpUserAgent(_bookmarks_user_agent())
+        self._bookmarks_profile.setHttpAcceptLanguage("ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+        # Client Hints — Cloudflare часто валит WebEngine из‑за пустых UA-CH
+        try:
+            hints = self._bookmarks_profile.clientHints()
+            hints.setPlatform("Windows")
+            hints.setArchitecture("x86")
+            hints.setBitness("64")
+            hints.setMobile(False)
+        except Exception:
+            pass
+        bm_settings = self._bookmarks_profile.settings()
+        for attr, on in (
+            (QWebEngineSettings.WebAttribute.JavascriptEnabled, True),
+            (QWebEngineSettings.WebAttribute.LocalStorageEnabled, True),
+            # Soft-WebGL в Qt часто триггерит Turnstile «Verification failed»
+            (QWebEngineSettings.WebAttribute.WebGLEnabled, False),
+            (QWebEngineSettings.WebAttribute.PluginsEnabled, True),
+            (QWebEngineSettings.WebAttribute.AutoLoadImages, True),
+            (QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False),
+            (QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, True),
+            (QWebEngineSettings.WebAttribute.DnsPrefetchEnabled, True),
+        ):
+            try:
+                bm_settings.setAttribute(attr, on)
+            except Exception:
+                pass
+
+        self.bookmarks_web_view = QWebEngineView()
+        _BmSafePage = _make_safe_page_class(bookmark_allowed_hosts(self._bookmarks))
+        self._bookmarks_page = _BmSafePage(self._bookmarks_profile, self.bookmarks_web_view)
+        self.bookmarks_web_view.setPage(self._bookmarks_page)
+        self.bookmarks_web_view.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.bookmarks_web_view.loadFinished.connect(self._on_bookmarks_web_loaded)
+        self.bookmarks_web_view.loadProgress.connect(self._on_bookmarks_load_progress)
+        self.bookmarks_web_view.urlChanged.connect(self._on_bookmarks_url_changed)
+        web_layout.addWidget(self.bookmarks_web_view)
+        self.bookmarks_content_stack.addWidget(web_card)
+
+        self.history_panel = QFrame()
+        self.history_panel.setProperty("card", True)
+        history_layout = QVBoxLayout(self.history_panel)
+        history_layout.setContentsMargins(8, 8, 8, 8)
+        hist_hint = QLabel("Недавно открытые страницы (только в закладках WebView)")
+        hist_hint.setProperty("muted", True)
+        hist_hint.setWordWrap(True)
+        history_layout.addWidget(hist_hint)
+        self.history_scroll = QScrollArea()
+        self.history_scroll.setWidgetResizable(True)
+        self.history_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.history_inner = QWidget()
+        self.history_layout = QVBoxLayout(self.history_inner)
+        self.history_layout.setContentsMargins(0, 0, 0, 0)
+        self.history_layout.setSpacing(6)
+        self.history_scroll.setWidget(self.history_inner)
+        history_layout.addWidget(self.history_scroll)
+        self.bookmarks_content_stack.addWidget(self.history_panel)
+
+        layout.addWidget(self.bookmarks_content_stack, 1)
+
+        self._history_tab_index = self.bookmarks_tabs.addTab(QWidget(), "📜 История")
+
+        status_row = QHBoxLayout()
+        self.bookmarks_status = QLabel("Выбери вкладку закладки")
+        self.bookmarks_status.setProperty("muted", True)
+        status_row.addWidget(self.bookmarks_status, 1)
+
+        self.bookmarks_open_browser_btn = QPushButton("Открыть в Chrome")
+        self.bookmarks_open_browser_btn.setProperty("fallback", True)
+        self.bookmarks_open_browser_btn.setToolTip(
+            "Открыть в Chrome/Edge (окно приложения). "
+            "Нужно, если Cloudflare блокирует встроенный браузер."
+        )
+        self.bookmarks_open_browser_btn.clicked.connect(self._open_bookmark_in_browser)
+        status_row.addWidget(self.bookmarks_open_browser_btn)
+        layout.addLayout(status_row)
+
+        self._bookmarks_current_url = ""
+        if self.bookmarks_tabs.count() > 0:
+            self.bookmarks_tabs.setCurrentIndex(0)
+
+        self._disable_space_button_activate(
+            self.bookmarks_back_btn,
+            self.bookmarks_open_browser_btn,
+        )
+        return page
+
+    def _set_lang(self, lang_code: str) -> None:
+        self._lang_code = lang_code
+        self.ru_btn.setProperty("selected", lang_code == "ru")
+        self.en_btn.setProperty("selected", lang_code == "en")
+        self.ru_btn.style().unpolish(self.ru_btn)
+        self.ru_btn.style().polish(self.ru_btn)
+        self.en_btn.style().unpolish(self.en_btn)
+        self.en_btn.style().polish(self.en_btn)
+
+    def _set_ai_mode(self, mode: str) -> None:
+        self._ai_mode = "invest" if mode == "invest" else "general"
+        self.ai_invest_btn.setProperty("selected", self._ai_mode == "invest")
+        self.ai_general_btn.setProperty("selected", self._ai_mode == "general")
+        for btn in (self.ai_invest_btn, self.ai_general_btn):
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+            btn.update()
+
+    def _polish_btn(self, btn: QPushButton) -> None:
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+        btn.update()
+
+    def _sync_cancel_buttons(self) -> None:
+        """Показать ✕ Отмена при скачивании или ИИ; стиль/tooltip по контексту."""
+        show = self._busy or self._ai_busy
+        ai_ctx = self._ai_busy and not self._busy
+
+        if hasattr(self, "cancel_busy_btn"):
+            self.cancel_busy_btn.setVisible(show)
+            if show:
+                tip = (
+                    "Отменить ИИ-разбор"
+                    if ai_ctx
+                    else "Остановить скачивание субтитров или аудио"
+                )
+                self.cancel_busy_btn.setToolTip(tip)
+                self.cancel_busy_btn.setProperty("cancel_busy", ai_ctx or self._busy)
+                self._polish_btn(self.cancel_busy_btn)
+
+        if hasattr(self, "player_cancel_btn"):
+            self.player_cancel_btn.setVisible(show)
+            if show:
+                self.player_cancel_btn.setText("✕ Отмена")
+                self.player_cancel_btn.setMinimumWidth(96)
+                self.player_cancel_btn.setProperty("compact", False)
+                self.player_cancel_btn.setProperty("cancel_busy", True)
+                tip = (
+                    "Отменить ИИ-разбор"
+                    if ai_ctx
+                    else "Отменить скачивание"
+                )
+                self.player_cancel_btn.setToolTip(tip)
+                self._polish_btn(self.player_cancel_btn)
+            else:
+                self.player_cancel_btn.setProperty("cancel_busy", False)
+                self.player_cancel_btn.setProperty("compact", True)
+                self.player_cancel_btn.setToolTip("Отменить скачивание")
+                self._polish_btn(self.player_cancel_btn)
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
-        state = "disabled" if busy else "normal"
-        self.download_btn.configure(state=state)
-        self.player_btn.configure(state=state)
-        self.lang_seg.configure(state=state)
-        self.url_input.configure(state=state)
+        for widget in (
+            self.download_btn,
+            self.audio_btn,
+            self.player_btn,
+            self.bookmarks_btn,
+            self.clear_btn,
+            self.ru_btn,
+            self.en_btn,
+        ):
+            widget.setDisabled(busy)
+        if hasattr(self, "player_audio_btn"):
+            self.player_audio_btn.setDisabled(busy)
+        if hasattr(self, "analyze_btn"):
+            self.analyze_btn.setDisabled(busy)
+        self.url_input.setDisabled(busy)
+        self.download_btn.setProperty("motion_busy", busy)
+        self._polish_btn(self.download_btn)
+        self._sync_cancel_buttons()
+        if busy:
+            self._cancel_event.clear()
+            self._busy_t0 = time.monotonic()
+            self._busy_timer.start()
+            self._pulse_download.start()
+        else:
+            self._busy_timer.stop()
+            self._busy_t0 = None
+            self._cancel_context = ""
+            self._pulse_download.stop()
+            self._paint_download_status()
+
+    def _begin_download_task(self, context: str) -> None:
+        """context: download | player_subs | audio | audio_player"""
+        self._cancel_context = context
+        self._cancel_event.clear()
+
+    def on_cancel_download(self) -> None:
+        """Единая отмена: ИИ (если _ai_busy) иначе скачивание (если _busy)."""
+        if self._ai_busy:
+            self._ai_cancel_event.set()
+            self._ai_job_id += 1  # инвалидация позднего ответа
+            self._set_player_status_core("ИИ: отмена…")
+            return
+        if not self._busy:
+            return
+        self._cancel_event.set()
+        msg = "Отмена…"
+        if self._cancel_context.startswith("audio"):
+            if "player" in self._cancel_context:
+                self._set_player_status_core(msg)
+            else:
+                self._set_status(msg)
+        elif self._cancel_context == "player_subs":
+            self._set_player_status_core(msg)
+        else:
+            self._set_status(msg)
 
     def _set_status(self, text: str) -> None:
-        self.status.configure(text=text)
+        self._status_core = text
+        self._paint_download_status()
+
+    def _paint_download_status(self) -> None:
+        extra = ""
+        if self._busy and self._busy_t0 is not None:
+            extra = f"\n⏱ {int(time.monotonic() - self._busy_t0)}с"
+        self.download_status.setText(self._status_core + extra)
+
+    def _refresh_busy_clock(self) -> None:
+        self._paint_download_status()
+
+    def _set_player_status(self, text: str) -> None:
+        self._set_player_status_core(text)
+
+    def _set_player_status_core(self, text: str) -> None:
+        self._player_status_core = text
+        self._paint_player_status()
+
+    def _paint_player_status(self) -> None:
+        extra = ""
+        if self._ai_busy and self._ai_busy_t0 is not None:
+            extra = f"\n⏱ {int(time.monotonic() - self._ai_busy_t0)}с"
+        self.player_status.setText(self._player_status_core + extra)
+
+    def _refresh_ai_busy_clock(self) -> None:
+        self._paint_player_status()
+
+    def _set_ai_busy(self, busy: bool) -> None:
+        self._ai_busy = busy
+        self.ai_btn.setDisabled(busy)
+        self.ai_btn.setProperty("motion_busy", busy)
+        self._polish_btn(self.ai_btn)
+        if hasattr(self, "analyze_btn"):
+            self.analyze_btn.setDisabled(busy or self._busy)
+        if busy:
+            self.ai_btn.setText("ИИ…")
+            self._ai_busy_t0 = time.monotonic()
+            self._ai_busy_timer.start()
+            self._pulse_ai.start()
+        else:
+            self.ai_btn.setText("✨ ИИ")
+            self._ai_busy_timer.stop()
+            self._ai_busy_t0 = None
+            self._pulse_ai.stop()
+            self._paint_player_status()
+        self._sync_cancel_buttons()
+
+    def _toggle_player_theater(self) -> None:
+        """Полномасштабный режим: весь монитор + без панелей (⛶ / T)."""
+        if self.isFullScreen() or self._player_theater:
+            self._exit_immersive_playback()
+        else:
+            self._enter_immersive_playback()
+
+    def _on_theater_hotkey(self) -> None:
+        """T — immersive fullscreen; только на экране плеера."""
+        if self.stack.currentWidget() is not self.player_view:
+            return
+        self._toggle_player_theater()
+
+    def _on_sidebar_hotkey(self) -> None:
+        """R — свернуть/показать панель разбора; только на экране плеера, не в theater."""
+        if self.stack.currentWidget() is not self.player_view:
+            return
+        if self._player_theater or self.isFullScreen():
+            return
+        self._toggle_player_sidebar()
+
+    def _toggle_player_sidebar(self) -> None:
+        """В окне: спрятать/вернуть правую панель (видео шире), не theater."""
+        if self._player_theater or self.isFullScreen():
+            return
+        if self.stack.currentWidget() is not self.player_view:
+            return
+        if self._sidebar_collapsed:
+            self._set_sidebar_collapsed(False)
+        else:
+            self._set_sidebar_collapsed(True)
+
+    def _set_sidebar_collapsed(self, collapsed: bool) -> None:
+        if collapsed:
+            sizes = self.player_splitter.sizes()
+            if len(sizes) >= 2 and sizes[1] > 40:
+                self._splitter_sizes_with_sidebar = sizes
+            # maximumWidth(0) надёжнее hide: QSplitter иначе «держит» дыру
+            self.player_sidebar.setMinimumWidth(0)
+            self.player_sidebar.setMaximumWidth(0)
+            self.player_sidebar.hide()
+            self._sidebar_collapsed = True
+        else:
+            self.player_sidebar.setMaximumWidth(16777215)
+            self.player_sidebar.setMinimumWidth(0)
+            self.player_sidebar.show()
+            self._sidebar_collapsed = False
+            restore = self._splitter_sizes_with_sidebar or [800, 200]
+            self.player_splitter.setSizes(restore)
+        self._sync_sidebar_toggle_btn()
+        # Chromium WebView часто не подхватывает ширину с первого кадра
+        self._nudge_player_split_layout()
+        QTimer.singleShot(0, self._nudge_player_split_layout)
+        QTimer.singleShot(40, self._nudge_player_split_layout)
+        QTimer.singleShot(120, self._nudge_player_split_layout)
+
+    def _nudge_player_split_layout(self) -> None:
+        """Заставить splitter + WebEngine пересчитать геометрию."""
+        if not hasattr(self, "player_splitter"):
+            return
+        sp = self.player_splitter
+        total = max(sp.width(), 1)
+        if self._sidebar_collapsed:
+            sp.setSizes([total, 0])
+        elif self.player_sidebar.isVisible():
+            cur = sp.sizes()
+            if len(cur) >= 2 and cur[1] < 40:
+                restore = self._splitter_sizes_with_sidebar or [800, 200]
+                s0, s1 = restore[0], restore[1]
+                ratio = s0 / max(s0 + s1, 1)
+                left = max(1, int(total * ratio))
+                sp.setSizes([left, max(1, total - left)])
+        if hasattr(self, "web_view"):
+            w = self.web_view
+            s = w.size()
+            if s.width() > 0 and s.height() > 0:
+                w.resize(s.width() + 1, s.height())
+                w.resize(s)
+            w.updateGeometry()
+            w.update()
+        sp.updateGeometry()
+        sp.update()
+
+    def _sync_sidebar_toggle_btn(self) -> None:
+        if not hasattr(self, "sidebar_toggle_btn"):
+            return
+        if self._sidebar_collapsed:
+            self.sidebar_toggle_btn.setText("Р\nа\nз\nб\nо\nр")
+        else:
+            self.sidebar_toggle_btn.setText("«")
+        self.sidebar_toggle_btn.setToolTip("Панель разбора (R)")
+
+    def _theater_btn_tooltip_idle(self) -> str:
+        return (
+            "Полный экран (T / ⛶) — видео на весь монитор · Esc — выход · "
+            "F11 — то же"
+        )
+
+    def _set_immersive_chrome(self, on: bool) -> None:
+        """Убрать/вернуть отступы и панели — чтобы WebView был edge-to-edge."""
+        root_layout = self.centralWidget().layout() if self.centralWidget() else None
+        if on:
+            if root_layout is not None:
+                root_layout.setContentsMargins(0, 0, 0, 0)
+            if hasattr(self, "_player_page_layout"):
+                self._player_page_layout.setContentsMargins(0, 0, 0, 0)
+                self._player_page_layout.setSpacing(0)
+            if hasattr(self, "_player_video_layout"):
+                self._player_video_layout.setContentsMargins(0, 0, 0, 0)
+            if hasattr(self, "_player_video_card"):
+                self._player_video_card.setProperty("card", False)
+                self._player_video_card.setStyleSheet(
+                    "QFrame { background: #000; border: none; border-radius: 0; }"
+                )
+        else:
+            if root_layout is not None:
+                root_layout.setContentsMargins(16, 16, 16, 16)
+            if hasattr(self, "_player_page_layout"):
+                self._player_page_layout.setContentsMargins(0, 0, 0, 0)
+                self._player_page_layout.setSpacing(8)
+            if hasattr(self, "_player_video_layout"):
+                self._player_video_layout.setContentsMargins(8, 8, 8, 8)
+            if hasattr(self, "_player_video_card"):
+                self._player_video_card.setProperty("card", True)
+                self._player_video_card.setStyleSheet("")
+                self._player_video_card.style().unpolish(self._player_video_card)
+                self._player_video_card.style().polish(self._player_video_card)
+
+    def _enter_immersive_playback(self) -> None:
+        if self._player_theater and self.isFullScreen():
+            return
+        if self.stack.currentWidget() is not self.player_view:
+            return
+        if not self._player_theater:
+            # Сохранить ширины до theater; не затирать «с сайдбаром», если уже свёрнут
+            sizes = self.player_splitter.sizes()
+            self._splitter_sizes_normal = sizes
+            if not self._sidebar_collapsed and len(sizes) >= 2 and sizes[1] > 40:
+                self._splitter_sizes_with_sidebar = sizes
+            self.player_sidebar.setVisible(False)
+            for widget in self._theater_hide_widgets:
+                widget.setVisible(False)
+            self._player_theater = True
+        self._set_immersive_chrome(True)
+        self.theater_btn.setToolTip("Выйти из полного экрана (Esc / T / F11)")
+        if not self.isFullScreen():
+            self.showFullScreen()
+        # Best-effort: HTML5 video fullscreen внутри Chromium
+        QTimer.singleShot(200, self._try_html_video_fullscreen)
+
+    def _try_html_video_fullscreen(self) -> None:
+        if not self._player_theater or not hasattr(self, "web_view"):
+            return
+        self.web_view.page().runJavaScript(
+            """
+            (function(){
+              try {
+                var v = document.querySelector('video');
+                if (!v) return 'no-video';
+                if (document.fullscreenElement) return 'already';
+                var req = v.requestFullscreen || v.webkitRequestFullscreen;
+                if (req) { req.call(v); return 'ok'; }
+                return 'no-api';
+              } catch (e) { return 'err:' + e; }
+            })();
+            """
+        )
+
+    def _exit_html_video_fullscreen(self) -> None:
+        if not hasattr(self, "web_view"):
+            return
+        self.web_view.page().runJavaScript(
+            """
+            (function(){
+              try {
+                if (document.fullscreenElement) {
+                  var ex = document.exitFullscreen || document.webkitExitFullscreen;
+                  if (ex) ex.call(document);
+                }
+              } catch (e) {}
+            })();
+            """
+        )
+
+    def _enter_player_theater(self) -> None:
+        """Совместимость: театр = immersive fullscreen."""
+        self._enter_immersive_playback()
+
+    def _exit_player_theater(self, *, force: bool = False) -> None:
+        if not self._player_theater and not force:
+            return
+        self._exit_html_video_fullscreen()
+        if self.isFullScreen():
+            self.showNormal()
+            self._ensure_window_on_screen()
+            QTimer.singleShot(0, self._ensure_window_on_screen)
+        self._set_immersive_chrome(False)
+        for widget in self._theater_hide_widgets:
+            widget.setVisible(True)
+        # Уважаем свёрнутый сайдбар: не форсим панель обратно
+        if self._sidebar_collapsed:
+            self.player_sidebar.setMinimumWidth(0)
+            self.player_sidebar.setMaximumWidth(0)
+            self.player_sidebar.setVisible(False)
+            total = sum(self._splitter_sizes_normal or [1000, 0]) or 1000
+            self.player_splitter.setSizes([total, 0])
+        else:
+            self.player_sidebar.setMaximumWidth(16777215)
+            self.player_sidebar.setMinimumWidth(0)
+            self.player_sidebar.setVisible(True)
+            restore = (
+                self._splitter_sizes_with_sidebar
+                or self._splitter_sizes_normal
+                or [800, 200]
+            )
+            self.player_splitter.setSizes(restore)
+        self._sync_sidebar_toggle_btn()
+        self._nudge_player_split_layout()
+        QTimer.singleShot(40, self._nudge_player_split_layout)
+        self._player_theater = False
+        self.theater_btn.setToolTip(self._theater_btn_tooltip_idle())
+
+    def _exit_immersive_playback(self) -> None:
+        self._exit_player_theater(force=True)
+
+    def _on_theater_escape(self) -> None:
+        if self.isFullScreen() or self._player_theater:
+            self._exit_immersive_playback()
+
+    def _toggle_os_fullscreen(self) -> None:
+        """F11 — тот же полномасштабный режим, что ⛶ / T."""
+        if self.stack.currentWidget() is not self.player_view:
+            return
+        self._toggle_player_theater()
+
+    def _clear_layout_buttons(self, layout: QVBoxLayout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _mark_elide_width(self) -> int:
+        """Ширина для … в кнопках таймкодов — по реальной ширине сайдбара."""
+        area = None
+        if hasattr(self, "sidebar_tabs"):
+            idx = self.sidebar_tabs.currentIndex()
+            if idx == 1 and hasattr(self, "ai_marks_area"):
+                area = self.ai_marks_area
+            elif idx == 2 and hasattr(self, "all_marks_area"):
+                area = self.all_marks_area
+        if area is None and hasattr(self, "all_marks_area"):
+            area = self.all_marks_area
+        if area is not None:
+            w = area.viewport().width()
+            if w > 40:
+                return max(60, w - 28)
+        return 180
+
+    def _elide_mark_label(self, full_text: str, width: int | None = None) -> str:
+        w = width if width is not None else self._mark_elide_width()
+        return QFontMetrics(self.font()).elidedText(
+            full_text,
+            Qt.TextElideMode.ElideRight,
+            w,
+        )
+
+    def _refresh_mark_button_labels(self, layout: QVBoxLayout | None = None) -> None:
+        """Пересчитать … при ресайзе сайдбара."""
+        layouts = [layout] if layout is not None else []
+        if not layouts:
+            if hasattr(self, "timed_layout_ai"):
+                layouts.append(self.timed_layout_ai)
+            if hasattr(self, "timed_layout_all"):
+                layouts.append(self.timed_layout_all)
+        w = self._mark_elide_width()
+        for lay in layouts:
+            for i in range(lay.count()):
+                item = lay.itemAt(i)
+                btn = item.widget() if item else None
+                if btn is None or not isinstance(btn, QPushButton):
+                    continue
+                full = btn.property("full_text")
+                if full:
+                    btn.setText(self._elide_mark_label(str(full), w))
+
+    def _fill_mark_buttons(self, layout: QVBoxLayout, marks: list[dict], empty_text: str) -> None:
+        self._clear_layout_buttons(layout)
+        if not marks:
+            label = QLabel(empty_text)
+            label.setProperty("muted", True)
+            label.setWordWrap(True)
+            layout.addWidget(label)
+            layout.addStretch()
+            return
+        w = self._mark_elide_width()
+        for mark in marks:
+            sec = int(mark["seconds"])
+            stamp = format_mmss(sec)
+            label = str(mark.get("label") or "").strip()
+            # короткий тайтл: без простыни — оставляем суть, Qt дорисует …
+            if len(label) > 72:
+                label = label[:69].rstrip() + "…"
+            full_text = f"[{stamp}] {label}" if label else f"[{stamp}]"
+            btn = QPushButton(self._elide_mark_label(full_text, w))
+            btn.setProperty("mark", True)
+            btn.setProperty("full_text", full_text)
+            btn.setToolTip(full_text)
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+            btn.clicked.connect(lambda _=False, s=sec: self.seek_in_player(s))
+            layout.addWidget(btn)
+        layout.addStretch()
+        # после layout ширина viewport может стать реальной
+        QTimer.singleShot(0, lambda: self._refresh_mark_button_labels(layout))
+
+    def _build_ai_summary_html(self, analysis: dict) -> str:
+        """HTML разбора для вкладки «Разбор»."""
+        mode = analysis.get("mode") or "general"
+        kind = analysis.get("content_kind") or mode
+        verdict = str(analysis.get("verdict_1_line") or "").strip()
+        summary = str(analysis.get("summary") or "").strip()
+        action = str(analysis.get("action") or "").strip()
+        fit = str(analysis.get("checkpoint_fit") or "").strip()
+        link = str(analysis.get("portfolio_link") or "").strip()
+        facts = analysis.get("facts_usable") or []
+        ignore = analysis.get("opinions_ignore") or []
+        flags = analysis.get("red_flags_seen") or []
+        verify = analysis.get("verify_list") or analysis.get("verify") or []
+        assets = analysis.get("assets") or []
+        claims = analysis.get("claims") or []
+        takeaways = analysis.get("takeaways") or []
+        holds_up = str(analysis.get("holds_up") or "").strip()
+        framing = str(analysis.get("framing") or "").strip()
+        thinking = str(analysis.get("what_it_changes_in_thinking") or "").strip()
+
+        def _ul(title: str, items: list) -> str:
+            if not items:
+                return ""
+            bullets = "".join(f"<li>{str(t)}</li>" for t in items)
+            return f"<b>{title}</b><ul>{bullets}</ul>"
+
+        parts: list[str] = []
+        if mode == "invest":
+            kind_ru = "образовалка" if kind == "educational" else "инвест/сигналы"
+            parts.append(f"<b>Инвест-фильтр</b> · {kind_ru}")
+            if verdict:
+                parts.append(f"<b>Вердикт</b><br/>{verdict}")
+            meta = []
+            if action:
+                meta.append(f"action: <b>{action}</b>")
+            if fit:
+                meta.append(f"checkpoint: {fit}")
+            if link:
+                meta.append(f"portfolio: {link}")
+            if meta:
+                parts.append(" · ".join(meta))
+            if assets:
+                parts.append("<b>Активы из текста</b><br/>" + ", ".join(str(a) for a in assets))
+            for title, items in (
+                ("Факты (usable)", facts),
+                ("Тезисы автора", claims),
+                ("Красные флаги", flags),
+                ("Игнор", ignore),
+                ("Сверить в первичке", verify),
+                ("Takeaways", takeaways),
+            ):
+                block = _ul(title, items)
+                if block:
+                    parts.append(block)
+            if kind == "educational":
+                if holds_up:
+                    parts.append(f"<b>Держится ли рамка</b><br/>{holds_up}")
+                if framing:
+                    parts.append(f"<b>Рамка</b><br/>{framing}")
+                if thinking:
+                    parts.append(f"<b>На что влияет мышление</b><br/>{thinking}")
+        else:
+            parts.append("<b>Обычный разбор</b>")
+            if verdict:
+                parts.append(f"<b>Вердикт</b><br/>{verdict}")
+            if summary and summary != verdict:
+                parts.append(f"<b>Вывод</b><br/>{summary.replace(chr(10), '<br/>')}")
+            block = _ul("Что уяснить", takeaways)
+            if block:
+                parts.append(block)
+            block = _ul("Игнор", ignore)
+            if block:
+                parts.append(block)
+
+        body = "<br/><br/>".join(parts) if parts else "<i>Пустой ответ ИИ</i>"
+        return f'<div style="line-height:1.45;">{body}</div>'
+
+    def _ai_highlights_to_marks(self, analysis: dict) -> list[dict]:
+        highlights = analysis.get("highlights") or []
+        return [
+            {"seconds": int(h["seconds"]), "label": str(h.get("label", ""))}
+            for h in highlights
+            if isinstance(h, dict) and "seconds" in h
+        ]
+
+    def _apply_ai_analysis(self, analysis: dict, *, switch_tab: bool = True) -> None:
+        """Заполняет вкладки разбора и ИИ-моментов, сохраняет в память."""
+        self._last_ai_analysis = analysis
+        self.ai_summary.setHtml(self._build_ai_summary_html(analysis))
+        marks = self._ai_highlights_to_marks(analysis)
+        self._fill_mark_buttons(
+            self.timed_layout_ai,
+            marks,
+            "Нет моментов для прыжка — смотри вкладку «Разбор»",
+        )
+        if switch_tab:
+            self.sidebar_tabs.setCurrentIndex(0)
+
+    def _fill_ai_analysis(self, analysis: dict) -> None:
+        """Показывает вывод ИИ + таймкоды моментов (после API)."""
+        self._apply_ai_analysis(analysis, switch_tab=True)
 
     def on_clear(self) -> None:
         if self._busy:
             return
-        self.url_input.delete(0, "end")
+        self.url_input.clear()
         self._set_status("Статус: ожидание ссылки…")
+
+    def _unload_player(self) -> None:
+        """Гасит WebView: стоп видео/сеть. Куки в yt_profile остаются."""
+        if not hasattr(self, "web_view"):
+            return
+        # Быстро глушим звук до blank — иначе Chromium может ещё секунду играть
+        try:
+            self.web_view.page().runJavaScript(
+                "try{var v=document.querySelector('video');"
+                "if(v){v.pause();v.src='';v.load();}"
+                "window.stop();}catch(e){}"
+            )
+        except Exception:
+            pass
+        self.web_view.setUrl(QUrl("about:blank"))
+        self._player_video_loaded = False
+        self._pending_seek_seconds = None
+        if hasattr(self, "load_video_btn"):
+            self.load_video_btn.setVisible(True)
+            self.load_video_btn.setEnabled(True)
+            self.load_video_btn.setText("▶ Загрузить видео")
+        self._login_mode = False
+        if hasattr(self, "login_btn"):
+            self.login_btn.setText("Войти")
+            self.login_btn.setToolTip("Войти в YouTube")
+
+    def show_download_view(self) -> None:
+        if self.isFullScreen():
+            self.showNormal()
+        self._exit_player_theater(force=True)
+        self._unload_player()
+        # Закладки не гасим — иначе каждый возврат = полная перезагрузка сайта
+        self.stack.setCurrentWidget(self.download_view)
+        self._lock_download_window_size()
+
+    def show_player_view(self) -> None:
+        from_download = self._is_download_view_active()
+        # Закладки не гасим: иначе Aniwaves каждый раз заново ловит Cloudflare
+        # Сначала переключить stack — иначе resize→moveEvent снова залочит download
+        self.stack.setCurrentWidget(self.player_view)
+        self._unlock_player_window_size(reset_geometry=from_download)
+        # Фокус в WebView — пробел = play/pause YouTube, не клик по кнопкам
+        QTimer.singleShot(0, lambda: self.web_view.setFocus())
+
+    def show_bookmarks_view(self) -> None:
+        if self._busy:
+            return
+        if self.isFullScreen():
+            self.showNormal()
+            self._ensure_window_on_screen()
+        from_download = self._is_download_view_active()
+        self._exit_player_theater(force=True)
+        self._unload_player()
+        self.stack.setCurrentWidget(self.bookmarks_view)
+        self._unlock_player_window_size(reset_geometry=from_download)
+        if self.bookmarks_tabs.count() <= 1:
+            self.bookmarks_status.setText("Нет закладок — добавь URL в bookmarks.json")
+            return
+        idx = self.bookmarks_tabs.currentIndex()
+        if idx < 0:
+            self.bookmarks_tabs.setCurrentIndex(0)
+            idx = 0
+        if idx >= len(self._bookmarks):
+            self.bookmarks_content_stack.setCurrentWidget(self.history_panel)
+            self._refresh_history_list()
+            return
+        self.bookmarks_content_stack.setCurrentWidget(
+            self.bookmarks_content_stack.widget(0)
+        )
+        cur = self.bookmarks_web_view.url().toString()
+        if cur in ("", "about:blank"):
+            self._load_bookmark_at_index(idx)
+        else:
+            title = self._bookmarks[idx].get("title") or "закладку"
+            self.bookmarks_status.setText(f"Загружено: {title} (из кэша)")
+
+    def _on_bookmark_tab_changed(self, index: int) -> None:
+        if index >= len(self._bookmarks):
+            self.bookmarks_content_stack.setCurrentWidget(self.history_panel)
+            self._refresh_history_list()
+            return
+        self.bookmarks_content_stack.setCurrentWidget(
+            self.bookmarks_content_stack.widget(0)
+        )
+        item = self._bookmarks[index]
+        want = str(item.get("url") or "")
+        cur = self.bookmarks_web_view.url().toString()
+        # Не дёргать CF заново, если уже на этом сайте (в т.ч. глубокая страница)
+        if want and self._bookmark_same_site(cur, want):
+            title = item.get("title") or "закладку"
+            if not self._bookmarks_current_url or self._bookmarks_current_url.startswith(
+                "about:"
+            ):
+                self._bookmarks_current_url = cur if cur and not cur.startswith("about:") else want
+            self.bookmarks_status.setText(f"Загружено: {title}")
+            return
+        self._load_bookmark_at_index(index)
+
+    @staticmethod
+    def _bookmark_same_site(current: str, bookmark: str) -> bool:
+        if not current or current.startswith("about:"):
+            return False
+        ch = (QUrl(current).host() or "").lower()
+        bh = (QUrl(bookmark).host() or "").lower()
+        if not ch or not bh:
+            return False
+        return ch == bh or ch.endswith("." + bh) or bh.endswith("." + ch)
+
+    def _current_bookmark_open_url(self) -> str:
+        """URL для «Открыть в Chrome»: текущая страница сайта, не CF-challenge."""
+        idx = self.bookmarks_tabs.currentIndex()
+        configured = ""
+        if 0 <= idx < len(self._bookmarks):
+            configured = str(self._bookmarks[idx].get("url") or "").strip()
+        cur = (self._bookmarks_current_url or "").strip()
+        if cur and not cur.startswith("about:"):
+            host = (QUrl(cur).host() or "").lower()
+            if "cloudflare" in host:
+                return configured
+            if configured:
+                cfg_host = (QUrl(configured).host() or "").lower()
+                if host and cfg_host and (
+                    host == cfg_host
+                    or host.endswith("." + cfg_host)
+                    or cfg_host.endswith("." + host)
+                ):
+                    return cur
+            # История / уже разрешённый URL
+            return cur
+        return configured
+
+    def _on_bookmarks_load_progress(self, progress: int) -> None:
+        if self.bookmarks_content_stack.currentWidget() is not self.bookmarks_content_stack.widget(0):
+            return
+        idx = self.bookmarks_tabs.currentIndex()
+        if idx < 0 or idx >= len(self._bookmarks):
+            return
+        title = self._bookmarks[idx].get("title") or "страницу"
+        if progress < 100:
+            self.bookmarks_status.setText(f"Загружаю: {title} — {progress}%")
+        elif progress == 100:
+            self.bookmarks_status.setText(f"Загружаю: {title} — отрисовка…")
+
+    def _on_bookmarks_url_changed(self, url: QUrl) -> None:
+        s = url.toString()
+        if s and not s.startswith("about:"):
+            self._bookmarks_current_url = s
+
+    def _record_bookmarks_history(self) -> None:
+        url = self.bookmarks_web_view.url().toString()
+        if not url or url.startswith("about:"):
+            return
+
+        def _save(title: str) -> None:
+            append_bookmarks_history(url, str(title or url))
+            if (
+                self.bookmarks_tabs.currentIndex() >= len(self._bookmarks)
+                and self.bookmarks_content_stack.currentWidget() is self.history_panel
+            ):
+                self._refresh_history_list()
+
+        self.bookmarks_web_view.page().runJavaScript(
+            "document.title || ''", _save
+        )
+
+    def _refresh_history_list(self) -> None:
+        while self.history_layout.count():
+            item = self.history_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        items = load_bookmarks_history()
+        if not items:
+            empty = QLabel("Пока пусто — открой сайт во вкладке закладки")
+            empty.setProperty("muted", True)
+            empty.setWordWrap(True)
+            self.history_layout.addWidget(empty)
+            self.history_layout.addStretch()
+            return
+        for entry in items:
+            url = str(entry.get("url") or "")
+            title = str(entry.get("title") or url)
+            ts = entry.get("ts")
+            when = ""
+            if isinstance(ts, (int, float)):
+                when = time.strftime(" %d.%m %H:%M", time.localtime(ts))
+            btn = QPushButton(f"{title}{when}")
+            btn.setProperty("mark", True)
+            btn.setToolTip(url)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+            btn.clicked.connect(lambda _=False, u=url: self._open_history_url(u))
+            self.history_layout.addWidget(btn)
+        self.history_layout.addStretch()
+
+    def _open_history_url(self, url: str) -> None:
+        if not url:
+            return
+        host = QUrl(url).host()
+        allowed = bookmark_allowed_hosts(self._bookmarks)
+        if not _nav_host_allowed(host, allowed):
+            self.bookmarks_status.setText(
+                f"Домен {host} не в whitelist — открой в Chrome"
+            )
+            return
+        self.bookmarks_content_stack.setCurrentWidget(
+            self.bookmarks_content_stack.widget(0)
+        )
+        for i, item in enumerate(self._bookmarks):
+            if QUrl(str(item.get("url") or "")).host().lower() == host.lower():
+                self.bookmarks_tabs.setCurrentIndex(i)
+                break
+        self._bookmarks_current_url = url
+        self.bookmarks_status.setText(f"Загружаю из истории…")
+        self.bookmarks_web_view.setUrl(QUrl(url))
+
+    def _load_bookmark_at_index(self, index: int) -> None:
+        if index < 0 or index >= len(self._bookmarks):
+            return
+        item = self._bookmarks[index]
+        url = item.get("url") or ""
+        if not url:
+            return
+        self._bookmarks_current_url = url
+        self.bookmarks_status.setText(f"Загружаю: {item.get('title') or url}")
+        self.bookmarks_web_view.setUrl(QUrl(url))
+
+    def _on_bookmarks_web_loaded(self, ok: bool) -> None:
+        idx = self.bookmarks_tabs.currentIndex()
+        if ok:
+            self._record_bookmarks_history()
+            # Turnstile рисует fail с задержкой — проверяем сразу и ещё раз через пару секунд
+            QTimer.singleShot(300, self._probe_bookmarks_cloudflare)
+            QTimer.singleShot(2500, self._probe_bookmarks_cloudflare)
+        if idx < 0 or idx >= len(self._bookmarks):
+            if ok:
+                self.bookmarks_status.setText("Загружено")
+            else:
+                self.bookmarks_status.setText(
+                    "Не удалось загрузить — попробуй «Открыть в Chrome» или VPN"
+                )
+            return
+        title = self._bookmarks[idx].get("title") or "закладку"
+        if ok:
+            self.bookmarks_status.setText(f"Загружено: {title}")
+        else:
+            self.bookmarks_status.setText(
+                f"Не удалось загрузить {title} — попробуй «Открыть в Chrome» или VPN"
+            )
+
+    def _probe_bookmarks_cloudflare(self) -> None:
+        if not hasattr(self, "bookmarks_web_view"):
+            return
+        if self.stack.currentWidget() is not self.bookmarks_view:
+            return
+        self.bookmarks_web_view.page().runJavaScript(
+            """
+            (function(){
+              var t = (document.body && document.body.innerText) || '';
+              var html = document.documentElement ? document.documentElement.innerHTML : '';
+              var fail = /Verification failed/i.test(t) || /Verification failed/i.test(html);
+              var blocked = /Sorry, you have been blocked|Attention Required!/i.test(t);
+              return {ok: true, fail: !!fail, blocked: !!blocked};
+            })();
+            """,
+            self._on_bookmarks_cf_probe,
+        )
+
+    def _on_bookmarks_cf_probe(self, result) -> None:
+        if not isinstance(result, dict):
+            return
+        if not (result.get("fail") or result.get("blocked")):
+            return
+        self.bookmarks_status.setText(
+            "Cloudflare блокирует встроенный браузер → жми «Открыть в Chrome» "
+            "(отдельное окно без вкладок; CF там обычно проходит)"
+        )
+
+    def _open_bookmark_in_browser(self) -> None:
+        url = self._current_bookmark_open_url()
+        if not url:
+            self.bookmarks_status.setText("Нет URL — выбери закладку")
+            return
+        chrome = _find_chrome_or_edge()
+        if chrome:
+            try:
+                # --app= отдельное окно без панели вкладок — ближе к «в приложении»
+                subprocess.Popen(
+                    [chrome, f"--app={url}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self.bookmarks_status.setText(
+                    "Открыто в Chrome/Edge (окно приложения) — Cloudflare там обычно проходит"
+                )
+                return
+            except OSError:
+                pass
+        QDesktopServices.openUrl(QUrl(url))
+        self.bookmarks_status.setText("Открыто во внешнем браузере")
 
     def on_open_player(self) -> None:
         if self._busy:
             return
-        url = self.url_input.get().strip()
+        url = self.url_input.text().strip()
         folder_name, id_for_write = resolve_player_target(url)
         if not folder_name:
             self._set_status("Статус: нет папки субтитров — сначала скачай")
             return
 
-        # Всегда пересобираем: иначе stale HTML (чужой id / старые метки)
-        try:
-            write_player_html(folder_name, id_for_write)
-        except (OSError, ValueError) as exc:
-            self._set_status(
-                f"Статус: нет {PLAYER_FILENAME}, пересобрать не вышло: {exc}"
-            )
-            return
-        player_path = os.path.join(folder_name, PLAYER_FILENAME)
-        if not os.path.isfile(player_path):
-            self._set_status(f"Статус: нет {PLAYER_FILENAME}")
+        if self._apply_player_folder_state(folder_name, id_for_write) is None:
             return
 
-        short = os.path.basename(folder_name)
-        if len(short) > 42:
-            short = short[:39] + "…"
-        try:
-            open_player_http(folder_name)
-        except OSError as exc:
-            try:
-                os.startfile(player_path)  # type: ignore[attr-defined]
-            except OSError as exc2:
-                self._set_status(f"Статус: не открылся плеер: {exc}; {exc2}")
-                return
-            self._set_status(f"Статус: плеер (file) · {short}")
+        # Не грузим YouTube сразу: пустой webview, ▶ по желанию.
+        video_id = id_for_write or _extract_id_from_folder(folder_name)
+        self._player_pending_video_id = video_id
+        self._player_video_loaded = False
+        self._unload_player_page_only()
+        if hasattr(self, "load_video_btn"):
+            self.load_video_btn.setVisible(True)
+            self.load_video_btn.setText("▶ Загрузить видео")
+        if video_id:
+            self._set_player_status(
+                "Статус: плеер готов · видео не загружено — нажми ▶"
+            )
+        else:
+            self._set_player_status("Статус: не удалось определить video ID")
+        self.show_player_view()
+
+    def on_load_player_video(self) -> None:
+        """Явная загрузка YouTube (без автоплея при открытии плеера)."""
+        vid = self._player_pending_video_id
+        if not vid and self._current_player_folder:
+            vid = _extract_id_from_folder(self._current_player_folder)
+            self._player_pending_video_id = vid
+        if not vid:
+            self._set_player_status("Статус: нет video ID — открой плеер из папки с субами")
             return
-        self._set_status(f"Статус: плеер · {short}")
+        self._set_player_status("Статус: загружаю YouTube…")
+        if hasattr(self, "load_video_btn"):
+            self.load_video_btn.setText("⏳ Загрузка…")
+            self.load_video_btn.setEnabled(False)
+        self.web_view.setUrl(QUrl(f"https://www.youtube.com/watch?v={vid}"))
+
+    def _unload_player_page_only(self) -> None:
+        """Сбросить WebView без сноса папки/меток."""
+        if not hasattr(self, "web_view"):
+            return
+        try:
+            self.web_view.page().runJavaScript(
+                "try{var v=document.querySelector('video');"
+                "if(v){v.pause();v.removeAttribute('src');v.load();}}catch(e){}"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        self.web_view.setUrl(QUrl("about:blank"))
+        self._player_video_loaded = False
+
+    def _force_pause_youtube(self) -> None:
+        """YouTube часто сам жмёт play — гасим несколько раз после load."""
+        script = (
+            "(function(){try{var v=document.querySelector('video');"
+            "if(!v)return 'no';v.pause();v.autoplay=false;return 'ok';}"
+            "catch(e){return 'err';}})();"
+        )
+
+        def _done(result) -> None:
+            if result == "ok":
+                return
+            if self._pause_retries_left > 0:
+                self._pause_retries_left -= 1
+                QTimer.singleShot(350, self._force_pause_youtube)
+
+        self.web_view.page().runJavaScript(script, _done)
+
+    def _apply_player_folder_state(
+        self, folder_name: str, id_for_write: str | None
+    ) -> bool | None:
+        """None — ошибка. True/False — ok, есть/нет сохранённого ИИ-разбора."""
+        try:
+            payload = load_player_data(folder_name, id_for_write)
+            write_player_html(folder_name, id_for_write)
+            self._player_http_url = ensure_player_http_url(folder_name)
+        except (OSError, ValueError) as exc:
+            self._set_status(f"Статус: встроенный плеер не подготовился: {exc}")
+            self._set_player_status(f"Ошибка подготовки: {exc}")
+            return None
+
+        self._current_player_folder = folder_name
+        short = os.path.basename(folder_name)
+        self._player_title_full = short
+        self.player_title.setToolTip(short)
+        self._refresh_player_title_elide()
+
+        if hasattr(self, "ai_summary"):
+            self.ai_summary.clear()
+
+        self._all_marks = list(payload["marks"])
+        self._fill_mark_buttons(
+            self.timed_layout_all,
+            self._all_marks,
+            "Нет таймкодов — проверь 1_текст_с_таймкодами.txt",
+        )
+        self._clear_layout_buttons(self.timed_layout_ai)
+        self._last_ai_analysis = None
+
+        saved = load_saved_analysis(folder_name)
+        if saved:
+            self._apply_ai_analysis(saved, switch_tab=False)
+            action = saved.get("action") or "—"
+            verdict = (saved.get("verdict_1_line") or "")[:80]
+            n_h = len(saved.get("highlights") or [])
+            self._set_player_status_core(
+                f"ИИ: сохранённый разбор · {action} · {n_h} моментов"
+                + (f" · {verdict}" if verdict else "")
+            )
+            self.sidebar_tabs.setCurrentIndex(0)
+            return True
+
+        self.ai_summary.setHtml(
+            "<i>Нажми «✨ ИИ» для разбора субтитров</i>"
+        )
+        self._fill_mark_buttons(
+            self.timed_layout_ai,
+            [],
+            "Сначала запусти «✨ ИИ»",
+        )
+        self.sidebar_tabs.setCurrentIndex(2)
+        return False
+
+    def _get_current_youtube_url(self, callback: Callable[[str], None]) -> None:
+        script = (
+            "(function(){try{return window.location.href||'';}catch(e){return '';}})();"
+        )
+        self.web_view.page().runJavaScript(script, callback)
+
+    def on_analyze_current_video(self) -> None:
+        """Только субтитры текущего ролика / refresh marks — без автозапуска ИИ."""
+        if self._busy or self._ai_busy:
+            return
+
+        def _on_href(href: str) -> None:
+            url = (href or "").strip()
+            video_id = get_video_id(url)
+            if not video_id:
+                self._set_player_status_core(
+                    "Статус: открой ролик YouTube — ссылка не распознана"
+                )
+                return
+
+            self.url_input.setText(url)
+            folder_name = find_output_folder(video_id)
+            if folder_name:
+                result = self._apply_player_folder_state(folder_name, video_id)
+                if result is None:
+                    return
+                n = len(self._all_marks)
+                if result:
+                    self._set_player_status_core(
+                        f"Статус: субтитры · {n} таймкодов · загружен сохранённый ИИ"
+                    )
+                else:
+                    self._set_player_status_core(
+                        f"Статус: субтитры · {n} таймкодов · ИИ нет — жми «✨ ИИ»"
+                    )
+                return
+
+            self._pending_ai_after_subs = False  # 📥 ≠ цепочка ИИ
+            self._set_player_status_core(
+                f"Статус: скачиваю субтитры ({self._lang_code.upper()})…"
+            )
+            self._begin_download_task("player_subs")
+            self._set_busy(True)
+            threading.Thread(
+                target=self._player_subs_download_worker,
+                args=(url, self._lang_code),
+                daemon=True,
+            ).start()
+
+        self._get_current_youtube_url(_on_href)
+
+    @staticmethod
+    def _folder_has_subtitle_files(folder: str) -> bool:
+        return os.path.isfile(
+            os.path.join(folder, "1_текст_с_таймкодами.txt")
+        ) or os.path.isfile(
+            os.path.join(folder, "0_весь_текст_для_буфера.txt")
+        )
+
+    def on_ai_analyze(self) -> None:
+        """ИИ по ролику из WebView (не stale `_current_player_folder`)."""
+        if self._ai_busy or self._busy:
+            return
+
+        def _on_href(href: str) -> None:
+            if self._ai_busy or self._busy:
+                return
+            url = (href or "").strip()
+            video_id = get_video_id(url)
+            if not video_id:
+                self._set_player_status_core(
+                    "Статус: открой ролик YouTube — ссылка не распознана"
+                )
+                return
+
+            self.url_input.setText(url)
+            folder_name = find_output_folder(video_id)
+            if folder_name and self._folder_has_subtitle_files(folder_name):
+                same = (
+                    self._current_player_folder
+                    and os.path.normpath(self._current_player_folder)
+                    == os.path.normpath(folder_name)
+                )
+                if not same:
+                    if self._apply_player_folder_state(folder_name, video_id) is None:
+                        return
+                self._start_ai_analyze_folder(folder_name)
+                return
+
+            # Папки нет / пустая → скачать субы текущего id, затем ИИ
+            self._pending_ai_after_subs = True
+            self._set_player_status_core(
+                f"ИИ: скачиваю субтитры ({self._lang_code.upper()})…"
+            )
+            self._begin_download_task("player_subs")
+            self._set_busy(True)
+            threading.Thread(
+                target=self._player_subs_download_worker,
+                args=(url, self._lang_code),
+                daemon=True,
+            ).start()
+
+        self._get_current_youtube_url(_on_href)
+
+    def _start_ai_analyze_folder(self, folder: str) -> None:
+        """DeepSeek по конкретной папке dist (после sync id из WebView)."""
+        if self._ai_busy or self._busy:
+            return
+        if not folder or not self._folder_has_subtitle_files(folder):
+            self._set_player_status_core(
+                "ИИ: нет файлов субтитров в папке ролика"
+            )
+            return
+        mode = self._ai_mode
+        mode_label = "инвест" if mode == "invest" else "обычный"
+        self._ai_cancel_event.clear()
+        self._ai_job_id += 1
+        job_id = self._ai_job_id
+        self._set_player_status_core(f"ИИ: отправляю запрос ({mode_label})…")
+        self._set_ai_busy(True)
+
+        def _worker():
+            try:
+                analysis = analyze_subtitles(
+                    folder,
+                    status_cb=lambda m: self._player_status_signal.emit(m),
+                    mode=mode,
+                    cancel_event=self._ai_cancel_event,
+                )
+                if (
+                    self._ai_cancel_event.is_set()
+                    or job_id != self._ai_job_id
+                ):
+                    self._done_signal.emit(
+                        False, "__ai__", "__cancelled__", str(job_id)
+                    )
+                    return
+                self._done_signal.emit(
+                    True,
+                    f"__ai__{folder}",
+                    json.dumps(analysis, ensure_ascii=False),
+                    str(job_id),
+                )
+            except AnalyzeCancelled:
+                self._done_signal.emit(
+                    False, "__ai__", "__cancelled__", str(job_id)
+                )
+            except Exception as exc:
+                self._done_signal.emit(False, "__ai__", str(exc), str(job_id))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _login_btn_clicked(self) -> None:
+        if not self._login_mode:
+            # → открыть страницу входа
+            self.web_view.setUrl(QUrl("https://accounts.google.com/signin/v2/identifier?service=youtube"))
+            self._set_player_status("Статус: войди в аккаунт, потом нажми «Назад»")
+            self.login_btn.setText("Назад")
+            self.login_btn.setToolTip("Назад к видео")
+            self._login_mode = True
+        else:
+            # → вернуться на видео
+            self.login_btn.setText("Войти")
+            self.login_btn.setToolTip("Войти в YouTube")
+            self._login_mode = False
+            if self._current_player_folder:
+                vid = _extract_id_from_folder(self._current_player_folder)
+                if vid:
+                    self._player_pending_video_id = vid
+                    self.on_load_player_video()
+                    return
+            self._set_player_status("Статус: нет video ID для возврата")
+
+    def seek_in_player(self, seconds: int) -> None:
+        # Если видео ещё не грузили — сначала ▶, потом seek после load
+        if not self._player_video_loaded:
+            self._pending_seek_seconds = int(seconds)
+            self.on_load_player_video()
+            self._set_player_status(
+                f"Статус: гружу видео, затем прыжок на {format_mmss(seconds)}…"
+            )
+            return
+        self._seek_in_player_now(int(seconds))
+
+    def _seek_in_player_now(self, seconds: int) -> None:
+        script = f"""
+        (function() {{
+            try {{
+                var video = document.querySelector('video');
+                if (video) {{
+                    video.currentTime = {int(seconds)};
+                    var p = video.play();
+                    if (p && p.catch) p.catch(function(){{}});
+                    return 'seek';
+                }}
+                return false;
+            }} catch(e) {{ return 'err:' + e.message; }}
+        }})();
+        """
+
+        def _done(result):
+            if result and result != 'false' and not str(result).startswith('err'):
+                self._set_player_status(f"Статус: прыжок на {format_mmss(seconds)}")
+            else:
+                self._set_player_status("Статус: видео ещё не загружено, подожди")
+
+        self.web_view.page().runJavaScript(script, _done)
+
+    def _on_webview_loaded(self, ok: bool) -> None:
+        url = ""
+        try:
+            url = self.web_view.url().toString()
+        except Exception:  # noqa: BLE001
+            url = ""
+        is_yt = "youtube.com" in url or "youtu.be" in url
+        if ok and is_yt:
+            self._player_video_loaded = True
+            if hasattr(self, "load_video_btn"):
+                self.load_video_btn.setVisible(False)
+                self.load_video_btn.setEnabled(True)
+                self.load_video_btn.setText("▶ Загрузить видео")
+            # Пауза по умолчанию (YT любит сам стартовать)
+            self._pause_retries_left = 8
+            QTimer.singleShot(200, self._force_pause_youtube)
+            QTimer.singleShot(800, self._force_pause_youtube)
+            QTimer.singleShot(1600, self._force_pause_youtube)
+            pending = getattr(self, "_pending_seek_seconds", None)
+            if pending is not None:
+                self._pending_seek_seconds = None
+                QTimer.singleShot(900, lambda s=pending: self._seek_in_player_now(s))
+                self._set_player_status(
+                    f"Статус: видео загружено · прыжок на {format_mmss(pending)}…"
+                )
+            else:
+                self._set_player_status("Статус: видео загружено · на паузе")
+            return
+        if ok:
+            self._set_player_status("Статус: встроенный плеер готов")
+        else:
+            if hasattr(self, "load_video_btn"):
+                self.load_video_btn.setEnabled(True)
+                self.load_video_btn.setText("▶ Загрузить видео")
+                self.load_video_btn.setVisible(True)
+            self._set_player_status(
+                "Статус: встроенный плеер не загрузился — проверь VPN/сеть или Войти."
+            )
 
     def on_download(self) -> None:
         if self._busy:
             return
 
-        url = self.url_input.get().strip()
+        url = self.url_input.text().strip()
         if not url:
             self._set_status("Статус: вставь ссылку")
             return
 
-        lang_code = "en" if self.lang_seg.get() == "EN" else "ru"
-        self._set_status(f"Статус: старт ({lang_code.upper()})…")
+        if not get_video_id(url):
+            self._set_status("Статус: не похоже на YouTube-ссылку — проверь URL")
+            return
+
+        self._set_status(f"Статус: старт ({self._lang_code.upper()})…")
+        self._begin_download_task("download")
         self._set_busy(True)
+        # на экране скачивания плеер не должен жить в фоне
+        self._unload_player()
 
         thread = threading.Thread(
             target=self._download_worker,
-            args=(url, lang_code),
+            args=(url, self._lang_code),
             daemon=True,
         )
         thread.start()
+
+    def on_download_audio(self) -> None:
+        if self._busy:
+            return
+        url = self.url_input.text().strip()
+        if not url:
+            self._set_status("Статус: вставь ссылку")
+            return
+        if not get_video_id(url):
+            self._set_status("Статус: не похоже на YouTube-ссылку — проверь URL")
+            return
+        self._start_audio_download(url, from_player=False)
+
+    def on_open_overlay(self) -> None:
+        """IDEA-022: always-on-top overlay с каталогом Music/YouTube_DL."""
+        win = open_overlay_player(start_dir=default_audio_output_dir(), parent=self)
+        if win is None:
+            return
+        self._overlay_window = win
+        self._set_status(
+            "Статус: overlay «Фон» открыт (🔊 громкость в окне; Ctrl+Shift+O — клики насквозь)"
+        )
+
+    def on_download_audio_from_player(self) -> None:
+        if self._busy:
+            return
+        url = self.url_input.text().strip()
+        if not url and self._current_player_folder:
+            vid = _extract_id_from_folder(self._current_player_folder)
+            if vid:
+                url = f"https://www.youtube.com/watch?v={vid}"
+        if not url or not get_video_id(url):
+            self._set_player_status_core("Статус: нет ссылки на видео для аудио")
+            return
+        self._start_audio_download(url, from_player=True)
+
+    def _start_audio_download(self, url: str, *, from_player: bool) -> None:
+        if from_player:
+            self._set_player_status_core("Статус: старт скачивания аудио…")
+        else:
+            self._set_status("Статус: старт скачивания аудио…")
+        self._begin_download_task("audio_player" if from_player else "audio")
+        self._set_busy(True)
+        threading.Thread(
+            target=self._audio_download_worker,
+            args=(url, from_player),
+            daemon=True,
+        ).start()
+
+    def _audio_download_worker(self, url: str, from_player: bool) -> None:
+        err_buf = io.StringIO()
+        last_status = "Статус: работаю…"
+        result_path = ""
+
+        def status_cb(message: str) -> None:
+            nonlocal last_status
+            last_status = message
+            if from_player:
+                self._player_status_signal.emit(message)
+            else:
+                self._status_signal.emit(message)
+
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(err_buf):
+                ok, result_path = download_audio(
+                    url,
+                    status_cb=status_cb,
+                    cancel_event=self._cancel_event,
+                )
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            err_buf.write(str(exc))
+
+        if self._cancel_event.is_set():
+            self._done_signal.emit(False, "__cancelled__", self._cancel_context, "")
+            return
+
+        marker = f"__audio__{'player' if from_player else 'download'}"
+        payload = result_path if ok else err_buf.getvalue()
+        self._done_signal.emit(ok, marker, payload, last_status)
 
     def _download_worker(self, url: str, lang_code: str) -> None:
         out_buf = io.StringIO()
@@ -995,14 +3551,23 @@ class SubtitleApp(ctk.CTk):
         def status_cb(message: str) -> None:
             nonlocal last_status
             last_status = message
-            self.after(0, lambda m=message: self._set_status(m))
+            self._status_signal.emit(message)
 
         try:
             with redirect_stdout(out_buf), redirect_stderr(err_buf):
-                ok = download_and_split(url, lang_code, status_cb=status_cb)
+                ok = download_and_split(
+                    url,
+                    lang_code,
+                    status_cb=status_cb,
+                    cancel_event=self._cancel_event,
+                )
         except Exception as exc:  # noqa: BLE001 — показать в UI
             ok = False
             err_buf.write(str(exc))
+
+        if self._cancel_event.is_set():
+            self._done_signal.emit(False, "__cancelled__", self._cancel_context, "")
+            return
 
         timing_hint = ""
         for line in out_buf.getvalue().splitlines():
@@ -1010,11 +3575,42 @@ class SubtitleApp(ctk.CTk):
                 timing_hint = line
                 break
 
-        self.after(
-            0,
-            lambda: self._on_download_done(
-                ok, url, err_buf.getvalue(), timing_hint or last_status
-            ),
+        self._done_signal.emit(ok, url, err_buf.getvalue(), timing_hint or last_status)
+
+    def _player_subs_download_worker(self, url: str, lang_code: str) -> None:
+        out_buf = io.StringIO()
+        err_buf = io.StringIO()
+        last_status = "Статус: работаю…"
+
+        def status_cb(message: str) -> None:
+            nonlocal last_status
+            last_status = message
+            self._player_status_signal.emit(message)
+
+        try:
+            with redirect_stdout(out_buf), redirect_stderr(err_buf):
+                ok = download_and_split(
+                    url,
+                    lang_code,
+                    status_cb=status_cb,
+                    cancel_event=self._cancel_event,
+                )
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            err_buf.write(str(exc))
+
+        if self._cancel_event.is_set():
+            self._done_signal.emit(False, "__cancelled__", self._cancel_context, "")
+            return
+
+        timing_hint = ""
+        for line in out_buf.getvalue().splitlines():
+            if line.startswith("Тайминги:"):
+                timing_hint = line
+                break
+
+        self._done_signal.emit(
+            ok, f"__player_subs__{url}", err_buf.getvalue(), timing_hint or last_status
         )
 
     def _on_download_done(
@@ -1022,12 +3618,122 @@ class SubtitleApp(ctk.CTk):
     ) -> None:
         self._set_busy(False)
 
+        if url == "__cancelled__":
+            self._pending_ai_after_subs = False
+            ctx = error_text or ""
+            msg = "Статус: скачивание отменено"
+            if ctx.startswith("audio"):
+                if "player" in ctx:
+                    self._set_player_status_core(msg)
+                else:
+                    self._set_status(msg)
+            elif ctx == "player_subs":
+                self._set_player_status_core(msg)
+            else:
+                self._set_status(msg)
+            return
+
+        # ── аудио ──────────────────────────────────────────────────────────
+        if url.startswith("__audio__"):
+            from_player = url == "__audio__player"
+            if not ok:
+                msg = (error_text or "").strip() or "Неизвестная ошибка yt-dlp"
+                if from_player:
+                    self._set_player_status_core(f"Аудио: ошибка — {msg}")
+                else:
+                    self._set_status(f"Ошибка аудио:\n{msg}")
+                return
+            out_dir = error_text
+            done_msg = f"Аудио готово! MP3 в:\n{out_dir}\n{timing_hint}"
+            if from_player:
+                self._set_player_status_core(done_msg)
+            else:
+                self._set_status(done_msg)
+            return
+        # ───────────────────────────────────────────────────────────────────
+
+        # ── ИИ-анализ ──────────────────────────────────────────────────────
+        if url.startswith("__ai__"):
+            # job_id в timing_hint: поздний/отменённый ответ не применяем
+            try:
+                done_job = int(timing_hint) if timing_hint.strip() else None
+            except ValueError:
+                done_job = None
+            cancelled = (not ok and error_text == "__cancelled__") or (
+                done_job is not None and done_job != self._ai_job_id
+            )
+            if cancelled:
+                self._set_ai_busy(False)
+                self._set_player_status_core("ИИ: отменено")
+                return
+            self._set_ai_busy(False)
+            if not ok:
+                self._set_player_status_core(f"ИИ: ошибка — {error_text}")
+                return
+            try:
+                analysis = json.loads(error_text)
+            except Exception:
+                analysis = {"summary": "", "takeaways": [], "highlights": []}
+            action = analysis.get("action") or "—"
+            verdict = (analysis.get("verdict_1_line") or "")[:80]
+            n_h = len(analysis.get("highlights") or [])
+            self._set_player_status_core(
+                f"ИИ: {action} · {n_h} моментов"
+                + (f" · {verdict}" if verdict else "")
+            )
+            self._fill_ai_analysis(analysis)
+            return
+        # ───────────────────────────────────────────────────────────────────
+
+        # ── субтитры из плеера ─────────────────────────────────────────────
+        if url.startswith("__player_subs__"):
+            actual_url = url.removeprefix("__player_subs__")
+            pending_ai = self._pending_ai_after_subs
+            self._pending_ai_after_subs = False
+            if not ok:
+                msg = (error_text or "").strip() or "Неизвестная ошибка yt-dlp"
+                prefix = "ИИ: не скачал субы — " if pending_ai else "Субтитры: ошибка — "
+                self._set_player_status_core(f"{prefix}{msg}")
+                return
+            video_id = get_video_id(actual_url)
+            folder_name = find_output_folder(video_id) if video_id else None
+            if not folder_name:
+                self._set_player_status_core(
+                    "ИИ: папка не найдена после скачивания"
+                    if pending_ai
+                    else "Субтитры: папка не найдена после скачивания"
+                )
+                return
+            has_ai = self._apply_player_folder_state(folder_name, video_id)
+            if has_ai is None:
+                self._set_player_status_core(
+                    "ИИ: не удалось загрузить таймкоды"
+                    if pending_ai
+                    else "Субтитры: не удалось загрузить таймкоды"
+                )
+                return
+            if pending_ai:
+                self._start_ai_analyze_folder(folder_name)
+                return
+            n = len(self._all_marks)
+            if has_ai:
+                self._set_player_status_core(
+                    f"Субтитры готовы · {n} таймкодов · загружен сохранённый ИИ"
+                )
+            else:
+                self._set_player_status_core(
+                    f"Субтитры готовы · {n} таймкодов · ИИ нет — жми «✨ ИИ»"
+                )
+            return
+        # ───────────────────────────────────────────────────────────────────
+
         if not ok:
             msg = (error_text or "").strip() or "Неизвестная ошибка yt-dlp или ссылки."
             self._set_status(f"Ошибка:\n{msg}")
             return
 
         video_id = get_video_id(url)
+        # base_dir=None → ищет в _subtitle_search_roots() (включает dist/)
         folder_name = find_output_folder(video_id) if video_id else None
         full_text_path = (
             os.path.join(folder_name, "0_весь_текст_для_буфера.txt")
@@ -1040,8 +3746,7 @@ class SubtitleApp(ctk.CTk):
             try:
                 with open(full_text_path, "r", encoding="utf-8") as f:
                     text_for_buffer = f.read()
-                self.clipboard_clear()
-                self.clipboard_append(text_for_buffer)
+                QApplication.clipboard().setText(text_for_buffer)
                 clipboard_msg = "\nТекст уже в буфере — Ctrl+V в нейросеть."
             except OSError as exc:
                 clipboard_msg = f"\n(Буфер не скопировался: {exc})"
@@ -1075,10 +3780,42 @@ def _configure_stdio() -> None:
             pass
 
 
+def _ensure_single_instance() -> object | None:
+    """
+    Именованный мьютекс Windows.
+    Второй запуск не молчит: поднимает уже открытое окно.
+    Если процесс есть, а окна нет (зомби) — говорим убить pythonw.
+    """
+    if os.name != "nt":
+        return None
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    mutex = kernel32.CreateMutexW(None, True, "SubtitleRipperPro_Mutex")
+    if kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
+        return mutex
+
+    hwnd = user32.FindWindowW(None, "Subtitle Ripper Pro")
+    if hwnd:
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        user32.SetForegroundWindow(hwnd)
+    else:
+        user32.MessageBoxW(
+            0,
+            "Процесс уже сидит в фоне, но окна нет.\n"
+            "Диспетчер задач → pythonw.exe / Subtitle_App → Снять задачу,\n"
+            "потом снова launch.vbs.",
+            "Уже запущено",
+            0x30,
+        )
+    return None
+
+
 if __name__ == "__main__":
     _configure_stdio()
 
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 1 and not str(sys.argv[1]).startswith("-"):
         video_url = sys.argv[1]
         lang = (
             sys.argv[2]
@@ -1087,5 +3824,19 @@ if __name__ == "__main__":
         )
         sys.exit(0 if download_and_split(video_url, lang) else 1)
 
-    app = SubtitleApp()
-    app.mainloop()
+    _mutex_handle = _ensure_single_instance()
+    if _mutex_handle is None and os.name == "nt":
+        sys.exit(0)
+
+    app = QApplication(sys.argv)
+    app.setWindowIcon(make_app_icon())
+    configure_qt_theme(app)
+    window = SubtitleApp()
+    app.installEventFilter(window)
+    window.show()
+    window.raise_()
+    window.activateWindow()
+    window._ensure_window_on_screen()
+    QTimer.singleShot(0, window._ensure_window_on_screen)
+
+    sys.exit(app.exec())

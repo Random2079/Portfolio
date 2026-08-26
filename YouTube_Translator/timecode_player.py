@@ -234,8 +234,9 @@ def build_player_html(
 """
 
 
-def write_player_html(folder: str, video_id: str | None = None) -> str:
-    """Пишет player.html в folder. video_id можно взять из имени папки."""
+
+def load_player_data(folder: str, video_id: str | None = None) -> dict[str, Any]:
+    """Читает метки из папки субтитров (без записи player.html)."""
     vid = video_id or video_id_from_folder_name(folder)
     if not vid:
         raise ValueError("Нет YouTube id: передай video_id или имя папки [...id]")
@@ -248,7 +249,16 @@ def write_player_html(folder: str, video_id: str | None = None) -> str:
 
     marks = thin_marks(parse_timed_lines(timed_text))
     highlights = parse_highlights(folder)
-    html_text = build_player_html(vid, marks, highlights)
+    return {
+        "video_id": vid,
+        "marks": marks,
+        "highlights": highlights,
+    }
+
+def write_player_html(folder: str, video_id: str | None = None) -> str:
+    """Пишет player.html в folder. video_id можно взять из имени папки."""
+    data = load_player_data(folder, video_id)
+    html_text = build_player_html(data["video_id"], data["marks"], data["highlights"])
     out = os.path.join(folder, PLAYER_FILENAME)
     with open(out, "w", encoding="utf-8") as f:
         f.write(html_text)

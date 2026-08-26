@@ -168,6 +168,7 @@
         </div>
       </header>
 
+      <div class="filters" id="sourceFilters" role="tablist" aria-label="Источник списка"></div>
       <div class="filters" id="kindFilters" role="tablist" aria-label="Тип бумаг"></div>
       <div class="sectors" id="sectorFilters" hidden></div>
       <p class="warn-all" id="pollScopeHint"></p>
@@ -219,6 +220,9 @@
       let selected = null;
       let kindFilter = "all";
       let sectorFilter = null;
+      /** @type {"bcs"|"all"} список слева: портфель БКС или весь Snowball/БД */
+      let listSource = "bcs";
+      let dbTickers = [];
       let tickers = [];
       let allNews = [];
       let pollInfo = null;
@@ -227,6 +231,8 @@
       let moexAbort = null;
       let moexReqId = 0;
       let holdingsCache = null;
+      let bcsListOk = false;
+      let bcsListError = "";
 
       function showError(msg) {
         const el = document.getElementById("error");
@@ -271,6 +277,105 @@
           list = list.filter((t) => (t.category || "") === sectorFilter);
         }
         return list;
+      }
+
+      function guessKindFromHolding(h) {
+        const cc = String(h.class_code || "").toUpperCase();
+        const name = String(h.name || "");
+        if (/TQTF|ETF|BPIF|ПИФ/i.test(cc + " " + name)) return "fund";
+        if (/TQCB|TQOB|TQIR|BOND|ОФЗ|обл/i.test(cc + " " + name)) return "bond";
+        return "equity";
+      }
+
+      function holdingsToTickers(snap, dbList) {
+        const byId = {};
+        const byIsin = {};
+        for (const t of dbList || []) {
+          if (t && t.id) byId[String(t.id).toUpperCase()] = t;
+          if (t && t.isin) byIsin[String(t.isin).toUpperCase()] = t;
+        }
+        const out = [];
+        const seen = new Set();
+        for (const h of (snap && snap.holdings) || []) {
+          const rawId = String(h.ticker || h.sec_code || "").trim().toUpperCase();
+          if (!rawId || seen.has(rawId)) continue;
+          // кэш/валюта на счёте — не тикер для новостей/MOEX
+          if (/^(RUB|USD|EUR|CNY|HKD|GBP|CHF)$/.test(rawId)) continue;
+          seen.add(rawId);
+          const db =
+            byId[rawId] ||
+            (h.isin ? byIsin[String(h.isin).toUpperCase()] : null) ||
+            null;
+          out.push({
+            id: db ? db.id : rawId,
+            name: (db && db.name) || h.name || rawId,
+            kind: (db && db.kind) || guessKindFromHolding(h),
+            category: (db && db.category) || "",
+            isin: (db && db.isin) || h.isin || "",
+            from_bcs: true,
+            qty: h.quantity,
+            avg_price: h.avg_price,
+            market_price: h.market_price,
+            pnl: h.pnl,
+          });
+        }
+        out.sort((a, b) => a.id.localeCompare(b.id, "ru"));
+        return out;
+      }
+
+      function applyTickerSource() {
+        if (listSource === "bcs" && bcsListOk && holdingsCache) {
+          const mapped = holdingsToTickers(holdingsCache, dbTickers);
+          if (mapped.length) {
+            tickers = mapped;
+            return;
+          }
+        }
+        tickers = dbTickers.slice();
+      }
+
+      function renderSourceFilters() {
+        const host = document.getElementById("sourceFilters");
+        host.innerHTML = "";
+        const opts = [
+          {
+            key: "bcs",
+            label: bcsListOk
+              ? "БКС (" + holdingsToTickers(holdingsCache, dbTickers).length + ")"
+              : "БКС",
+            title: bcsListOk
+              ? "Список = позиции счёта"
+              : bcsListError || "БКС недоступен — будет fallback на базу",
+          },
+          {
+            key: "all",
+            label: "Все в базе (" + dbTickers.length + ")",
+            title: "Snowball / импорт в SQLite",
+          },
+        ];
+        for (const o of opts) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "chip" + (listSource === o.key ? " active-filter" : "");
+          btn.textContent = o.label;
+          btn.title = o.title;
+          if (o.key === "bcs" && !bcsListOk) btn.style.opacity = "0.65";
+          btn.addEventListener("click", () => {
+            listSource = o.key;
+            if (listSource === "bcs" && !bcsListOk) {
+              showError(bcsListError || "БКС не настроен или ошибка API");
+            } else {
+              showError("");
+            }
+            applyTickerSource();
+            kindFilter = "all";
+            sectorFilter = null;
+            if (selected && !tickers.some((x) => x.id === selected)) selected = null;
+            renderAll();
+            if (view !== "news") loadCurrentMoexView();
+          });
+          host.appendChild(btn);
+        }
       }
 
       function pollQuery() {
@@ -421,10 +526,20 @@
       function renderTickers() {
         const ul = document.getElementById("tickers");
         const list = filteredTickers();
-        document.getElementById("tickersHeading").textContent = "Тикеры · " + list.length;
+        const src =
+          listSource === "bcs" && bcsListOk && tickers.some((t) => t.from_bcs)
+            ? "БКС"
+            : "база";
+        document.getElementById("tickersHeading").textContent =
+          "Тикеры · " + src + " · " + list.length;
         ul.innerHTML = "";
         if (!list.length) {
-          ul.innerHTML = '<li class="empty">В этом фильтре пусто.</li>';
+          ul.innerHTML =
+            '<li class="empty">' +
+            (listSource === "bcs" && !bcsListOk
+              ? "БКС пуст/ошибка — переключись на «Все в базе» или почини токен."
+              : "В этом фильтре пусто.") +
+            "</li>";
           return;
         }
         for (const t of list) {
@@ -434,6 +549,10 @@
           if (selected === t.id) btn.classList.add("active");
           const cat =
             t.kind === "equity" && t.category ? " · " + t.category : "";
+          const qtyBit =
+            t.from_bcs && t.qty != null
+              ? " · " + (Number(t.qty) === t.qty && t.qty % 1 === 0 ? t.qty : Number(t.qty).toFixed(2)) + " шт"
+              : "";
           btn.innerHTML =
             '<span class="badge ' + esc(t.kind) + '">' +
             esc(KIND_BADGE[t.kind] || t.kind) +
@@ -442,7 +561,7 @@
             esc(t.id) +
             "</span>" +
             '<span class="name">' +
-            esc((t.name || "") + cat) +
+            esc((t.name || "") + cat + qtyBit) +
             "</span>";
           btn.addEventListener("click", () => {
             selected = selected === t.id ? null : t.id;
@@ -508,8 +627,21 @@
         const equity = tickers.filter((t) => t.kind === "equity").length;
         const bond = tickers.filter((t) => t.kind === "bond").length;
         const fund = tickers.filter((t) => t.kind === "fund").length;
+        const src =
+          listSource === "bcs" && bcsListOk && tickers.some((t) => t.from_bcs)
+            ? "БКС"
+            : "база";
         let text =
-          tickers.length + " бумаг · " + equity + " акций · " + bond + " облигаций · " + fund + " фондов";
+          src +
+          " · " +
+          tickers.length +
+          " бумаг · " +
+          equity +
+          " акций · " +
+          bond +
+          " облигаций · " +
+          fund +
+          " фондов";
         if (pollInfo && pollInfo.inserted != null && pollInfo.inserted !== undefined) {
           text += " · last poll +" + pollInfo.inserted;
         }
@@ -709,6 +841,7 @@
       }
 
       function renderAll() {
+        renderSourceFilters();
         renderKindFilters();
         renderSectorFilters();
         renderTickers();
@@ -722,12 +855,28 @@
       async function load() {
         showError("");
         try {
-          const [t, n] = await Promise.all([
+          const [t, n, snap] = await Promise.all([
             getJson("/api/tickers"),
             getJson("/api/news?limit=200"),
+            getJson("/api/holdings").catch((e) => ({
+              configured: false,
+              ok: false,
+              error: String(e.message || e),
+              holdings: [],
+            })),
           ]);
-          tickers = t;
+          dbTickers = t;
           allNews = n;
+          holdingsCache = snap;
+          bcsListOk = !!(snap && snap.configured && snap.ok && (snap.holdings || []).length);
+          bcsListError = (snap && snap.error) || (!snap.configured ? "нет токена в .env" : "пустой портфель / ошибка");
+          if (listSource === "bcs" && !bcsListOk) {
+            listSource = "all";
+            if (snap && snap.configured && !snap.ok) {
+              showError("БКС: " + bcsListError + " — показываю базу");
+            }
+          }
+          applyTickerSource();
           if (selected && !tickers.some((x) => x.id === selected)) selected = null;
           renderAll();
         } catch (e) {
@@ -921,6 +1070,16 @@
         try {
           const q = force ? "?force=1" : "";
           holdingsCache = await getJson("/api/holdings" + q);
+          bcsListOk = !!(
+            holdingsCache &&
+            holdingsCache.configured &&
+            holdingsCache.ok &&
+            (holdingsCache.holdings || []).length
+          );
+          bcsListError =
+            (holdingsCache && holdingsCache.error) ||
+            (!holdingsCache.configured ? "нет токена в .env" : "пустой портфель / ошибка");
+          if (listSource === "bcs") applyTickerSource();
           return holdingsCache;
         } catch (e) {
           holdingsCache = {
@@ -929,6 +1088,8 @@
             error: String(e.message || e),
             holdings: [],
           };
+          bcsListOk = false;
+          bcsListError = String(e.message || e);
           return holdingsCache;
         }
       }

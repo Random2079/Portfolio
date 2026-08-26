@@ -1,86 +1,61 @@
-# YouTube Translator
+# YouTube Translator (Subtitle Ripper Pro)
 
-**Статус:** рабочий pet-проект (GUI + пайплайн субтитров).  
-**Стек:** Python · CustomTkinter · yt-dlp · (опционально) faster-whisper.
+Скачивание субтитров YouTube, встроенный плеер с таймкодами, ИИ-разбор (DeepSeek).
+
+**Статус:** рабочий pet-проект.  
+**Стек:** Python · **PySide6 + QtWebEngine** · yt-dlp · (опц.) faster-whisper.
+
+Подробное ТЗ и карточки для агента → **[docs/TZ.md](docs/TZ.md)** · промпт → [docs/PROMPT_FOR_AGENT.md](docs/PROMPT_FOR_AGENT.md).
 
 ---
 
-## Задача
+## Структура
 
-Нужен текст ролика YouTube без ручного копирования субтитров:  
-вставил ссылку → получил чистый текст и фразы с таймкодами для буфера / дальнейшей обработки.
+```
+YouTube_Translator/
+├── Subtitle_App.py       # GUI + плеер + скачивание + закладки
+├── ai_analyze.py         # ИИ-разбор (инвест / обычный)
+├── timecode_player.py    # player.html / marks
+├── ui_motion.py          # hover / busy pulse
+├── launch.vbs / launch/  # запуск без консоли
+├── requirements.txt
+├── bookmarks.json
+├── dist/                 # субтитры_<title> [youtubeId]/
+├── yt_profile/           # cookies WebView YouTube
+└── docs/                 # ТЗ, parts (не смешивать с .py)
+```
 
-## Что делает
+Бэкап старого CTk/Qt: `Subtitle_App_qt_backup.py` / тонкие backup-файлы — не боевой путь.
 
-1. Принимает URL ролика YouTube.  
-2. Тянет субтитры через **yt-dlp** (авто / ручные).  
-3. Собирает:
-   - цельный текст для буфера;
-   - текст с таймкодами `[mm:ss]`;
-   - `player.html` — iframe YouTube + кнопки, клик прыгает по времени;
-   - при необходимости — куски по размеру.  
-4. Если субтитров нет — можно прогнать аудио через **Whisper** (`whisper_transcribe.py`).
+---
 
-## Стек и навыки, которые здесь видны
-
-| Область | Как проявлено |
-|---------|----------------|
-| GUI | CustomTkinter (есть бэкап на PyQt) |
-| Внешние CLI / API-подобные тулзы | yt-dlp, PATH, обработка ошибок |
-| Файлы и кодировки | UTF-8, структура папок на ролик |
-| Опционально ML | faster-whisper для расшифровки |
-| Упаковка | PyInstaller spec → exe |
-
-## Запуск
+## Быстрый старт
 
 ```powershell
 cd YouTube_Translator
 pip install -r requirements.txt
-# yt-dlp в PATH (или: winget install yt-dlp / pip ставит пакет)
+# боевой GUI нужен PySide6 (+ QtWebEngine); доустанови при ImportError
 python Subtitle_App.py
+# или: wscript launch.vbs
 ```
 
-Опционально exe: `pyinstaller --noconfirm Subtitle_App.spec`
+1. URL → **Скачать** → папка в `dist/`.  
+2. **Плеер** → YouTube + сайдбар.  
+3. **✨ ИИ** — разбор **текущего** ролика в WebView (субы из `dist/` или авто-скачивание → DeepSeek).  
+4. **📥** — только субы текущего URL без ИИ.  
+5. **🎵** — MP3 в `Music\YouTube_DL`.
 
-## Результат в папке ролика
-
-Новые прогоны пишутся в `dist/субтитры_<title> [<youtubeId>]/` (кнопка **Плеер** ищет ещё cwd и корень проекта — старые папки не теряются).
-
-| Файл | Зачем |
-|------|--------|
-| `0_весь_текст_для_буфера.txt` | Чистый текст (удобно Ctrl+V) |
-| `1_текст_с_таймкодами.txt` | Фразы `[mm:ss] текст` |
-| `player.html` | Плеер: iframe + кнопки (прорежено ~25 сек) |
-| `часть_ru_1.txt` … | Куски, если текст очень длинный |
-
-Склейка таймкодов: соседние куски SRT объединяются при короткой паузе и разумной длине фразы (не word-level).
-
-Кнопки в плеере не на каждую фразу — шаг ~25 секунд. Опционально положи в папку ролика `метки.txt` (`mm:ss | заголовок`) или `highlights.json` — они сверху как «полезные».
-
-Открой через кнопку **Плеер** (поднимает локальный `http://127.0.0.1` — так YouTube API нормально сикает). Либо двойной клик по `player.html`; если с `file://` не прыгает:
-
-```powershell
-python -m http.server
-```
-
-и открой `http://127.0.0.1:8000/player.html`. Видео не скачивается — только iframe.
-
-## Файлы проекта
-
-| Файл | Зачем |
-|------|--------|
-| `Subtitle_App.py` | Окно CTk, валидация ссылки, вызов yt-dlp |
-| `timecode_player.py` | Сборка `player.html` из таймкодов |
-| `Subtitle_App_qt_backup.py` | Старый GUI на PyQt5 (бэкап) |
-| `whisper_transcribe.py` | Локальная расшифровка → `.srt` / `.txt` |
-| `Subtitle_App.spec` | Сборка в exe |
-| `requirements.txt` | customtkinter, yt-dlp |
-
-## Зависимости
-
-- Обязательно: **customtkinter**, **yt-dlp**
-- Для Whisper: `pip install faster-whisper`
+Опционально exe: `pyinstaller --noconfirm Subtitle_App.spec` (только по нужде).
 
 ---
 
-Родительский обзор портфеля: [README.md](../README.md)
+## Результат в папке ролика
+
+| Файл | Зачем |
+|------|--------|
+| `0_весь_текст_для_буфера.txt` | Чистый текст |
+| `1_текст_с_таймкодами.txt` | `[mm:ss] фраза` |
+| `ai_analysis.json` | Сохранённый ИИ-разбор |
+| `player.html` | Legacy HTML-плеер |
+
+Родительский обзор: [README.md](../README.md) · идеи: [IDEAS.md](../IDEAS.md).
