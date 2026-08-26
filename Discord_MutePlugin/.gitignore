@@ -1,0 +1,10 @@
+stt/models/
+stt/*.zip
+*.asar
+node_modules/
+
+stt/logs/
+stt/__pycache__/
+**/__pycache__/
+debug-*.log
+*.pyc

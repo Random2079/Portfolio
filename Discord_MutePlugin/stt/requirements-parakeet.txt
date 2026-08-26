@@ -1,0 +1,5 @@
+# Optional: Parakeet ASR (engine=parakeet in stt_config.json)
+# Heavy: NeMo + torch. Prefer GPU; CPU works but slow.
+# Install into Discord_VoiceMute .venv OR a dedicated venv:
+#   pip install -U "nemo_toolkit[asr]"
+nemo_toolkit[asr]>=2.0.0

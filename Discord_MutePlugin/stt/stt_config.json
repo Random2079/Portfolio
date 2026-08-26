@@ -1,0 +1,22 @@
+{
+  "gain": 1.3,
+  "input_device": 3,
+  "engine": "parakeet",
+  "whisper_model": "base",
+  "whisper_device": "cpu",
+  "parakeet_model": "nvidia/parakeet-tdt-0.6b-v3",
+  "parakeet_device": "auto",
+  "global_ptt": true,
+  "global_ptt_mouse": "middle",
+  "global_ptt_shift_k": true,
+  "use_grammar": true,
+  "model_dir": "models/vosk-model-small-ru-0.22",
+  "stop_drain_ms": 400,
+  "log_file": "logs/stt.log",
+  "vad_rms_min": 0,
+  "loud_rms_min": 2000,
+  "ignore_first_ms": 120,
+  "min_speech_ms": 250,
+  "save_clips": true,
+  "decode_free": true
+}

@@ -48,6 +48,33 @@ def daemon_alive() -> bool:
         return False
 
 
+def panel_active() -> bool:
+    """Авто из хука только пока открыта панель (файл + живой PID)."""
+    flag = ROOT / "TTS_PANEL_ACTIVE"
+    if not flag.is_file():
+        return False
+    try:
+        pid = int(flag.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        flag.unlink(missing_ok=True)
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if not handle:
+            flag.unlink(missing_ok=True)
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        flag.unlink(missing_ok=True)
+        return False
+    return True
+
+
 def _daemon_busy(status: dict) -> bool:
     phase = str(status.get("phase", "idle")).strip().lower()
     return (
@@ -193,20 +220,29 @@ def main() -> int:
         return 0
 
     if args.stop:
+        # Стоп = очистить очередь/звук. Демон убиваем ТОЛЬКО если грузится Qwen
+        # (CUDA не отпускает иначе). Tera/Edge/Silero warmup обязан дожить —
+        # иначе «Авто OFF» / Прослушать во время прогрева валят процесс и модель
+        # «перестаёт запускаться».
+        reply: dict = {"ok": False}
         warming = False
+        warming_engine = ""
         try:
             reply = send_command({"cmd": "stop"})
             try:
                 st = send_command({"cmd": "status"}, timeout=0.5)
                 warming = bool(st.get("warming"))
+                warming_engine = str(st.get("engine") or "").strip().lower()
             except OSError:
                 warming = False
         except OSError as exc:
             reply = {"ok": False, "error": str(exc)}
-            warming = True
-        if warming:
+            warming = False
+        if warming and warming_engine == "qwen":
             stop_daemon(force=True)
-        if reply.get("ok") or warming:
+            print("PLAYING")
+            return 0
+        if reply.get("ok"):
             print("PLAYING")
             return 0
         return 1

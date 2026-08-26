@@ -31,20 +31,26 @@ PID_FILE = ROOT / "tts_daemon.pid"
 HOST = "127.0.0.1"
 PORT = 47391
 DEFAULT_VOLUME = 45
-DEFAULT_ENGINE = "local"  # local (Silero) | kokoro | qwen
+DEFAULT_ENGINE = "tera"  # tera | edge | local (Silero) | qwen | openai
 DEFAULT_PAUSE_MS = 350  # пауза между кусками (реф: ~300–500ms между предложениями)
 DEFAULT_HYBRID_MODE = "dict_only"
 DEFAULT_LANG_SWITCH_PAUSE_MS = 80
-DEFAULT_KOKORO_VOICE = "sveta"
 DEFAULT_LOCAL_SPEAKER = "xenia"
+DEFAULT_OPENAI_VOICE = "nova"
+DEFAULT_EDGE_VOICE = "ru-RU-SvetlanaNeural"
+DEFAULT_TERA_VOICE = "ru_f1"
+DEFAULT_TERA_DURATION_SCALE = 1.0
 DEFAULT_QWEN_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
 DEFAULT_QWEN_SPEAKER = "serena"
 DEFAULT_QWEN_DESIGN = "micro_wife/voice_design.txt"
-_ENGINES = {"local", "kokoro", "qwen"}
+_ENGINES = {"local", "edge", "tera", "qwen", "openai"}
+_DEAD_ENGINES = {"kokoro", "piper"}  # kokoro→edge, piper→local
 _HYBRID_MODES = {"off", "dict_only"}
 # Живой Qwen на 3050: 20–30с / до ~160с если тесно. Дальше CUDA стоит — процесс надо убить.
 WARMUP_STALE_SEC = 240
 WARMUP_BUSY_OTHER = -1
+# Stop во время warmup: process exit только для CUDA (Qwen). Остальным — soft cancel.
+_FORCE_EXIT_ON_WARMUP_STOP = {"qwen"}
 
 try:
     from tts_debug import (
@@ -182,6 +188,17 @@ def end_warmup(token: int) -> None:
             _warmup_active = False
 
 
+def cancel_warmup_soft() -> str:
+    """Снять флаг warmup без убийства процесса. Возвращает engine, который грузился."""
+    global _warmup_active, _warmup_token, _warmup_engine
+    with _progress_lock:
+        was = str(_warmup_engine or "")
+        if _warmup_active:
+            _warmup_token += 1  # инвалидируем текущий token в finally warmup-потока
+            _warmup_active = False
+        return was
+
+
 def warmup_in_progress(engine: str | None = None) -> bool:
     with _progress_lock:
         if not _warmup_active:
@@ -200,6 +217,27 @@ def try_begin_warmup(engine: str) -> int | None:
         if warmup_in_progress():
             return WARMUP_BUSY_OTHER
         return set_warmup_active(True, engine=engine)
+
+
+def wait_until_warmup_done(engine: str, timeout: float | None = None) -> bool:
+    """Не стартовать synth, пока bg-warmup того же движка не закончится.
+    True = можно говорить; False = stop / timeout.
+    """
+    limit = float(timeout if timeout is not None else WARMUP_STALE_SEC)
+    deadline = time.monotonic() + limit
+    waited = False
+    while warmup_in_progress(engine):
+        waited = True
+        if _stop_event.is_set():
+            debug_log(f"SPEAK wait warmup aborted (stop) engine={engine}")
+            return False
+        if time.monotonic() >= deadline:
+            debug_log(f"SPEAK wait warmup timeout engine={engine}")
+            return False
+        time.sleep(0.12)
+    if waited:
+        debug_log(f"SPEAK wait warmup done engine={engine}")
+    return True
 
 
 def _exit_process_soon() -> None:
@@ -249,8 +287,11 @@ def progress_snapshot() -> dict[str, object]:
 def load_config() -> dict:
     data = {
         "engine": DEFAULT_ENGINE,
-        "kokoro_voice": DEFAULT_KOKORO_VOICE,
         "local_speaker": DEFAULT_LOCAL_SPEAKER,
+        "openai_voice": DEFAULT_OPENAI_VOICE,
+        "edge_voice": DEFAULT_EDGE_VOICE,
+        "tera_voice": DEFAULT_TERA_VOICE,
+        "tera_duration_scale": DEFAULT_TERA_DURATION_SCALE,
         "hybrid_mode": DEFAULT_HYBRID_MODE,
         "lang_switch_pause_ms": DEFAULT_LANG_SWITCH_PAUSE_MS,
         "qwen_model": DEFAULT_QWEN_MODEL,
@@ -263,13 +304,29 @@ def load_config() -> dict:
         try:
             raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             engine = str(raw.get("engine", DEFAULT_ENGINE)).strip().lower()
+            if engine in _DEAD_ENGINES:
+                engine = "edge" if engine == "kokoro" else "local"
             data["engine"] = engine if engine in _ENGINES else DEFAULT_ENGINE
-            kokoro_voice = str(raw.get("kokoro_voice", DEFAULT_KOKORO_VOICE)).strip().lower()
-            data["kokoro_voice"] = kokoro_voice or DEFAULT_KOKORO_VOICE
             local_speaker = str(
                 raw.get("local_speaker", DEFAULT_LOCAL_SPEAKER)
             ).strip().lower()
             data["local_speaker"] = local_speaker or DEFAULT_LOCAL_SPEAKER
+            openai_voice = str(
+                raw.get("openai_voice", DEFAULT_OPENAI_VOICE)
+            ).strip().lower()
+            data["openai_voice"] = openai_voice or DEFAULT_OPENAI_VOICE
+            edge_voice = str(raw.get("edge_voice", DEFAULT_EDGE_VOICE)).strip()
+            data["edge_voice"] = edge_voice or DEFAULT_EDGE_VOICE
+            tera_voice = str(raw.get("tera_voice", DEFAULT_TERA_VOICE)).strip()
+            data["tera_voice"] = tera_voice or DEFAULT_TERA_VOICE
+            try:
+                from speak_tera import normalize_duration_scale
+
+                data["tera_duration_scale"] = normalize_duration_scale(
+                    raw.get("tera_duration_scale", DEFAULT_TERA_DURATION_SCALE)
+                )
+            except Exception:
+                data["tera_duration_scale"] = DEFAULT_TERA_DURATION_SCALE
             hybrid = str(raw.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
             if hybrid == "dict_and_en":
                 hybrid = "dict_only"
@@ -310,8 +367,10 @@ def load_config() -> dict:
         data["qwen_speaker"] = DEFAULT_QWEN_SPEAKER
     if "micro_wife_design_file" not in data:
         data["micro_wife_design_file"] = DEFAULT_QWEN_DESIGN
-    if "kokoro_voice" not in data:
-        data["kokoro_voice"] = DEFAULT_KOKORO_VOICE
+    if "tera_voice" not in data:
+        data["tera_voice"] = DEFAULT_TERA_VOICE
+    if "tera_duration_scale" not in data:
+        data["tera_duration_scale"] = DEFAULT_TERA_DURATION_SCALE
     return data
 
 
@@ -427,8 +486,8 @@ def stop_playback() -> None:
 
 
 def _prepare_engine(engine: str) -> None:
-    """При смене движка освобождаем чужой runtime (VRAM / worker RAM)."""
-    if engine in {"local", "kokoro"}:
+    """При смене движка освобождаем чужой runtime (VRAM / orphan kokoro worker)."""
+    if engine in {"local", "edge", "tera", "openai"}:
         try:
             micro = Path(__file__).resolve().parent / "micro_wife"
             if str(micro) not in sys.path:
@@ -438,7 +497,8 @@ def _prepare_engine(engine: str) -> None:
             unload_qwen()
         except Exception as error:
             debug_log(f"unload qwen skip: {error}")
-    if engine in {"local", "qwen"}:
+    # kokoro убран из стека — на всякий гасим зависшие worker'ы
+    if engine in {"local", "edge", "tera", "qwen", "openai"}:
         try:
             from speak_kokoro import stop_worker
 
@@ -447,8 +507,20 @@ def _prepare_engine(engine: str) -> None:
             debug_log(f"stop kokoro worker skip: {error}")
 
 
-def _normalize_kokoro_voice(voice: str | None) -> str:
-    from speak_kokoro import normalize_voice
+def _normalize_openai_voice(voice: str | None) -> str:
+    from speak_openai import normalize_voice
+
+    return normalize_voice(voice)
+
+
+def _normalize_edge_voice(voice: str | None) -> str:
+    from speak_edge_tts import normalize_voice
+
+    return normalize_voice(voice)
+
+
+def _normalize_tera_voice(voice: str | None) -> str:
+    from speak_tera import normalize_voice
 
     return normalize_voice(voice)
 
@@ -730,11 +802,13 @@ def _safe_unlink(path: Path) -> None:
 
 
 def _audio_suffix(engine: str) -> str:
+    if engine == "edge":
+        return ".mp3"
     return ".wav"
 
 
 def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None:
-    """local / kokoro / qwen → wav. lang оставлен для совместимости (всегда ru).
+    """local / edge / kokoro / qwen / openai → audio.
     Смену движка (_prepare_engine) делает speak_text/warmup один раз — не на каждый chunk.
     """
     del lang  # EN hybrid убран вместе с Piper
@@ -748,13 +822,26 @@ def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None
             out_path,
         )
         return
-    if engine == "kokoro":
-        from speak_kokoro import synthesize_wav as synthesize_kokoro
+    if engine == "edge":
+        from speak_edge_tts import synthesize_wav as synthesize_edge
 
-        synthesize_kokoro(
+        synthesize_edge(
             part,
-            _normalize_kokoro_voice(cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)),
             out_path,
+            voice=_normalize_edge_voice(cfg.get("edge_voice", DEFAULT_EDGE_VOICE)),
+        )
+        return
+    if engine == "tera":
+        from speak_tera import normalize_duration_scale
+        from speak_tera import synthesize_wav as synthesize_tera
+
+        synthesize_tera(
+            part,
+            out_path,
+            voice=_normalize_tera_voice(cfg.get("tera_voice", DEFAULT_TERA_VOICE)),
+            duration_scale=normalize_duration_scale(
+                cfg.get("tera_duration_scale", DEFAULT_TERA_DURATION_SCALE)
+            ),
         )
         return
     if engine == "qwen":
@@ -775,6 +862,15 @@ def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None
             language="russian",
         )
         return
+    if engine == "openai":
+        from speak_openai import synthesize_wav as synthesize_openai
+
+        synthesize_openai(
+            part,
+            out_path,
+            voice=_normalize_openai_voice(cfg.get("openai_voice", DEFAULT_OPENAI_VOICE)),
+        )
+        return
     raise ValueError(f"unknown engine: {engine}")
 
 
@@ -792,12 +888,19 @@ def _parts_for_engine(text: str, engine: str) -> list[str]:
     if engine == "local":
         # Silero режет длинные куски сам (~900); держим умеренно.
         return split_into_chunks(text, target=140 if table_like else 280)
-    if engine == "kokoro":
-        return split_into_chunks(text, target=160 if table_like else 400)
+    if engine == "edge":
+        # Сеть: крупнее куски = меньше round-trip; Edge держит длинные фразы.
+        return split_into_chunks(text, target=500 if table_like else 900)
+    if engine == "tera":
+        # Локальный ONNX: умеренные куски, без микронарезок.
+        return split_into_chunks(text, target=220 if table_like else 420)
     if engine == "qwen":
         # Короткие куски на Qwen дают хуже RTF (фиксированный overhead generate).
         # table_like раньше резал до 120 — это усугубляло; держим крупные куски.
         return split_into_chunks(text, target=420)
+    if engine == "openai":
+        # Сеть+API: крупнее куски = меньше round-trip (лимит OpenAI ~4096).
+        return split_into_chunks(text, target=900)
     return split_into_chunks(text, target=160 if table_like else 400)
 
 
@@ -837,6 +940,18 @@ def speak_text(item: SpeechItem) -> None:
             conversation_id=item.conversation_id,
             generation_id=item.generation_id,
         )
+        # Не гоняем synth параллельно с bg-warmup (Kokoro/Qwen иначе ловят stale/двойную load).
+        if not wait_until_warmup_done(engine):
+            set_progress(
+                "idle",
+                engine=engine,
+                current=0,
+                total=0,
+                source="",
+                conversation_id="",
+                generation_id="",
+            )
+            return
         units = _speech_units(item.text, cfg)
         if not units:
             set_progress(
@@ -972,15 +1087,6 @@ def _run_engine_warmup(engine: str, cfg: dict, *, bg: bool) -> None:
         warmup_local()
         debug_log(f"{prefix} local done")
         return
-    if engine == "kokoro":
-        from speak_kokoro import warmup as warmup_kokoro
-
-        debug_log(f"{prefix} kokoro begin")
-        warmup_kokoro(
-            _normalize_kokoro_voice(cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE))
-        )
-        debug_log(f"{prefix} kokoro done")
-        return
     if engine == "qwen":
         micro = Path(__file__).resolve().parent / "micro_wife"
         if str(micro) not in sys.path:
@@ -990,6 +1096,30 @@ def _run_engine_warmup(engine: str, cfg: dict, *, bg: bool) -> None:
         debug_log(f"{prefix} qwen begin")
         warmup_qwen(cfg.get("qwen_model", DEFAULT_QWEN_MODEL))
         debug_log(f"{prefix} qwen done")
+        return
+    if engine == "openai":
+        from speak_openai import warmup as warmup_openai
+
+        debug_log(f"{prefix} openai begin")
+        warmup_openai(cfg.get("openai_voice", DEFAULT_OPENAI_VOICE))
+        debug_log(f"{prefix} openai done")
+        return
+    if engine == "edge":
+        from speak_edge_tts import warmup as warmup_edge
+
+        debug_log(f"{prefix} edge begin")
+        warmup_edge(cfg.get("edge_voice", DEFAULT_EDGE_VOICE))
+        debug_log(f"{prefix} edge done")
+        return
+    if engine == "tera":
+        from speak_tera import warmup as warmup_tera
+
+        debug_log(f"{prefix} tera begin")
+        warmup_tera(
+            cfg.get("tera_voice", DEFAULT_TERA_VOICE),
+            cfg.get("tera_duration_scale", DEFAULT_TERA_DURATION_SCALE),
+        )
+        debug_log(f"{prefix} tera done")
         return
     debug_log(f"{prefix} skip (engine={engine})")
 
@@ -1095,14 +1225,24 @@ def handle_client(conn: socket.socket) -> None:
             cleared = clear_speech_queue()
             stop_playback()
             warming = warmup_in_progress()
-            debug_log(f"STOP cleared_queue={cleared} warming={warming}")
-            conn.sendall(b'{"ok":true,"stopped":true}\n')
+            warming_engine = ""
             if warming:
-                # CUDA from_pretrained не прерывается из Python — убиваем процесс.
-                debug_log("STOP abort warmup — process exit")
+                with _progress_lock:
+                    warming_engine = str(_warmup_engine or "")
+            debug_log(
+                f"STOP cleared_queue={cleared} warming={warming} eng={warming_engine}"
+            )
+            conn.sendall(b'{"ok":true,"stopped":true}\n')
+            if warming and warming_engine in _FORCE_EXIT_ON_WARMUP_STOP:
+                # CUDA from_pretrained не прерывается — только Qwen убиваем процесс.
+                debug_log("STOP abort warmup — process exit (qwen)")
                 threading.Thread(
                     target=_exit_process_soon, name="tts-abort-warmup", daemon=True
                 ).start()
+            elif warming:
+                # Tera/Edge/Silero: НЕ срываем warmup. Иначе Прослушать/Стоп
+                # отменяют загрузку, а synth грузит модель 30–90 с «в тишине».
+                debug_log(f"STOP keep warmup running eng={warming_engine}")
             return
         if cmd in {"enqueue_auto", "enqueue_manual", "preview", "speak"}:
             cfg = load_config()

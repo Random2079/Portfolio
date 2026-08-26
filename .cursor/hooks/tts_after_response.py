@@ -1,18 +1,21 @@
 """
 Cursor hook: afterAgentResponse → очередь в tts_daemon.
-Читает JSON из stdin. Выключить: файл Cursor_TTS/TTS_OFF.
-Текст только извлекается и режется по длине; финальная подготовка — в демоне (text_prep).
+Авто только если открыта панель (TTS_PANEL_ACTIVE) и нет TTS_OFF.
+Один hooks.json: только ~/.cursor/hooks.json (project-level пустой).
 """
 from __future__ import annotations
 
 import json
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]  # DS_Projects
 OFF_FLAG = ROOT / "Cursor_TTS" / "TTS_OFF"
+PANEL_ACTIVE_FLAG = ROOT / "Cursor_TTS" / "TTS_PANEL_ACTIVE"
+HOOK_DEDUP_DIR = Path(tempfile.gettempdir()) / "cursor_tts_hook_dedup"
 LOG_FILE = Path(tempfile.gettempdir()) / "cursor_tts_hook.log"
 sys.path.insert(0, str(ROOT / "Cursor_TTS"))
 try:
@@ -28,9 +31,35 @@ def log(message: str) -> None:
         file.write(f"[{timestamp}] {message}\n")
 
 
+def claim_generation(generation_id: str, conversation_id: str = "") -> bool:
+    """True = мы первые на этот generation_id. False = дубль хука — выходим."""
+    gid = (generation_id or "").strip()
+    if not gid:
+        return True
+    try:
+        HOOK_DEDUP_DIR.mkdir(parents=True, exist_ok=True)
+        # чистим старые метки (>10 мин)
+        now = time.time()
+        for stale in HOOK_DEDUP_DIR.glob("*.claim"):
+            try:
+                if now - stale.stat().st_mtime > 600:
+                    stale.unlink(missing_ok=True)
+            except OSError:
+                pass
+        key = f"{conversation_id[:32]}_{gid[:64]}".replace("/", "_")
+        path = HOOK_DEDUP_DIR / f"{key}.claim"
+        try:
+            fd = path.open("x", encoding="utf-8")
+            fd.write(str(now))
+            fd.close()
+            return True
+        except FileExistsError:
+            return False
+    except OSError:
+        return True
+
 
 def read_hook_payload() -> dict:
-    """Читает JSON от Cursor. На Windows stdin часто кривой — логируем сырьё."""
     if hasattr(sys.stdin, "reconfigure"):
         try:
             sys.stdin.reconfigure(encoding="utf-8", errors="replace")
@@ -51,7 +80,6 @@ def read_hook_payload() -> dict:
 
 
 def read_last_assistant_message(path: Path) -> str:
-    """Берёт последний нормальный ответ assistant из JSONL-транскрипта."""
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
 
     for line in reversed(lines):
@@ -76,17 +104,13 @@ def read_last_assistant_message(path: Path) -> str:
     return ""
 
 
-# Cursor на Windows отдаёт текст как UTF-8 байты, декодированные через cp1251.
-# Такие пары встречаются в любой кириллице, покалеченной этим способом.
 _MOJIBAKE_MARKERS = ("Рµ", "Рѕ", "РЅ", "СЂ", "СЃ", "Рё", "РІ", "Р°", "вЂ")
 
 
 def fix_mojibake(text: str) -> str:
-    """Разворачивает utf-8-как-cp1251 обратно. Не трогает нормальный текст."""
     if not any(marker in text for marker in _MOJIBAKE_MARKERS):
         return text
 
-    # Построчно: одна нерасшифруемая строка не должна ронять весь текст.
     out = []
     for line in text.split("\n"):
         try:
@@ -97,7 +121,6 @@ def fix_mojibake(text: str) -> str:
 
 
 def extract_text(data: dict) -> str:
-    """Сначала прямой payload text, transcript — только fallback."""
     text = str(data.get("text") or "").strip()
     if text:
         text = fix_mojibake(text)
@@ -113,20 +136,22 @@ def extract_text(data: dict) -> str:
                 log(f"loaded assistant text from transcript: chars={len(text)}")
                 return text
 
-    text = str(data.get("text") or "")
-    replacement_count = text.count("") + text.count("?")
-    if replacement_count:
-        log(f"stdin text may be corrupted: bad_chars={replacement_count}")
-    return text
+    return str(data.get("text") or "")
 
 
 MAX_SPEECH_CHARS = 12000
 
 
 def enqueue_auto(text: str, data: dict) -> None:
-    from speak_edge import ensure_daemon, send_command
+    from speak_edge import daemon_alive, ensure_daemon, panel_active, send_command
 
-    ensure_daemon()
+    if not panel_active():
+        log("TTS panel not running — skip auto")
+        return
+
+    if not daemon_alive():
+        ensure_daemon()
+
     payload = {
         "cmd": "enqueue_auto",
         "entry": {
@@ -150,8 +175,22 @@ def enqueue_auto(text: str, data: dict) -> None:
 def main() -> int:
     log("Hook invoked")
 
+    from speak_edge import daemon_alive, panel_active
+
     if OFF_FLAG.exists():
         log("TTS disabled by TTS_OFF")
+        return 0
+
+    if not panel_active():
+        log("TTS panel not running — skip hook")
+        if daemon_alive():
+            try:
+                from speak_edge import stop_daemon
+
+                stop_daemon(force=True)
+                log("orphan daemon stopped (panel closed)")
+            except Exception as error:
+                log(f"orphan daemon stop failed: {type(error).__name__}: {error}")
         return 0
 
     try:
@@ -162,20 +201,25 @@ def main() -> int:
 
     event = str(data.get("hook_event_name") or "")
     status = str(data.get("status") or "")
+    conv = str(data.get("conversation_id") or "")
+    gen = str(data.get("generation_id") or "")
 
     if event == "stop":
         try:
-            from speak_edge import ensure_daemon, send_command
+            from speak_edge import send_command
 
-            ensure_daemon()
-            send_command({"cmd": "stop"}, timeout=2.0)
-            log(f"hook stop -> daemon stop (status={status})")
+            if daemon_alive():
+                send_command({"cmd": "stop"}, timeout=2.0)
+                log(f"hook stop -> daemon stop (status={status})")
         except Exception as error:
             log(f"hook stop failed: {type(error).__name__}: {error}")
         return 0
 
-    text = extract_text(data).strip()
+    if not claim_generation(gen, conv):
+        log(f"Duplicate hook skipped gen={gen[:12]}")
+        return 0
 
+    text = extract_text(data).strip()
     log_clean_result(text[:200], text[:200])
     if len(text) < 8:
         log(f"Text too short: chars={len(text)}")

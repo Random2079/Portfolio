@@ -1,0 +1,18 @@
+﻿=== Start-VoiceStt -ForceRestart ===
+Starting STT daemon…
+Waiting for model… 10s / 90s
+Waiting for model… 20s / 90s
+Waiting for model… 30s / 90s
+Waiting for model… 40s / 90s
+Waiting for model… 50s / 90s
+Orphan vosk_daemon PID 12632 (port owner=3040) — killing
+OK: {"ok": true, "engine": "parakeet", "whisper_model": null, "parakeet_model": "nvidia/parakeet-tdt-0.6b-v3", "global_ptt": true, "port": 39281, "model": "nvidia/parakeet-tdt-0.6b-v3", "gain": 1.3, "grammar": false, "vad_rms_min": 0.0, "device": "Микрофон (NVIDIA RTX Voice)", "device_index": 3, "log": "C:\\Users\\Home\\OneDrive\\Desktop\\DS_Projects\\Discord_MutePlugin\\stt\\logs\\stt.log"}
+=== EXIT: 0 ===
+=== vosk_daemon count ===
+0
+=== /health ===
+
+=== /commands/pending ===
+
+=== Listen 39281 ===
+

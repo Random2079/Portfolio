@@ -34,16 +34,12 @@ from PyQt5.QtWidgets import (
 
 ROOT = Path(__file__).resolve().parent
 OFF_FLAG = ROOT / "TTS_OFF"
+PANEL_ACTIVE_FLAG = ROOT / "TTS_PANEL_ACTIVE"
 PAUSE_FLAG = ROOT / "TTS_PAUSED"
 CONFIG_FILE = ROOT / "tts_config.json"
 PID_FILE = ROOT / "tts_speech.pid"
 SPEAK_EDGE = ROOT / "speak_edge.py"  # клиент к демону (имя историческое)
 
-VOICES_KOKORO = [
-    ("sveta", "Света (kokoro-ru)"),
-    ("masha", "Маша (kokoro-ru)"),
-    ("dima", "Дима (kokoro-ru)"),
-]
 VOICES_LOCAL = [
     ("xenia", "Ксения (Silero)"),
     ("baya", "Бая (Silero)"),
@@ -51,15 +47,19 @@ VOICES_LOCAL = [
     ("aidar", "Айдар (Silero)"),
     ("eugene", "Евгений (Silero)"),
 ]
-DEFAULT_KOKORO_VOICE = "sveta"
 DEFAULT_LOCAL_SPEAKER = "xenia"
 DEFAULT_HYBRID_MODE = "dict_only"
 DEFAULT_VOLUME = 45
-DEFAULT_ENGINE = "local"
+DEFAULT_ENGINE = "tera"
 DEFAULT_PAUSE_MS = 350
 DEFAULT_QWEN_SPEAKER = "serena"
 DEFAULT_QWEN_DESIGN = "micro_wife/designs/02_soft_high_female.txt"
-_ENGINES = {"local", "kokoro", "qwen"}
+DEFAULT_OPENAI_VOICE = "nova"
+DEFAULT_EDGE_VOICE = "ru-RU-SvetlanaNeural"
+DEFAULT_TERA_VOICE = "ru_f1"
+DEFAULT_TERA_DURATION_SCALE = 1.0
+_ENGINES = {"local", "edge", "tera", "qwen", "openai"}
+_DEAD_ENGINES = {"kokoro", "piper"}
 _HYBRID_MODES = {"off", "dict_only"}
 HYBRID_ITEMS = [
     ("off", "Как написано (без словаря)"),
@@ -70,17 +70,38 @@ VOICES_QWEN = [
     ("micro_wife/designs/02_soft_high_female.txt", "2 · мягкий высокий (micro wife)"),
     ("micro_wife/designs/05_adult_book_female.txt", "5 · взрослая книжная (не лоли)"),
 ]
-TEST_PHRASE = "Привет. Это проверка голоса Cursor TTS. Silero, Kokoro или Qwen."
-# По логам этой машины: Silero cold ~15–25с (раз ~74с), Kokoro ~50–70с,
-# Qwen ~20–30с на свободной 3050, до ~2.5 мин если тесно. Дальше — зависон, не «ещё грузится».
+VOICES_OPENAI = [
+    ("nova", "Nova (жен., яркий)"),
+    ("shimmer", "Shimmer (жен., мягкий)"),
+    ("alloy", "Alloy (нейтральный)"),
+    ("echo", "Echo (муж.)"),
+    ("onyx", "Onyx (муж., низкий)"),
+    ("fable", "Fable (сторителлинг)"),
+]
+VOICES_EDGE = [
+    ("ru-RU-SvetlanaNeural", "Светлана (Edge, жен.)"),
+    ("ru-RU-DariyaNeural", "Дарья (Edge, жен.)"),
+    ("ru-RU-DmitryNeural", "Дмитрий (Edge, муж.)"),
+]
+VOICES_TERA = [
+    ("ru_f1", "Tera · жен. ru_f1"),
+    ("ru_f2", "Tera · жен. ru_f2"),
+    ("ru_m5", "Tera · муж. ru_m5"),
+    ("ru_m1", "Tera · муж. ru_m1"),
+]
+TEST_PHRASE = "Привет. Это проверка голоса Cursor TTS. Tera, Edge или Silero."
+# Tera warm ~2–4с; Edge ~1–2с; Silero cold тяжелее. Дальше stale — зависон.
 WARMUP_STALE_SEC = 240
 
 
 def load_config() -> dict:
     data = {
         "engine": DEFAULT_ENGINE,
-        "kokoro_voice": DEFAULT_KOKORO_VOICE,
         "local_speaker": DEFAULT_LOCAL_SPEAKER,
+        "openai_voice": DEFAULT_OPENAI_VOICE,
+        "edge_voice": DEFAULT_EDGE_VOICE,
+        "tera_voice": DEFAULT_TERA_VOICE,
+        "tera_duration_scale": DEFAULT_TERA_DURATION_SCALE,
         "hybrid_mode": DEFAULT_HYBRID_MODE,
         "micro_wife_design_file": DEFAULT_QWEN_DESIGN,
         "qwen_speaker": DEFAULT_QWEN_SPEAKER,
@@ -97,24 +118,42 @@ def load_config() -> dict:
             pass
 
     engine = str(data.get("engine", DEFAULT_ENGINE)).strip().lower()
-    # мёртвые edge/piper → local (быстрый Silero); неизвестное тоже
-    if engine in {"edge", "piper"}:
+    if engine == "kokoro":
+        engine = "edge"
+    elif engine == "piper":
         engine = "local"
     if engine not in _ENGINES:
         engine = DEFAULT_ENGINE
     data["engine"] = engine
-
-    kokoro_voice = str(data.get("kokoro_voice", DEFAULT_KOKORO_VOICE)).strip().lower()
-    known_kokoro = {code for code, _ in VOICES_KOKORO}
-    if kokoro_voice not in known_kokoro:
-        kokoro_voice = DEFAULT_KOKORO_VOICE
-    data["kokoro_voice"] = kokoro_voice
 
     local_speaker = str(data.get("local_speaker", DEFAULT_LOCAL_SPEAKER)).strip().lower()
     known_local = {code for code, _ in VOICES_LOCAL}
     if local_speaker not in known_local:
         local_speaker = DEFAULT_LOCAL_SPEAKER
     data["local_speaker"] = local_speaker
+
+    openai_voice = str(data.get("openai_voice", DEFAULT_OPENAI_VOICE)).strip().lower()
+    known_openai = {code for code, _ in VOICES_OPENAI}
+    if openai_voice not in known_openai:
+        openai_voice = DEFAULT_OPENAI_VOICE
+    data["openai_voice"] = openai_voice
+
+    edge_voice = str(data.get("edge_voice", DEFAULT_EDGE_VOICE)).strip()
+    known_edge = {code for code, _ in VOICES_EDGE}
+    if edge_voice not in known_edge:
+        edge_voice = DEFAULT_EDGE_VOICE
+    data["edge_voice"] = edge_voice
+
+    tera_voice = str(data.get("tera_voice", DEFAULT_TERA_VOICE)).strip()
+    known_tera = {code for code, _ in VOICES_TERA}
+    if tera_voice not in known_tera:
+        tera_voice = DEFAULT_TERA_VOICE
+    data["tera_voice"] = tera_voice
+    try:
+        scale = float(data.get("tera_duration_scale", DEFAULT_TERA_DURATION_SCALE))
+    except (TypeError, ValueError):
+        scale = DEFAULT_TERA_DURATION_SCALE
+    data["tera_duration_scale"] = max(0.6, min(1.5, scale))
 
     hybrid = str(data.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
     if hybrid == "dict_and_en":
@@ -146,8 +185,11 @@ def load_config() -> dict:
 def save_config(
     *,
     engine: str | None = None,
-    kokoro_voice: str | None = None,
     local_speaker: str | None = None,
+    openai_voice: str | None = None,
+    edge_voice: str | None = None,
+    tera_voice: str | None = None,
+    tera_duration_scale: float | None = None,
     hybrid_mode: str | None = None,
     micro_wife_design_file: str | None = None,
     qwen_speaker: str | None = None,
@@ -158,14 +200,28 @@ def save_config(
     data = load_config()
     if engine is not None:
         data["engine"] = engine if engine in _ENGINES else DEFAULT_ENGINE
-    if kokoro_voice is not None:
-        voice = str(kokoro_voice).strip().lower()
-        known = {code for code, _ in VOICES_KOKORO}
-        data["kokoro_voice"] = voice if voice in known else DEFAULT_KOKORO_VOICE
     if local_speaker is not None:
         voice = str(local_speaker).strip().lower()
         known = {code for code, _ in VOICES_LOCAL}
         data["local_speaker"] = voice if voice in known else DEFAULT_LOCAL_SPEAKER
+    if openai_voice is not None:
+        voice = str(openai_voice).strip().lower()
+        known = {code for code, _ in VOICES_OPENAI}
+        data["openai_voice"] = voice if voice in known else DEFAULT_OPENAI_VOICE
+    if edge_voice is not None:
+        voice = str(edge_voice).strip()
+        known = {code for code, _ in VOICES_EDGE}
+        data["edge_voice"] = voice if voice in known else DEFAULT_EDGE_VOICE
+    if tera_voice is not None:
+        voice = str(tera_voice).strip()
+        known = {code for code, _ in VOICES_TERA}
+        data["tera_voice"] = voice if voice in known else DEFAULT_TERA_VOICE
+    if tera_duration_scale is not None:
+        try:
+            scale = float(tera_duration_scale)
+        except (TypeError, ValueError):
+            scale = DEFAULT_TERA_DURATION_SCALE
+        data["tera_duration_scale"] = max(0.6, min(1.5, scale))
     if hybrid_mode is not None:
         mode = str(hybrid_mode).strip().lower()
         if mode == "dict_and_en":
@@ -194,6 +250,7 @@ def save_config(
         "voice",
         "piper_model",
         "piper_model_en",
+        "kokoro_voice",
     ):
         data.pop(dead, None)
     data["micro_wife_ready"] = True
@@ -212,6 +269,14 @@ def set_auto_on(enabled: bool) -> None:
         OFF_FLAG.unlink(missing_ok=True)
     else:
         OFF_FLAG.write_text("", encoding="utf-8")
+
+
+def set_panel_active(active: bool) -> None:
+    """Хук авто-озвучки разрешён только пока панель открыта."""
+    if active:
+        PANEL_ACTIVE_FLAG.write_text(str(os.getpid()), encoding="ascii")
+    else:
+        PANEL_ACTIVE_FLAG.unlink(missing_ok=True)
 
 
 DAEMON_PID_FILE = ROOT / "tts_daemon.pid"
@@ -337,6 +402,7 @@ def shutdown_tts_stack() -> None:
     if _tts_stack_shutting_down:
         return
     _tts_stack_shutting_down = True
+    set_panel_active(False)
     try:
         stop_speech()
     except Exception:
@@ -496,7 +562,7 @@ def format_daemon_progress(status: dict) -> str:
         if warmup_is_stale(status):
             text = (
                 f"⚠ {engine}: загрузка зависла · {elapsed} с "
-                f"(лимит {WARMUP_STALE_SEC} с). Закрой панель или вернись на Silero."
+                f"(лимит {WARMUP_STALE_SEC} с). Закрой панель или временно Edge."
             )
         else:
             text = f"⏳ {engine}: загрузка модели · {elapsed} с"
@@ -579,9 +645,11 @@ class TTSPanel(QMainWindow):
         engine_row = QHBoxLayout()
         engine_row.addWidget(QLabel("Движок:", self))
         self.engine_combo = QComboBox(self)
-        self.engine_combo.addItem("Silero (быстрый, как раньше)", "local")
-        self.engine_combo.addItem("Kokoro-ru", "kokoro")
+        self.engine_combo.addItem("TeraTTS (локальный, качество)", "tera")
+        self.engine_combo.addItem("Edge TTS (Microsoft, онлайн)", "edge")
+        self.engine_combo.addItem("Silero (быстрый, офлайн)", "local")
         self.engine_combo.addItem("Micro wife (Qwen)", "qwen")
+        self.engine_combo.addItem("OpenAI API (нужен VPN из РФ)", "openai")
         self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         engine_row.addWidget(self.engine_combo, stretch=1)
         layout.addLayout(engine_row)
@@ -626,6 +694,23 @@ class TTSPanel(QMainWindow):
         self.pause_label.setMinimumWidth(56)
         pause_row.addWidget(self.pause_label)
         layout.addLayout(pause_row)
+
+        tempo_row = QHBoxLayout()
+        tempo_row.addWidget(QLabel("Tera темп:", self))
+        self.tera_tempo_slider = QSlider(Qt.Horizontal, self)
+        # 60..150 → duration_scale 0.60..1.50; больше = медленнее
+        self.tera_tempo_slider.setRange(60, 150)
+        self.tera_tempo_slider.setSingleStep(5)
+        self.tera_tempo_slider.setTickInterval(10)
+        self.tera_tempo_slider.setToolTip(
+            "duration_scale Tera: меньше = быстрее речь, больше = медленнее. 100 = норма."
+        )
+        self.tera_tempo_slider.valueChanged.connect(self._on_tera_tempo_changed)
+        tempo_row.addWidget(self.tera_tempo_slider, stretch=1)
+        self.tera_tempo_label = QLabel("", self)
+        self.tera_tempo_label.setMinimumWidth(72)
+        tempo_row.addWidget(self.tera_tempo_label)
+        layout.addLayout(tempo_row)
 
         buttons = QHBoxLayout()
         self.test_button = QPushButton("Прослушать", self)
@@ -672,6 +757,8 @@ class TTSPanel(QMainWindow):
         if OFF_FLAG.exists():
             set_auto_on(True)
 
+        set_panel_active(True)
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_disk)
         self.timer.start(1000)
@@ -693,8 +780,14 @@ class TTSPanel(QMainWindow):
             items = VOICES_QWEN
         elif engine == "local":
             items = VOICES_LOCAL
+        elif engine == "edge":
+            items = VOICES_EDGE
+        elif engine == "tera":
+            items = VOICES_TERA
+        elif engine == "openai":
+            items = VOICES_OPENAI
         else:
-            items = VOICES_KOKORO
+            items = VOICES_TERA
         for code, label in items:
             self.voice_combo.addItem(label, code)
         if selected:
@@ -706,10 +799,16 @@ class TTSPanel(QMainWindow):
     @staticmethod
     def _selected_voice_for_engine(cfg: dict, engine: str) -> str:
         if engine == "qwen":
-            return cfg.get("micro_wife_design_file", DEFAULT_QWEN_DESIGN)
+            return str(cfg.get("micro_wife_design_file", DEFAULT_QWEN_DESIGN))
         if engine == "local":
-            return cfg.get("local_speaker", DEFAULT_LOCAL_SPEAKER)
-        return cfg.get("kokoro_voice", DEFAULT_KOKORO_VOICE)
+            return str(cfg.get("local_speaker", DEFAULT_LOCAL_SPEAKER))
+        if engine == "edge":
+            return str(cfg.get("edge_voice", DEFAULT_EDGE_VOICE))
+        if engine == "tera":
+            return str(cfg.get("tera_voice", DEFAULT_TERA_VOICE))
+        if engine == "openai":
+            return str(cfg.get("openai_voice", DEFAULT_OPENAI_VOICE))
+        return str(cfg.get("tera_voice", DEFAULT_TERA_VOICE))
 
     def _reload_from_disk(self) -> None:
         self._updating = True
@@ -725,6 +824,11 @@ class TTSPanel(QMainWindow):
         self.volume_label.setText(f"{cfg['volume']}%")
         self.pause_slider.setValue(int(cfg.get("pause_ms", DEFAULT_PAUSE_MS)))
         self.pause_label.setText(f"{int(cfg.get('pause_ms', DEFAULT_PAUSE_MS))} ms")
+        scale = float(cfg.get("tera_duration_scale", DEFAULT_TERA_DURATION_SCALE))
+        tempo_pct = int(round(scale * 100))
+        self.tera_tempo_slider.setValue(max(60, min(150, tempo_pct)))
+        self._set_tera_tempo_label(tempo_pct)
+        self.tera_tempo_slider.setEnabled(cfg.get("engine") == "tera")
         hybrid_index = self.hybrid_combo.findData(
             cfg.get("hybrid_mode", DEFAULT_HYBRID_MODE)
         )
@@ -851,7 +955,13 @@ class TTSPanel(QMainWindow):
             return
         set_auto_on(checked)
         if not checked:
+            # Только снять текущую речь/очередь. Нельзя ронять демон на warmup Tera —
+            # иначе после «Авто OFF» модель «не запускается» до рестарта панели.
             stop_speech()
+            self.status_label.setText(
+                "Авто выкл. Демон и прогрев модели продолжают жить — "
+                "Прослушать / выделение работают."
+            )
         self._refresh_status()
 
     def _on_interrupt_toggled(self, checked: bool) -> None:
@@ -875,9 +985,7 @@ class TTSPanel(QMainWindow):
         save_config(engine=engine)
         self._arm_preview_hold()
         self._stale_killed = False
-        msg_prefix = (
-            "Сменил движок — убиваю старый процесс (Qwen/Kokoro иначе не отдают GPU). "
-        )
+        msg_prefix = "Сменил движок — перезапускаю демон. "
         if engine == "qwen":
             msg = (
                 f"{msg_prefix}Движок: Micro wife (Qwen). Качество, медленнее. "
@@ -885,14 +993,28 @@ class TTSPanel(QMainWindow):
             )
         elif engine == "local":
             msg = (
-                f"{msg_prefix}Движок: Silero (local). Быстрый офлайн, как раньше. "
+                f"{msg_prefix}Движок: Silero (local). Быстрый офлайн. "
                 "Первый старт — скачает модель, дальше тепло."
             )
-        else:
+        elif engine == "edge":
             msg = (
-                f"{msg_prefix}Движок: Kokoro-ru. Качество выше Silero, cold load тяжелее."
+                f"{msg_prefix}Движок: Edge TTS (Microsoft). Без ключа, нужен интернет. "
+                "Из РФ обычно работает (в отличие от OpenAI)."
             )
+        elif engine == "tera":
+            msg = (
+                f"{msg_prefix}Движок: TeraTTS. Первый прогрев часто 30–90 с — "
+                "не жми Стоп/Прослушать, дождись «готов». Потом куски ~2–4 с."
+            )
+        elif engine == "openai":
+            msg = (
+                f"{msg_prefix}Движок: OpenAI API. Нужен ключ + VPN из РФ "
+                "(иначе 403). Лучше бери Edge/Tera."
+            )
+        else:
+            msg = f"{msg_prefix}Движок: {engine}."
         self.status_label.setText(msg)
+        self.tera_tempo_slider.setEnabled(engine == "tera")
         try:
             if str(ROOT) not in sys.path:
                 sys.path.insert(0, str(ROOT))
@@ -939,8 +1061,34 @@ class TTSPanel(QMainWindow):
             save_config(micro_wife_design_file=str(code), qwen_speaker=spk)
         elif engine == "local":
             save_config(local_speaker=str(code))
+        elif engine == "edge":
+            save_config(edge_voice=str(code))
+        elif engine == "tera":
+            save_config(tera_voice=str(code))
+        elif engine == "openai":
+            save_config(openai_voice=str(code))
+        self._refresh_status()
+
+    def _set_tera_tempo_label(self, tempo_pct: int) -> None:
+        scale = tempo_pct / 100.0
+        if tempo_pct < 95:
+            hint = "быстрее"
+        elif tempo_pct > 105:
+            hint = "медленнее"
         else:
-            save_config(kokoro_voice=str(code))
+            hint = "норма"
+        self.tera_tempo_label.setText(f"{scale:.2f} · {hint}")
+
+    def _on_tera_tempo_changed(self, value: int) -> None:
+        value = int(round(value / 5) * 5)
+        if self.tera_tempo_slider.value() != value:
+            self.tera_tempo_slider.blockSignals(True)
+            self.tera_tempo_slider.setValue(value)
+            self.tera_tempo_slider.blockSignals(False)
+        self._set_tera_tempo_label(value)
+        if self._updating:
+            return
+        save_config(tera_duration_scale=value / 100.0)
         self._refresh_status()
 
     def _on_volume_changed(self, value: int) -> None:
@@ -964,7 +1112,19 @@ class TTSPanel(QMainWindow):
         self._refresh_status()
 
     def _on_test(self) -> None:
-        if not preview_allowed(daemon_status()) or self._preview_hold:
+        status = daemon_status()
+        if status.get("warming") or self._preview_hold:
+            eng = str(status.get("engine") or load_config().get("engine") or "")
+            elapsed = int(status.get("elapsed_sec", 0) or 0)
+            self.status_label.setText(
+                f"Tera/модель ещё грузится ({elapsed} с). Не жми Стоп и Прослушать — "
+                "иначе срывается прогрев и ждёшь 1+ мин снова. Дождись «готов»."
+                if eng == "tera" or load_config().get("engine") == "tera"
+                else "Подожди загрузку модели. Прослушать сейчас не жми."
+            )
+            self.test_button.setEnabled(False)
+            return
+        if not preview_allowed(status):
             self.status_label.setText(
                 "Подожди загрузку модели. Прослушать сейчас не жми — Стоп потом не спасёт."
             )
@@ -989,16 +1149,24 @@ class TTSPanel(QMainWindow):
             creationflags=flags,
         )
         engine = load_config()["engine"]
-        if engine == "qwen":
+        if engine == "tera":
+            tip = (
+                "Tera синтезирует… после прогрева обычно 2–4 с. "
+                "Темп — слайдер «Tera темп» (больше = медленнее)."
+            )
+        elif engine == "edge":
+            tip = "Edge TTS синтезирует… обычно 1–3 с на кусок (нужен интернет)."
+        elif engine == "openai":
+            tip = "OpenAI синтезирует… обычно 1–3 с (ключ + VPN из РФ)."
+        elif engine == "qwen":
             tip = (
                 "Qwen синтезирует… после прогрева обычно 5–15 секунд. "
                 "Не запускай новую фразу до начала речи."
             )
+        elif engine == "local":
+            tip = "Silero синтезирует…"
         else:
-            tip = (
-                "Kokoro синтезирует… первый раз после старта демона может быть ~20–30 с, "
-                "потом быстрее."
-            )
+            tip = "Синтез…"
         self.status_label.setText(tip)
 
     def _on_pause_toggle(self) -> None:
@@ -1016,10 +1184,6 @@ class TTSPanel(QMainWindow):
         self.status_label.setText("Остановлено (очередь сброшена, пауза снята).")
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        # Закрытие панели не должно оставлять TTS_OFF навсегда:
-        # авто по умолчанию снова ON (иначе хук молчит до ручного включения).
-        if OFF_FLAG.exists():
-            set_auto_on(True)
         shutdown_tts_stack()
         super().closeEvent(event)
 
