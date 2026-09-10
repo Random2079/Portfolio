@@ -100,7 +100,7 @@
 
 - Сделано (2026-08-16): опрос по фильтру; прогресс poll; digest-toast; `/api/metrics` + вкладка MOEX.
 
-- Следующие шаги: трек **K свой БКС** (история сделок, графики, разбор; потом scope новостей = портфель). Новостной хвост (ИИ/watch/телефон) — позже. ТЗ: [`Portfolio_News/docs/TZ.md`](Portfolio_News/docs/TZ.md).
+- Следующие шаги: трек **K свой БКС** (K0→K1…). **2026-09-10:** UI только от БКС API (без «Все в базе»); котировки ≈ Snowball. Новостной хвост позже. ТЗ: [`Portfolio_News/docs/TZ.md`](Portfolio_News/docs/TZ.md).
 
 
 
@@ -194,13 +194,13 @@
 
 - Дата: 2026-08-08
 
-- Статус: входящие (парковка — не стартовать без команды)
+- Статус: отложено (пауза 2026-09-10 — юзер вымотан; быт = Happ/FixPrice)
 
 - Описание: Свой VPN вместо чужих нод Happ: VPS за границей + WireGuard / Outline / VLESS (панель вроде 3x-ui), клиент на ПК. Контекст: Мегафон режет Discord; **zapret ≈ Discord**, **Happ ≈ YouTube**; чужие ноды нестабильны; Proxy ≠ TUN (голос Discord часто мёртв в Proxy). Не писать VPN с нуля — аренда сервера и настройка стека.
 
-- Быт (пока без своего VPS): Discord → zapret; YouTube → Happ; не женить zapret + Happ TUN global на один трафик.
+- Быт (пауза Own HEL): Discord → zapret; YouTube/Cursor → **Happ FixPrice**; не женить zapret + Happ TUN global на один трафик. VPS `185.238.189.220` не сносить. Чеклист Happ: `Own_VPN/docs/TRY_HAPP_STABLE.md`.
 
-- Следующие шаги: выбрать VPS из шортлиста (не скам): **HOSTKEY** (hostkey.ru/.com — норм компания, EU; для VPN брать PL/FR/NL, не РФ; pico/nano ~490–560₽/мес при оплате за год, лимит ~3 ТБ); **Aeza** (часто дешевле/удобнее под RU, hourly-тест, NL/DE); **Contabo** (жир по RAM/~€5.5, DE, карта/оплата может быть больнее). Для личного VPN хватит 1 vCPU / 1–2 GB. Дальше: WireGuard vs VLESS/Reality; чеклист; тест Discord+YouTube; DPI Мегафона → иногда всё равно zapret.
+- Следующие шаги (когда снимем паузу): ручной AWG/Reality на Метросети → IP `185.238…` → `measure_st0.ps1` vs Happ; дом/Мегафон отдельно. Пока: стабильность Happ, не OwnVpn.exe.
 
 
 
