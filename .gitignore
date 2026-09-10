@@ -27,3 +27,29 @@ Cursor_TTS/TTS_OFF
 Cursor_TTS/ahk_err.txt
 Cursor_TTS/__pycache__/
 debug-*.log
+
+# Own VPN — в разработке, не в Portfolio
+Own_VPN/
+
+# YouTube Translator runtime / local junk
+YouTube_Translator/yt_profile/
+YouTube_Translator/bookmarks_profile/
+YouTube_Translator/backups/
+YouTube_Translator/_launch_error.log
+YouTube_Translator/**/*.log
+
+# Portfolio News local backups
+Portfolio_News/portfolio_news/static/backups/
+
+# Own VPN — в разработке, не в Portfolio
+Own_VPN/
+
+# YouTube Translator runtime / local junk
+YouTube_Translator/yt_profile/
+YouTube_Translator/bookmarks_profile/
+YouTube_Translator/backups/
+YouTube_Translator/_launch_error.log
+YouTube_Translator/**/*.log
+
+# Portfolio News local backups
+Portfolio_News/portfolio_news/static/backups/
