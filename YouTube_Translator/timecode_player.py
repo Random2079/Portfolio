@@ -181,18 +181,19 @@ def build_player_html(
 <title>Плеер таймкодов — {vid}</title>
 <style>
   :root {{ color-scheme: dark; }}
-  body {{ margin: 0; font-family: Segoe UI, system-ui, sans-serif; background: #111; color: #eee; }}
+  body {{ margin: 0; font-family: Segoe UI, system-ui, sans-serif; background: #0f1115; color: #f1f5f9; }}
   .wrap {{ display: flex; flex-wrap: wrap; min-height: 100vh; }}
-  .player {{ flex: 1 1 420px; background: #000; }}
+  .player {{ flex: 1 1 420px; background: #05070c; }}
   .player iframe, #yt {{ width: 100%; height: min(56vw, 70vh); min-height: 240px; border: 0; }}
-  .side {{ flex: 1 1 280px; max-height: 100vh; overflow: auto; padding: 12px 16px 24px; }}
-  h2 {{ font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #aaa; margin: 8px 0; }}
+  .side {{ flex: 1 1 280px; max-height: 100vh; overflow: auto; padding: 12px 16px 24px;
+           background: #0f1115; border-left: 1px solid #1c1f26; }}
+  h2 {{ font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #64748b; margin: 8px 0; }}
   .mark {{ display: block; width: 100%; text-align: left; margin: 0 0 6px; padding: 8px 10px;
-           border: 0; border-radius: 6px; background: #1e1e1e; color: #eee; cursor: pointer; }}
-  .mark:hover {{ background: #2a3a55; }}
-  .mark .t {{ color: #8ab4ff; font-variant-numeric: tabular-nums; margin-right: 8px; }}
-  .empty {{ color: #888; }}
-  .hint {{ font-size: 12px; color: #888; margin-top: 16px; }}
+           border: 1px solid #1c1f26; border-radius: 8px; background: #151a24; color: #e2e8f0; cursor: pointer; }}
+  .mark:hover {{ background: #1a2230; border-color: #2a3548; }}
+  .mark .t {{ color: #94a3b8; font-variant-numeric: tabular-nums; margin-right: 8px; }}
+  .empty {{ color: #64748b; }}
+  .hint {{ font-size: 12px; color: #64748b; margin-top: 16px; }}
 </style>
 </head>
 <body>

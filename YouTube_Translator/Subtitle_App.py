@@ -23,11 +23,13 @@ YouTube Subtitle Ripper — GUI (CustomTkinter) + yt-dlp.
 """
 from __future__ import annotations
 
+import html
 import io
 import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -36,7 +38,7 @@ from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-from PySide6.QtCore import QEvent, QObject, QSize, QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import QByteArray, QEvent, QObject, QSize, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
@@ -49,6 +51,7 @@ from PySide6.QtGui import (
     QPixmap,
     QShortcut,
 )
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
@@ -77,7 +80,7 @@ from ai_analyze import (  # DeepSeek — без доп. зависимостей
     analyze_subtitles,
     load_saved_analysis,
 )
-from overlay_player import open_overlay_player
+from overlay_player import close_overlay_player, open_overlay_player
 from timecode_player import PLAYER_FILENAME, load_player_data, write_player_html
 
 StatusCb = Callable[[str], None]
@@ -137,14 +140,55 @@ def resolve_subtitle_track(meta: dict, lang_code: str) -> tuple[str, str] | None
     """
     Что качать: (mode, yt_lang_key) или None.
     mode: auto | manual. yt_lang_key — как в JSON yt-dlp (для --sub-lang).
-    Приоритет: сначала auto, иначе manual.
+    Для выбранного языка: сначала обычные (manual), потом авто.
     """
-    auto_key = resolve_lang_key(meta.get("automatic_captions"), lang_code)
-    if auto_key:
-        return "auto", auto_key
     manual_key = resolve_lang_key(meta.get("subtitles"), lang_code)
     if manual_key:
         return "manual", manual_key
+    auto_key = resolve_lang_key(meta.get("automatic_captions"), lang_code)
+    if auto_key:
+        return "auto", auto_key
+    return None
+
+
+def resolve_subtitle_track_with_fallback(
+    meta: dict, preferred: str
+) -> tuple[str, str, str] | None:
+    """
+    (mode, yt_lang_key, effective_lang) с запасными языками.
+
+    en → en (manual/auto) → ru → любой доступный
+    ru → ru (manual/auto) → en → любой доступный
+    """
+    preferred = (preferred or "ru").lower().strip()
+    order = [preferred]
+    if preferred == "en":
+        order.append("ru")
+    elif preferred == "ru":
+        order.append("en")
+    else:
+        order.extend(["en", "ru"])
+
+    seen: set[str] = set()
+    for lang in order:
+        if lang in seen:
+            continue
+        seen.add(lang)
+        hit = resolve_subtitle_track(meta, lang)
+        if hit:
+            return hit[0], hit[1], lang
+
+    # последний шанс: первая попавшаяся дорожка
+    for bucket, mode in (
+        ("subtitles", "manual"),
+        ("automatic_captions", "auto"),
+    ):
+        tracks = meta.get(bucket)
+        if not isinstance(tracks, dict) or not tracks:
+            continue
+        key = next(iter(tracks.keys()))
+        base = str(key).split("-", 1)[0] or str(key)
+        return mode, str(key), base
     return None
 
 
@@ -154,15 +198,190 @@ def pick_subtitle_mode(meta: dict, lang_code: str) -> str | None:
     return resolved[0] if resolved else None
 
 
+def _ytdlp_cookies_file() -> str | None:
+    """Путь к Netscape cookies, если файл уже лежит в ~/.subtitle_ripper/."""
+    folder = os.path.join(os.path.expanduser("~"), ".subtitle_ripper")
+    if not os.path.isdir(folder):
+        return None
+    # Типичные имена экспорта («Get cookies.txt LOCALLY» и наше каноническое)
+    candidates = [
+        "youtube_cookies.txt",
+        "www.youtube.com_cookies.txt",
+        "cookies.txt",
+    ]
+    for name in candidates:
+        path = os.path.join(folder, name)
+        if os.path.isfile(path) and os.path.getsize(path) > 32:
+            return path
+    try:
+        for name in sorted(os.listdir(folder)):
+            low = name.lower()
+            if not low.endswith(".txt"):
+                continue
+            if "cookie" not in low:
+                continue
+            path = os.path.join(folder, name)
+            if os.path.isfile(path) and os.path.getsize(path) > 32:
+                return path
+    except OSError:
+        return None
+    return None
+
+
+def _inspect_youtube_cookies(path: str | None) -> dict:
+    """Метаданные Netscape-cookies без значений (для диагностики bot-check).
+
+    Полноценный логин обычно даёт LOGIN_INFO и/или SID+SAPISID /
+    __Secure-1PSID. Гостевой экспорт (VISITOR_* + пара __Secure-3*)
+    yt-dlp принимает, но YouTube всё равно шлёт «confirm you're not a bot».
+    """
+    info: dict = {
+        "path_name": None,
+        "bytes": 0,
+        "rows": 0,
+        "has_login_info": False,
+        "has_sid": False,
+        "has_sapisid": False,
+        "has_secure_1psid": False,
+        "has_secure_3psid": False,
+        "looks_logged_in": False,
+    }
+    if not path or not os.path.isfile(path):
+        return info
+    info["path_name"] = os.path.basename(path)
+    try:
+        info["bytes"] = os.path.getsize(path)
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return info
+    names: set[str] = set()
+    for ln in text.splitlines():
+        if not ln.strip() or ln.startswith("#"):
+            continue
+        parts = ln.split("\t")
+        if len(parts) < 7:
+            continue
+        info["rows"] += 1
+        names.add(parts[5])
+    info["has_login_info"] = "LOGIN_INFO" in names
+    info["has_sid"] = "SID" in names
+    info["has_sapisid"] = "SAPISID" in names or "__Secure-3PAPISID" in names
+    info["has_secure_1psid"] = "__Secure-1PSID" in names
+    info["has_secure_3psid"] = "__Secure-3PSID" in names
+    # Достаточно типичных маркеров аккаунта (не только visitor)
+    info["looks_logged_in"] = bool(
+        info["has_login_info"]
+        or (info["has_sid"] and info["has_sapisid"])
+        or (info["has_secure_1psid"] and info["has_secure_3psid"])
+    )
+    return info
+
+
+def _yt_profile_cookie_db_paths() -> list[str]:
+    """Файлы Cookies Chromium/Qt WebEngine в yt_profile."""
+    root = os.path.join(app_install_dir(), "yt_profile")
+    return [
+        os.path.join(root, "Cookies"),
+        os.path.join(root, "Network", "Cookies"),
+        os.path.join(root, "Default", "Cookies"),
+        os.path.join(root, "Default", "Network", "Cookies"),
+    ]
+
+
+def _yt_profile_looks_logged_in() -> bool:
+    """True, если в persistent WebView-профиле есть маркеры логина Google/YouTube."""
+    markers = {
+        "LOGIN_INFO",
+        "SID",
+        "SAPISID",
+        "__Secure-1PSID",
+        "__Secure-3PSID",
+        "__Secure-3PAPISID",
+    }
+    found: set[str] = set()
+    for path in _yt_profile_cookie_db_paths():
+        if not os.path.isfile(path):
+            continue
+        try:
+            # readonly URI — меньше шансов подраться с живым Chromium
+            uri = path.replace("\\", "/")
+            if os.name == "nt" and len(uri) >= 2 and uri[1] == ":":
+                uri = "/" + uri
+            conn = sqlite3.connect(f"file:{uri}?mode=ro", uri=True, timeout=0.3)
+            try:
+                rows = conn.execute(
+                    "SELECT name FROM cookies WHERE host_key LIKE '%youtube%' "
+                    "OR host_key LIKE '%google%' LIMIT 200"
+                ).fetchall()
+            finally:
+                conn.close()
+        except (sqlite3.Error, OSError):
+            continue
+        for (name,) in rows:
+            if name in markers:
+                found.add(name)
+        if "LOGIN_INFO" in found:
+            return True
+        if "SID" in found and (
+            "SAPISID" in found or "__Secure-3PAPISID" in found
+        ):
+            return True
+        if "__Secure-1PSID" in found and "__Secure-3PSID" in found:
+            return True
+    return False
+
+
+def _ytdlp_cookies_args() -> list[str]:
+    """Cookies для обхода YouTube bot-check (VPN/VPS IP).
+
+    На Windows Chrome/Edge 127+ cookies с app-bound encryption —
+    `--cookies-from-browser chrome` обычно даёт Failed to decrypt DPAPI.
+    Рабочий путь: Netscape-файл в ~/.subtitle_ripper/
+
+    Приоритет:
+    1) youtube_cookies.txt / www.youtube.com_cookies.txt / *cookie*.txt
+    2) --cookies-from-browser только если задан SUBTITLE_RIPPER_COOKIES_BROWSER
+
+    Выключить всё: SUBTITLE_RIPPER_NO_COOKIES=1
+    """
+    if os.environ.get("SUBTITLE_RIPPER_NO_COOKIES", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return []
+    cookies_file = _ytdlp_cookies_file()
+    if cookies_file:
+        return ["--cookies", cookies_file]
+    browser = os.environ.get("SUBTITLE_RIPPER_COOKIES_BROWSER", "").strip().lower()
+    if browser:
+        return ["--cookies-from-browser", browser]
+    return []
+
+
+def _ytdlp_js_runtime_args() -> list[str]:
+    """YouTube в 2026 часто требует JS runtime (EJS), иначе субы/форматы пустые."""
+    import shutil
+
+    if shutil.which("deno"):
+        return ["--js-runtimes", "deno"]
+    if shutil.which("node"):
+        return ["--js-runtimes", "node"]
+    return []
+
+
 def ytdlp_argv(*args: str) -> list[str]:
     """Команда yt-dlp без Scripts\\yt-dlp.exe.
 
     На Windows exe-обёртка в Scripts часто даёт WinError 5 (Access denied),
     а `python -m yt_dlp` работает. В frozen-сборке остаётся PATH-yt-dlp.
     """
+    cookie = _ytdlp_cookies_args()
+    js = _ytdlp_js_runtime_args()
     if getattr(sys, "frozen", False):
-        return ["yt-dlp", *args]
-    return [sys.executable, "-m", "yt_dlp", *args]
+        return ["yt-dlp", *cookie, *js, *args]
+    return [sys.executable, "-m", "yt_dlp", *cookie, *js, *args]
 
 
 def build_meta_yt_dlp_cmd(url: str, extra: list[str] | None = None) -> list[str]:
@@ -170,11 +389,25 @@ def build_meta_yt_dlp_cmd(url: str, extra: list[str] | None = None) -> list[str]
     return ytdlp_argv(
         "--dump-single-json",
         "--skip-download",
+        "--ignore-no-formats-error",
         "--no-warnings",
         *(extra or []),
         "--",
         url,
     )
+
+
+def _ytdlp_player_client_extra() -> list[str]:
+    """Клиент yt-dlp для YouTube.
+
+    С cookies: web/mweb требуют PO token для Subs → пустой .srt при живых auto maps.
+    web_embedded не требует PO для субтитров (проверено runtime на jTJvyKZDFsY).
+    Без cookies: android+web как раньше.
+    """
+    if _ytdlp_cookies_args():
+        return ["--extractor-args", "youtube:player_client=web_embedded"]
+    return ["--extractor-args", "youtube:player_client=android,web"]
+
 
 
 def fetch_video_meta(
@@ -186,24 +419,60 @@ def fetch_video_meta(
     """Один проход yt-dlp: title + список субтитров (JSON UTF-8).
 
     При ConnectionReset / сбое API — до 3 попыток с разными player_client.
-    Жёсткий timeout процесса не крутим повторно: TLS/сеть всё равно мертвы.
+    С cookies не используем android (не поддерживает cookies).
     """
-    attempts: list[list[str]] = [
-        ["--socket-timeout", "20"],
-        [
-            "--socket-timeout",
-            "20",
-            "--extractor-args",
-            "youtube:player_client=android",
-        ],
-        [
-            "--socket-timeout",
-            "25",
-            "--extractor-args",
-            "youtube:player_client=android,web",
-        ],
-    ]
+    if _ytdlp_cookies_args():
+        attempts: list[list[str]] = [
+            [
+                "--socket-timeout",
+                "20",
+                "--extractor-args",
+                "youtube:player_client=web_embedded",
+            ],
+            ["--socket-timeout", "20"],
+            [
+                "--socket-timeout",
+                "20",
+                "--extractor-args",
+                "youtube:player_client=web",
+            ],
+            [
+                "--socket-timeout",
+                "25",
+                "--extractor-args",
+                "youtube:player_client=web,tv",
+            ],
+            [
+                "--socket-timeout",
+                "25",
+                "--extractor-args",
+                "youtube:player_client=mweb",
+            ],
+        ]
+    else:
+        attempts = [
+            ["--socket-timeout", "20"],
+            [
+                "--socket-timeout",
+                "20",
+                "--extractor-args",
+                "youtube:player_client=android",
+            ],
+            [
+                "--socket-timeout",
+                "25",
+                "--extractor-args",
+                "youtube:player_client=android,web",
+            ],
+            [
+                "--socket-timeout",
+                "25",
+                "--extractor-args",
+                "youtube:player_client=tv",
+            ],
+        ]
     last_exc: BaseException | None = None
+    best_title_meta: dict | None = None
     # на попытку: socket-timeout + запас; суммарно не раздувать до 5 минут
     process_timeout = 55
 
@@ -241,10 +510,36 @@ def fetch_video_meta(
             last_exc = ValueError("yt-dlp вернул пустой JSON метаданных")
             continue
         try:
-            return json.loads(raw)
+            meta = json.loads(raw)
         except json.JSONDecodeError as exc:
             last_exc = exc
             continue
+        # ignore-no-formats может вернуть заглушку без title — это не успех
+        title = (meta.get("title") or "").strip()
+        auto_count = (
+            len(meta.get("automatic_captions") or {})
+            if isinstance(meta.get("automatic_captions"), dict)
+            else -1
+        )
+        manual_count = (
+            len(meta.get("subtitles") or {})
+            if isinstance(meta.get("subtitles"), dict)
+            else -1
+        )
+        if not title or title.lower().startswith("youtube video #"):
+            last_exc = ValueError(
+                _proc_output_text(result.stderr)
+                or "Видео недоступно / нет метаданных (регион, удалено, или cookies устарели)"
+            )
+            continue
+        # Caption maps есть — сразу ок. Иначе продолжаем другие client'ы.
+        if auto_count > 0 or manual_count > 0:
+            return meta
+        if best_title_meta is None:
+            best_title_meta = meta
+
+    if best_title_meta is not None:
+        return best_title_meta
 
     assert last_exc is not None
     raise last_exc
@@ -542,8 +837,7 @@ def build_audio_ytdlp_cmd(url: str, out_dir: str) -> list[str]:
         "8",
         "--fragment-retries",
         "8",
-        "--extractor-args",
-        "youtube:player_client=android,web",
+        *_ytdlp_player_client_extra(),
         "-f",
         "bestaudio/best",
         "-x",
@@ -610,7 +904,7 @@ def resolve_player_target(
 
 
 def _find_srt(folder: str, *lang_candidates: str) -> str | None:
-    """Ищем .srt в папке: точный язык из meta, затем короткий код (ru / en)."""
+    """Ищем субтитры в папке: .srt предпочтительнее, иначе .vtt."""
     try:
         names = os.listdir(folder)
     except OSError:
@@ -621,23 +915,94 @@ def _find_srt(folder: str, *lang_candidates: str) -> str | None:
         if lang and lang not in seen:
             seen.add(lang)
             ordered.append(lang)
-    for lang in ordered:
-        suffix = f".{lang}.srt"
+
+    def _match(ext: str) -> str | None:
+        for lang in ordered:
+            suffix = f".{lang}.{ext}"
+            for name in names:
+                if name.endswith(suffix):
+                    return os.path.join(folder, name)
+        for lang in ordered:
+            needle = f".{lang}."
+            for name in names:
+                if name.endswith(f".{ext}") and needle in name:
+                    return os.path.join(folder, name)
+        # любой файл нужного расширения (если язык в имени странный)
         for name in names:
-            if name.endswith(suffix):
+            if name.endswith(f".{ext}"):
                 return os.path.join(folder, name)
-    for lang in ordered:
-        needle = f".{lang}."
-        for name in names:
-            if name.endswith(".srt") and needle in name:
-                return os.path.join(folder, name)
-    return None
+        return None
+
+    return _match("srt") or _match("vtt")
+
+
+def _ensure_srt(path: str) -> str | None:
+    """Если пришёл .vtt — конвертим в .srt (ffmpeg или простая замена)."""
+    if path.lower().endswith(".srt"):
+        return path
+    if not path.lower().endswith(".vtt"):
+        return None
+    out = path[: -len(".vtt")] + ".srt"
+    import shutil
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg:
+        try:
+            subprocess.run(
+                [ffmpeg, "-y", "-i", path, out],
+                check=True,
+                capture_output=True,
+                creationflags=(0x08000000 if os.name == "nt" else 0),
+            )
+            if os.path.isfile(out) and os.path.getsize(out) > 0:
+                return out
+        except (OSError, subprocess.CalledProcessError):
+            pass
+    # fallback: грубая конвертация без таймкодов WEBVTT-специфики
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+        lines = []
+        idx = 1
+        blocks = re.split(r"\n\s*\n", raw.replace("\r\n", "\n"))
+        for block in blocks:
+            bl = block.strip()
+            if not bl or bl.upper().startswith("WEBVTT") or bl.startswith("NOTE"):
+                continue
+            bl_lines = bl.split("\n")
+            timing = None
+            text_lines: list[str] = []
+            for ln in bl_lines:
+                if "-->" in ln:
+                    timing = ln.replace(".", ",").strip()
+                elif not re.match(r"^\d+$", ln.strip()):
+                    text_lines.append(re.sub(r"<[^>]+>", "", ln).strip())
+            text = " ".join(t for t in text_lines if t)
+            if timing and text:
+                lines.append(f"{idx}\n{timing}\n{text}\n")
+                idx += 1
+        if not lines:
+            return None
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        return out
+    except OSError:
+        return None
 
 
 def _emit(status_cb: StatusCb | None, message: str) -> None:
     print(message)
     if status_cb:
         status_cb(message)
+
+
+def _proc_output_text(blob: object | None) -> str:
+    """stdout/stderr из CompletedProcess: text=True → str, иначе bytes."""
+    if blob is None:
+        return ""
+    if isinstance(blob, bytes):
+        return blob.decode("utf-8", errors="replace").strip()
+    return str(blob).strip()
 
 
 def _run_ytdlp_with_heartbeat(
@@ -1049,7 +1414,7 @@ def download_and_split(
         return False
     except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError) as error:
         if isinstance(error, subprocess.CalledProcessError):
-            details = (error.stderr or b"").decode("utf-8", errors="replace").strip()
+            details = _proc_output_text(error.stderr) or _proc_output_text(error.stdout)
         else:
             details = str(error)
         hint = ""
@@ -1065,7 +1430,44 @@ def download_and_split(
         ):
             hint = (
                 "\nПодсказка: Chrome жив, yt-dlp нет — это не «запрет в приложении». "
-                "TUN/VPN режет TLS у Python. Переподключи Hiddify (TUN), повтори.\n"
+                "TUN/VPN режет TLS у Python. Переподключи VPN (TUN), повтори.\n"
+            )
+        elif "format is not available" in low or "requested format" in low:
+            hint = (
+                "\nПодсказка: конфликт cookies и player_client=android. "
+                "В новой версии с cookies идёт web/tv. Перезапусти SR и повтори.\n"
+            )
+        elif "unavailable" in low or "page needs to be reloaded" in low:
+            hint = (
+                "\nПодсказка: ролик недоступен для этого IP/аккаунта, "
+                "или cookies устарели. Обнови экспорт cookies с youtube.com "
+                "в ~/.subtitle_ripper/ или попробуй другой VPN / без VPN.\n"
+            )
+        elif (
+            "sign in to confirm" in low
+            or "not a bot" in low
+            or ("cookies" in low and "authentication" in low)
+        ):
+            cinfo = _inspect_youtube_cookies(_ytdlp_cookies_file())
+            if cinfo.get("path_name") and not cinfo.get("looks_logged_in"):
+                hint = (
+                    "\nПодсказка: cookies найдены, но без логина YouTube "
+                    f"({cinfo.get('rows')} шт., нет LOGIN_INFO/SID). "
+                    "Переэкспортируй cookies, будучи залогиненным на youtube.com, "
+                    "в ~/.subtitle_ripper/www.youtube.com_cookies.txt\n"
+                )
+            else:
+                hint = (
+                    "\nПодсказка: YouTube bot-check (часто IP VPS/Amnezia).\n"
+                    "Нужен свежий экспорт cookies (залогиненный аккаунт) в "
+                    "~/.subtitle_ripper/www.youtube.com_cookies.txt\n"
+                )
+        elif (
+            "could not copy" in low and "cookie" in low
+        ) or ("failed to decrypt" in low and "dpapi" in low):
+            hint = (
+                "\nПодсказка: читать cookies прямо из Chrome/Edge на Win нельзя "
+                "(DPAPI / app-bound). Нужен файл cookies.txt в ~/.subtitle_ripper/\n"
             )
         sys.stderr.write(
             f"Ошибка: не удалось получить метаданные видео.\n{details}\n{hint}"
@@ -1074,14 +1476,35 @@ def download_and_split(
     timings["meta"] = time.perf_counter() - t0
 
     video_title = sanitize_filename((meta.get("title") or "").strip())
-    resolved = resolve_subtitle_track(meta, lang_code)
-    if resolved is None:
-        sys.stderr.write(
-            f"Ошибка: субтитры на языке '{lang_code}' отсутствуют "
-            f"(ни авто, ни обычные).\n"
+    cookie_path = _ytdlp_cookies_file()
+    cookie_info = _inspect_youtube_cookies(cookie_path)
+    if cookie_path and not cookie_info.get("looks_logged_in"):
+        _emit(
+            status_cb,
+            "Статус: cookies есть, но без логина YouTube (нет LOGIN_INFO/SID) — "
+            "часто bot-check. Лучше переэкспортировать, будучи залогиненным.",
         )
-        return False
-    mode, yt_lang = resolved
+    resolved = resolve_subtitle_track_with_fallback(meta, lang_code)
+    blind_subs = False
+    if resolved is None:
+        # Meta часто отдаёт title, но пустые caption maps (YouTube/EJS/VPN).
+        # Тогда всё равно пробуем write-auto-subs / write-subs.
+        blind_subs = True
+        mode = "auto"
+        yt_lang = lang_code
+        effective_lang = lang_code
+        _emit(
+            status_cb,
+            "Статус: в meta нет списка дорожек → пробую скачать авто/обычные субы вслепую…",
+        )
+    else:
+        mode, yt_lang, effective_lang = resolved
+        if effective_lang != lang_code:
+            _emit(
+                status_cb,
+                f"Статус: для '{lang_code}' дорожки нет → беру {effective_lang} "
+                f"({'авто' if mode == 'auto' else 'обычные'})",
+            )
 
     folder_name = f"субтитры_{video_title} [{video_id}]"
     folder_path = os.path.join(work_root, folder_name)
@@ -1095,22 +1518,47 @@ def download_and_split(
     )
     t1 = time.perf_counter()
 
-    write_flag = "--write-auto-subs" if mode == "auto" else "--write-subs"
     out_template = os.path.join(folder_path, "temp_subtitles")
-    cmd = ytdlp_argv(
-        write_flag,
-        "--sub-lang",
-        yt_lang,
-        "--convert-subs",
-        "srt",
-        "--skip-download",
-        "--socket-timeout",
-        "30",
-        "-o",
-        out_template,
-        "--",
-        url,
-    )
+    if blind_subs:
+        # en + ru + all auto/manual — что удастся
+        sub_langs = f"{lang_code}.*,en.*,ru.*,all"
+        cmd = ytdlp_argv(
+            "--write-auto-subs",
+            "--write-subs",
+            "--sub-langs",
+            sub_langs,
+            "--convert-subs",
+            "srt",
+            "--skip-download",
+            "--ignore-no-formats-error",
+            "--socket-timeout",
+            "45",
+            *_ytdlp_player_client_extra(),
+            "-o",
+            out_template,
+            "--",
+            url,
+        )
+    else:
+        write_flag = "--write-auto-subs" if mode == "auto" else "--write-subs"
+        # en → en.* чтобы поймать en-US / en-orig; точный ключ из meta тоже передаём
+        sub_langs = yt_lang if "-" in yt_lang else f"{yt_lang}.*"
+        cmd = ytdlp_argv(
+            write_flag,
+            "--sub-langs",
+            sub_langs,
+            "--convert-subs",
+            "srt",
+            "--skip-download",
+            "--ignore-no-formats-error",
+            "--socket-timeout",
+            "45",
+            *_ytdlp_player_client_extra(),
+            "-o",
+            out_template,
+            "--",
+            url,
+        )
     try:
         result = _run_ytdlp_with_heartbeat(
             cmd,
@@ -1139,15 +1587,56 @@ def download_and_split(
     timings["subs"] = time.perf_counter() - t1
 
     if result.returncode != 0:
-        sys.stderr.write(f"Ошибка yt-dlp: {result.stderr}\n")
+        err = _proc_output_text(result.stderr) or _proc_output_text(result.stdout)
+        sys.stderr.write(f"Ошибка yt-dlp: {err}\n")
         return False
 
-    srt_file = _find_srt(folder_path, yt_lang, lang_code)
+    found = _find_srt(folder_path, yt_lang, effective_lang, lang_code, "en", "ru")
+    srt_file = _ensure_srt(found) if found else None
     if not srt_file:
-        sys.stderr.write(
-            f"Ошибка: yt-dlp не сохранил .srt для языка '{yt_lang}' "
-            f"(искали также '{lang_code}').\n"
-        )
+        try:
+            leftover = ", ".join(os.listdir(folder_path)) or "(пусто)"
+        except OSError:
+            leftover = "(нет доступа к папке)"
+        err_tail = _proc_output_text(result.stderr)
+        if blind_subs:
+            sys.stderr.write(
+                f"Ошибка: субтитры отсутствуют совсем "
+                f"(meta пустая и слепое скачивание не дало .srt/.vtt; "
+                f"искали '{lang_code}' / en / ru).\n"
+                f"В папке: {leftover}\n"
+            )
+        else:
+            sys.stderr.write(
+                f"Ошибка: yt-dlp не сохранил .srt/.vtt для языка '{yt_lang}' "
+                f"(искали также '{effective_lang}' / '{lang_code}').\n"
+                f"В папке: {leftover}\n"
+            )
+        if err_tail:
+            sys.stderr.write(f"{err_tail}\n")
+        err_low = (err_tail or "").lower()
+        cinfo = _inspect_youtube_cookies(_ytdlp_cookies_file())
+        if (
+            "sign in to confirm" in err_low
+            or "not a bot" in err_low
+            or not cinfo.get("looks_logged_in")
+        ):
+            sys.stderr.write(
+                "\nПричина: YouTube bot-check. Файл cookies есть, но это "
+                "гостевая/неполная сессия (нет LOGIN_INFO / SID / __Secure-1PSID).\n"
+                "Как починить:\n"
+                "1) В браузере зайди на youtube.com под аккаунтом (не инкогнито).\n"
+                "2) Расширение «Get cookies.txt LOCALLY» → Export для youtube.com.\n"
+                "3) Положи файл в %USERPROFILE%\\.subtitle_ripper\\ "
+                "как www.youtube.com_cookies.txt (замени старый).\n"
+                "4) Если качаешь через Amnezia/VPS — cookies лучше снять с того же "
+                "IP (VPN включён) или попробуй без VPN.\n"
+            )
+        elif not _ytdlp_js_runtime_args():
+            sys.stderr.write(
+                "Подсказка: нет JS runtime (deno/node) — YouTube часто "
+                "не отдаёт субтитры. Node у тебя обычно есть; перезапусти SR.\n"
+            )
         return False
 
     # --- 3) разбор srt → plain + таймкоды / части / буферный файл ---
@@ -1168,7 +1657,7 @@ def download_and_split(
         pass
 
     n_parts = write_output_texts(
-        folder_path, clean_text, timed_text, lang_code, max_chars=max_chars
+        folder_path, clean_text, timed_text, effective_lang, max_chars=max_chars
     )
     try:
         write_player_html(folder_path, video_id)
@@ -1241,17 +1730,50 @@ def download_audio(
 # =====================================================================
 # 3. GUI — PySide6
 # =====================================================================
+# Stroke-иконки в стиле оверлея (Slate), для chrome плеера
+_UI_SVG_STROKE = "#cbd5e1"
+_UI_SVG_ICONS: dict[str, str] = {
+    # Сайдбар открыт → свернуть (шеврон вправо / «закрыть панель»)
+    "panel_collapse": (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+        f'stroke="{_UI_SVG_STROKE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        f'<rect x="3" y="4" width="18" height="16" rx="2"/>'
+        f'<path d="M15 4v16"/><polyline points="10 9 13 12 10 15"/></svg>'
+    ),
+    # Сайдбар свёрнут → развернуть
+    "panel_expand": (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+        f'stroke="{_UI_SVG_STROKE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        f'<rect x="3" y="4" width="18" height="16" rx="2"/>'
+        f'<path d="M9 4v16"/><polyline points="14 9 11 12 14 15"/></svg>'
+    ),
+}
+
+
+def _ui_svg_icon(name: str, size: int = 18) -> QIcon:
+    svg = _UI_SVG_ICONS.get(name)
+    if not svg:
+        return QIcon()
+    renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    renderer.render(painter)
+    painter.end()
+    return QIcon(pm)
+
+
 def apply_primary_glow(btn: QPushButton, *, strong: bool = False) -> None:
-    """Лёгкое зелёное свечение на primary-кнопках (как на моке)."""
+    """Лёгкая мягкая тень на primary (Slate A — без зелёного glow)."""
     effect = QGraphicsDropShadowEffect(btn)
-    effect.setBlurRadius(22 if strong else 16)
-    effect.setOffset(0, 0)
-    effect.setColor(QColor(16, 185, 129, 200 if strong else 150))
+    effect.setBlurRadius(18 if strong else 12)
+    effect.setOffset(0, 1)
+    effect.setColor(QColor(15, 23, 42, 160 if strong else 110))
     btn.setGraphicsEffect(effect)
 
 
 def make_app_icon() -> QIcon:
-    """Эмблема SR (зелёное пятно) вместо дефолтной иконки Python/Qt в title bar."""
+    """Эмблема SR (Slate) вместо дефолтной иконки Python/Qt в title bar."""
     icon = QIcon()
     for size in (16, 24, 32, 48, 64, 128):
         pm = QPixmap(size, size)
@@ -1260,7 +1782,7 @@ def make_app_icon() -> QIcon:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         margin = max(1, size // 16)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#059669"))
+        painter.setBrush(QColor("#334155"))
         painter.drawRoundedRect(
             margin,
             margin,
@@ -1270,7 +1792,7 @@ def make_app_icon() -> QIcon:
             size * 0.22,
         )
         # лёгкий блик сверху
-        painter.setBrush(QColor(52, 211, 153, 90))
+        painter.setBrush(QColor(148, 163, 184, 70))
         painter.drawRoundedRect(
             margin,
             margin,
@@ -1282,7 +1804,7 @@ def make_app_icon() -> QIcon:
         font = QFont("Segoe UI", max(7, int(size * 0.34)))
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(QColor("#042f1a"))
+        painter.setPen(QColor("#f8fafc"))
         painter.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, "SR")
         painter.end()
         icon.addPixmap(pm)
@@ -1290,84 +1812,90 @@ def make_app_icon() -> QIcon:
 
 
 def configure_qt_theme(app: QApplication) -> None:
-    """Тема C: тёмный фон + зелёный accent + бренд-пятно SR."""
+    """Тема A — Slate: спокойный тёмный UI главной + плеера (без зелёного accent)."""
     app.setStyle("Fusion")
     palette = QPalette()
-    palette.setColor(QPalette.Window, QColor("#111318"))
-    palette.setColor(QPalette.WindowText, QColor("#f3f4f6"))
-    palette.setColor(QPalette.Base, QColor("#161a20"))
-    palette.setColor(QPalette.AlternateBase, QColor("#1a1e27"))
-    palette.setColor(QPalette.Text, QColor("#f3f4f6"))
-    palette.setColor(QPalette.Button, QColor("#1f2430"))
-    palette.setColor(QPalette.ButtonText, QColor("#f3f4f6"))
-    palette.setColor(QPalette.Highlight, QColor("#059669"))
-    palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    palette.setColor(QPalette.Window, QColor("#0f1115"))
+    palette.setColor(QPalette.WindowText, QColor("#f1f5f9"))
+    palette.setColor(QPalette.Base, QColor("#151a24"))
+    palette.setColor(QPalette.AlternateBase, QColor("#1c212b"))
+    palette.setColor(QPalette.Text, QColor("#f1f5f9"))
+    palette.setColor(QPalette.Button, QColor("#1e293b"))
+    palette.setColor(QPalette.ButtonText, QColor("#f1f5f9"))
+    palette.setColor(QPalette.Highlight, QColor("#334155"))
+    palette.setColor(QPalette.HighlightedText, QColor("#f8fafc"))
     app.setPalette(palette)
     app.setStyleSheet(
         """
-        QWidget { background: #111318; color: #f3f4f6; font-size: 14px; }
+        QWidget { background: #0f1115; color: #f1f5f9; font-size: 14px; }
         QLabel[muted="true"] { color: #64748b; }
         QLabel[status_bar="true"] { color: #64748b; font-size: 12px; }
         QLabel[player_title="true"] { color: #e2e8f0; }
         QLabel[brand_mark="true"] {
             background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #34d399, stop:1 #059669);
-            color: #042f1a;
+                stop:0 #475569, stop:1 #1e293b);
+            color: #f8fafc;
             border-radius: 9px;
             font-weight: 800;
             font-size: 13px;
         }
         QLineEdit {
-            background: #1a1e27;
-            border: 1px solid #2d3340;
+            background: #151a24;
+            border: 1px solid #2a3548;
             border-radius: 10px;
             padding: 10px 12px;
-            selection-background-color: #059669;
+            color: #cbd5e1;
+            selection-background-color: #334155;
         }
         QLineEdit:focus {
-            border: 1px solid #10b981;
-            background: #1f2430;
+            border: 1px solid #475569;
+            background: #1a2230;
         }
         QPushButton {
-            background: #059669;
-            color: white;
-            border: 1px solid #34d399;
+            background: #1e293b;
+            color: #f1f5f9;
+            border: 1px solid #334155;
             border-radius: 10px;
             padding: 10px 14px;
             min-height: 18px;
         }
-        QPushButton:hover { background: #10b981; border: 1px solid #6ee7b7; }
+        QPushButton:hover { background: #334155; border: 1px solid #475569; }
         QPushButton:disabled {
-            background: #3d4450;
-            color: #b7becb;
-            border: 1px solid #3d4450;
+            background: #1c212b;
+            color: #64748b;
+            border: 1px solid #1c212b;
         }
         QPushButton[fallback="true"] {
-            background: #1f2430;
-            color: #e2e8f0;
-            border: 1px solid #2d3340;
+            background: #151a24;
+            color: #cbd5e1;
+            border: 1px solid #2a3548;
         }
         QPushButton[fallback="true"]:hover {
-            background: #2a3140;
-            border: 1px solid #3d4450;
+            background: #1a2230;
+            border: 1px solid #334155;
         }
         QPushButton[segmented="true"] {
-            background: #1f2430;
+            background: #1c212b;
             color: #94a3b8;
-            min-width: 52px;
-            border: 2px solid transparent;
+            min-width: 56px;
+            padding: 8px 14px;
+            border: 1px solid transparent;
         }
         QPushButton[segmented="true"]:hover {
-            background: #2a3140;
+            background: #1a2230;
         }
         QPushButton[segmented="true"][selected="true"] {
-            background: #10b981;
-            color: #042f1a;
-            border: 2px solid #6ee7b7;
+            background: #334155;
+            color: #f8fafc;
+            border: 1px solid #64748b;
+        }
+        QPushButton[ai_mode="true"] {
+            min-width: 96px;
+            padding: 8px 16px;
         }
         QPushButton[selected="true"] {
-            background: #059669;
-            color: white;
+            background: #334155;
+            color: #f8fafc;
         }
         QPushButton[mark="true"] {
             text-align: left;
@@ -1380,24 +1908,29 @@ def configure_qt_theme(app: QApplication) -> None:
             border-radius: 8px;
         }
         QPushButton[sidebar_tab="true"] {
-            background: #1f2430;
-            color: #d1d5db;
-            border: none;
+            background: #151a24;
+            color: #cbd5e1;
+            border: 1px solid #1c1f26;
             border-radius: 8px;
-            padding: 10px 4px;
-            min-width: 28px;
-            max-width: 34px;
+            padding: 6px 4px;
+            min-width: 32px;
+            max-width: 36px;
         }
         QPushButton[sidebar_tab="true"]:hover {
-            background: #2a3140;
+            background: #1a2230;
+            border-color: #2a3548;
         }
         QPushButton[sidebar_tab="true"][selected="true"] {
-            background: #059669;
-            color: white;
+            background: #334155;
+            color: #f8fafc;
         }
         QTextBrowser#ai_summary {
             padding: 8px;
             line-height: 1.45;
+            background: #151a24;
+            border: 1px solid #1c1f26;
+            border-radius: 8px;
+            color: #cbd5e1;
         }
         QPushButton[cancel_busy="true"] {
             background: #b91c1c;
@@ -1405,19 +1938,22 @@ def configure_qt_theme(app: QApplication) -> None:
             min-width: 96px;
             padding: 8px 14px;
             border-radius: 8px;
+            border: 1px solid #991b1b;
         }
         QPushButton[cancel_busy="true"]:hover {
             background: #dc2626;
         }
         QPushButton[motion_busy="true"] {
             background: #b45309;
+            border: 1px solid #92400e;
         }
         QPushButton[fallback="true"][motion_busy="true"] {
             background: #b45309;
+            border: 1px solid #92400e;
         }
         QFrame[card="true"] {
-            background: #0d0f14;
-            border: 1px solid #2d3340;
+            background: #0c0e12;
+            border: 1px solid #1c1f26;
             border-radius: 12px;
         }
         QScrollArea { border: none; }
@@ -1542,11 +2078,6 @@ class SubtitleApp(QMainWindow):
         if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Space:
             if isinstance(obj, QPushButton):
                 return True
-        if event.type() == QEvent.Type.Resize:
-            if hasattr(self, "ai_marks_area") and obj is self.ai_marks_area.viewport():
-                self._refresh_mark_button_labels(self.timed_layout_ai)
-            elif hasattr(self, "all_marks_area") and obj is self.all_marks_area.viewport():
-                self._refresh_mark_button_labels(self.timed_layout_all)
         return super().eventFilter(obj, event)
 
     def _ensure_window_on_screen(self) -> None:
@@ -1853,6 +2384,7 @@ class SubtitleApp(QMainWindow):
         self._login_mode = False  # False=войти, True=назад к видео
         self.login_btn.clicked.connect(self._login_btn_clicked)
         row1.addWidget(self.login_btn)
+        self._refresh_login_btn_visibility()
         layout.addWidget(self.player_chrome_row1)
 
         self._player_page_layout = layout
@@ -1860,7 +2392,7 @@ class SubtitleApp(QMainWindow):
         self.player_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.player_splitter.setHandleWidth(6)
         self.player_splitter.setStyleSheet(
-            "QSplitter::handle { background: #10b981; border-radius: 3px; }"
+            "QSplitter::handle { background: #2a3548; border-radius: 3px; }"
         )
 
         video_card = QFrame()
@@ -1905,7 +2437,8 @@ class SubtitleApp(QMainWindow):
         sidebar_layout.setContentsMargins(10, 10, 10, 10)
         sidebar_layout.setSpacing(6)
 
-        mode_row = QHBoxLayout()
+        self.ai_mode_bar = QWidget()
+        mode_row = QHBoxLayout(self.ai_mode_bar)
         mode_row.setContentsMargins(0, 0, 0, 0)
         mode_row.setSpacing(6)
         mode_lbl = QLabel("ИИ:")
@@ -1914,6 +2447,7 @@ class SubtitleApp(QMainWindow):
 
         self.ai_invest_btn = QPushButton("Инвест")
         self.ai_invest_btn.setProperty("segmented", True)
+        self.ai_invest_btn.setProperty("ai_mode", True)
         self.ai_invest_btn.setProperty("selected", True)
         self.ai_invest_btn.setToolTip("Режим ИИ: инвест-фильтр (чекпоинт)")
         self.ai_invest_btn.clicked.connect(lambda: self._set_ai_mode("invest"))
@@ -1921,58 +2455,24 @@ class SubtitleApp(QMainWindow):
 
         self.ai_general_btn = QPushButton("Обычный")
         self.ai_general_btn.setProperty("segmented", True)
+        self.ai_general_btn.setProperty("ai_mode", True)
         self.ai_general_btn.setProperty("selected", False)
         self.ai_general_btn.setToolTip("Режим ИИ: обычный разбор")
         self.ai_general_btn.clicked.connect(lambda: self._set_ai_mode("general"))
         mode_row.addWidget(self.ai_general_btn)
         mode_row.addStretch()
-        sidebar_layout.addLayout(mode_row)
+        self.ai_mode_bar.setVisible(False)  # только после «✨ ИИ» / есть разбор
+        sidebar_layout.addWidget(self.ai_mode_bar)
         self._ai_mode_lbl = mode_lbl
 
-        self.sidebar_tabs = QTabWidget()
-        self.sidebar_tabs.setDocumentMode(True)
-
-        analysis_tab = QWidget()
-        analysis_layout = QVBoxLayout(analysis_tab)
-        analysis_layout.setContentsMargins(6, 10, 6, 6)
+        # Карточка №3: без вкладок «ИИ-моменты» / «Все» — только текст разбора
         self.ai_summary = QTextBrowser()
         self.ai_summary.setObjectName("ai_summary")
         self.ai_summary.setOpenExternalLinks(False)
-        self.ai_summary.setPlaceholderText("Нажми «✨ ИИ» или открой ролик с сохранённым разбором")
-        analysis_layout.addWidget(self.ai_summary)
-        self.sidebar_tabs.addTab(analysis_tab, "Разбор")
-
-        ai_marks_tab = QWidget()
-        ai_marks_outer = QVBoxLayout(ai_marks_tab)
-        ai_marks_outer.setContentsMargins(0, 0, 0, 0)
-        self.ai_marks_area = QScrollArea()
-        self.ai_marks_area.setWidgetResizable(True)
-        self.ai_marks_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.ai_marks_inner = QWidget()
-        self.timed_layout_ai = QVBoxLayout(self.ai_marks_inner)
-        self.timed_layout_ai.setContentsMargins(0, 0, 0, 0)
-        self.timed_layout_ai.setSpacing(6)
-        self.ai_marks_area.setWidget(self.ai_marks_inner)
-        self.ai_marks_area.viewport().installEventFilter(self)
-        ai_marks_outer.addWidget(self.ai_marks_area)
-        self.sidebar_tabs.addTab(ai_marks_tab, "ИИ-моменты")
-
-        all_marks_tab = QWidget()
-        all_marks_outer = QVBoxLayout(all_marks_tab)
-        all_marks_outer.setContentsMargins(0, 0, 0, 0)
-        self.all_marks_area = QScrollArea()
-        self.all_marks_area.setWidgetResizable(True)
-        self.all_marks_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.all_marks_inner = QWidget()
-        self.timed_layout_all = QVBoxLayout(self.all_marks_inner)
-        self.timed_layout_all.setContentsMargins(0, 0, 0, 0)
-        self.timed_layout_all.setSpacing(6)
-        self.all_marks_area.setWidget(self.all_marks_inner)
-        self.all_marks_area.viewport().installEventFilter(self)
-        all_marks_outer.addWidget(self.all_marks_area)
-        self.sidebar_tabs.addTab(all_marks_tab, "Все")
-
-        sidebar_layout.addWidget(self.sidebar_tabs)
+        self.ai_summary.setPlaceholderText(
+            "Нажми «✨ ИИ» или открой ролик с сохранённым разбором"
+        )
+        sidebar_layout.addWidget(self.ai_summary, 1)
 
         self.player_splitter.addWidget(video_card)
         self.player_splitter.addWidget(sidebar)
@@ -1981,11 +2481,13 @@ class SubtitleApp(QMainWindow):
         self.player_splitter.setSizes([800, 200])
         self._splitter_sizes_with_sidebar = [800, 200]
 
-        # Вкладка справа: свернуть/развернуть панель разбора (не theater)
-        self.sidebar_toggle_btn = QPushButton("«")
+        # Справа: свернуть/развернуть панель (SVG, без слова «Разбор»)
+        self.sidebar_toggle_btn = QPushButton()
         self.sidebar_toggle_btn.setProperty("sidebar_tab", True)
         self.sidebar_toggle_btn.setProperty("fallback", True)
         self.sidebar_toggle_btn.setToolTip("Панель разбора (R)")
+        self.sidebar_toggle_btn.setIcon(_ui_svg_icon("panel_collapse", 18))
+        self.sidebar_toggle_btn.setIconSize(QSize(18, 18))
         self.sidebar_toggle_btn.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
         )
@@ -2000,6 +2502,7 @@ class SubtitleApp(QMainWindow):
         layout.addWidget(split_row, 1)
 
         self._set_ai_mode("invest")
+        self._sync_sidebar_toggle_btn()
         self._disable_space_button_activate(
             self.back_btn,
             self.theater_btn,
@@ -2184,6 +2687,11 @@ class SubtitleApp(QMainWindow):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
             btn.update()
+
+    def _set_ai_mode_bar_visible(self, visible: bool) -> None:
+        """Инвест/Обычный — только когда идёт/есть разбор, иначе пустой сайдбар."""
+        if hasattr(self, "ai_mode_bar"):
+            self.ai_mode_bar.setVisible(bool(visible))
 
     def _polish_btn(self, btn: QPushButton) -> None:
         btn.style().unpolish(btn)
@@ -2421,10 +2929,13 @@ class SubtitleApp(QMainWindow):
         if not hasattr(self, "sidebar_toggle_btn"):
             return
         if self._sidebar_collapsed:
-            self.sidebar_toggle_btn.setText("Р\nа\nз\nб\nо\nр")
+            self.sidebar_toggle_btn.setIcon(_ui_svg_icon("panel_expand", 18))
+            self.sidebar_toggle_btn.setToolTip("Показать панель разбора (R)")
         else:
-            self.sidebar_toggle_btn.setText("«")
-        self.sidebar_toggle_btn.setToolTip("Панель разбора (R)")
+            self.sidebar_toggle_btn.setIcon(_ui_svg_icon("panel_collapse", 18))
+            self.sidebar_toggle_btn.setToolTip("Свернуть панель разбора (R)")
+        self.sidebar_toggle_btn.setIconSize(QSize(18, 18))
+        self.sidebar_toggle_btn.setText("")
 
     def _theater_btn_tooltip_idle(self) -> str:
         return (
@@ -2569,99 +3080,16 @@ class SubtitleApp(QMainWindow):
             return
         self._toggle_player_theater()
 
-    def _clear_layout_buttons(self, layout: QVBoxLayout) -> None:
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-
-    def _mark_elide_width(self) -> int:
-        """Ширина для … в кнопках таймкодов — по реальной ширине сайдбара."""
-        area = None
-        if hasattr(self, "sidebar_tabs"):
-            idx = self.sidebar_tabs.currentIndex()
-            if idx == 1 and hasattr(self, "ai_marks_area"):
-                area = self.ai_marks_area
-            elif idx == 2 and hasattr(self, "all_marks_area"):
-                area = self.all_marks_area
-        if area is None and hasattr(self, "all_marks_area"):
-            area = self.all_marks_area
-        if area is not None:
-            w = area.viewport().width()
-            if w > 40:
-                return max(60, w - 28)
-        return 180
-
-    def _elide_mark_label(self, full_text: str, width: int | None = None) -> str:
-        w = width if width is not None else self._mark_elide_width()
-        return QFontMetrics(self.font()).elidedText(
-            full_text,
-            Qt.TextElideMode.ElideRight,
-            w,
-        )
-
-    def _refresh_mark_button_labels(self, layout: QVBoxLayout | None = None) -> None:
-        """Пересчитать … при ресайзе сайдбара."""
-        layouts = [layout] if layout is not None else []
-        if not layouts:
-            if hasattr(self, "timed_layout_ai"):
-                layouts.append(self.timed_layout_ai)
-            if hasattr(self, "timed_layout_all"):
-                layouts.append(self.timed_layout_all)
-        w = self._mark_elide_width()
-        for lay in layouts:
-            for i in range(lay.count()):
-                item = lay.itemAt(i)
-                btn = item.widget() if item else None
-                if btn is None or not isinstance(btn, QPushButton):
-                    continue
-                full = btn.property("full_text")
-                if full:
-                    btn.setText(self._elide_mark_label(str(full), w))
-
-    def _fill_mark_buttons(self, layout: QVBoxLayout, marks: list[dict], empty_text: str) -> None:
-        self._clear_layout_buttons(layout)
-        if not marks:
-            label = QLabel(empty_text)
-            label.setProperty("muted", True)
-            label.setWordWrap(True)
-            layout.addWidget(label)
-            layout.addStretch()
-            return
-        w = self._mark_elide_width()
-        for mark in marks:
-            sec = int(mark["seconds"])
-            stamp = format_mmss(sec)
-            label = str(mark.get("label") or "").strip()
-            # короткий тайтл: без простыни — оставляем суть, Qt дорисует …
-            if len(label) > 72:
-                label = label[:69].rstrip() + "…"
-            full_text = f"[{stamp}] {label}" if label else f"[{stamp}]"
-            btn = QPushButton(self._elide_mark_label(full_text, w))
-            btn.setProperty("mark", True)
-            btn.setProperty("full_text", full_text)
-            btn.setToolTip(full_text)
-            btn.setAutoDefault(False)
-            btn.setDefault(False)
-            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            btn.style().unpolish(btn)
-            btn.style().polish(btn)
-            btn.clicked.connect(lambda _=False, s=sec: self.seek_in_player(s))
-            layout.addWidget(btn)
-        layout.addStretch()
-        # после layout ширина viewport может стать реальной
-        QTimer.singleShot(0, lambda: self._refresh_mark_button_labels(layout))
-
     def _build_ai_summary_html(self, analysis: dict) -> str:
-        """HTML разбора для вкладки «Разбор»."""
+        """HTML разбора для сайдбара плеера."""
         mode = analysis.get("mode") or "general"
         kind = analysis.get("content_kind") or mode
-        verdict = str(analysis.get("verdict_1_line") or "").strip()
-        summary = str(analysis.get("summary") or "").strip()
-        action = str(analysis.get("action") or "").strip()
-        fit = str(analysis.get("checkpoint_fit") or "").strip()
-        link = str(analysis.get("portfolio_link") or "").strip()
+        e = html.escape
+        verdict = e(str(analysis.get("verdict_1_line") or "").strip())
+        summary = e(str(analysis.get("summary") or "").strip())
+        action = e(str(analysis.get("action") or "").strip())
+        fit = e(str(analysis.get("checkpoint_fit") or "").strip())
+        link = e(str(analysis.get("portfolio_link") or "").strip())
         facts = analysis.get("facts_usable") or []
         ignore = analysis.get("opinions_ignore") or []
         flags = analysis.get("red_flags_seen") or []
@@ -2669,14 +3097,14 @@ class SubtitleApp(QMainWindow):
         assets = analysis.get("assets") or []
         claims = analysis.get("claims") or []
         takeaways = analysis.get("takeaways") or []
-        holds_up = str(analysis.get("holds_up") or "").strip()
-        framing = str(analysis.get("framing") or "").strip()
-        thinking = str(analysis.get("what_it_changes_in_thinking") or "").strip()
+        holds_up = e(str(analysis.get("holds_up") or "").strip())
+        framing = e(str(analysis.get("framing") or "").strip())
+        thinking = e(str(analysis.get("what_it_changes_in_thinking") or "").strip())
 
         def _ul(title: str, items: list) -> str:
             if not items:
                 return ""
-            bullets = "".join(f"<li>{str(t)}</li>" for t in items)
+            bullets = "".join(f"<li>{e(str(t))}</li>" for t in items)
             return f"<b>{title}</b><ul>{bullets}</ul>"
 
         parts: list[str] = []
@@ -2695,7 +3123,10 @@ class SubtitleApp(QMainWindow):
             if meta:
                 parts.append(" · ".join(meta))
             if assets:
-                parts.append("<b>Активы из текста</b><br/>" + ", ".join(str(a) for a in assets))
+                parts.append(
+                    "<b>Активы из текста</b><br/>"
+                    + ", ".join(e(str(a)) for a in assets)
+                )
             for title, items in (
                 ("Факты (usable)", facts),
                 ("Тезисы автора", claims),
@@ -2730,30 +3161,18 @@ class SubtitleApp(QMainWindow):
         body = "<br/><br/>".join(parts) if parts else "<i>Пустой ответ ИИ</i>"
         return f'<div style="line-height:1.45;">{body}</div>'
 
-    def _ai_highlights_to_marks(self, analysis: dict) -> list[dict]:
-        highlights = analysis.get("highlights") or []
-        return [
-            {"seconds": int(h["seconds"]), "label": str(h.get("label", ""))}
-            for h in highlights
-            if isinstance(h, dict) and "seconds" in h
-        ]
-
-    def _apply_ai_analysis(self, analysis: dict, *, switch_tab: bool = True) -> None:
-        """Заполняет вкладки разбора и ИИ-моментов, сохраняет в память."""
+    def _apply_ai_analysis(self, analysis: dict) -> None:
+        """Показывает текст разбора в сайдбаре (без вкладок моментов)."""
         self._last_ai_analysis = analysis
+        mode = analysis.get("mode")
+        if mode in ("invest", "general"):
+            self._set_ai_mode(str(mode))
+        self._set_ai_mode_bar_visible(True)
         self.ai_summary.setHtml(self._build_ai_summary_html(analysis))
-        marks = self._ai_highlights_to_marks(analysis)
-        self._fill_mark_buttons(
-            self.timed_layout_ai,
-            marks,
-            "Нет моментов для прыжка — смотри вкладку «Разбор»",
-        )
-        if switch_tab:
-            self.sidebar_tabs.setCurrentIndex(0)
 
     def _fill_ai_analysis(self, analysis: dict) -> None:
-        """Показывает вывод ИИ + таймкоды моментов (после API)."""
-        self._apply_ai_analysis(analysis, switch_tab=True)
+        """Показывает вывод ИИ (после API)."""
+        self._apply_ai_analysis(analysis)
 
     def on_clear(self) -> None:
         if self._busy:
@@ -2785,6 +3204,7 @@ class SubtitleApp(QMainWindow):
         if hasattr(self, "login_btn"):
             self.login_btn.setText("Войти")
             self.login_btn.setToolTip("Войти в YouTube")
+            self._refresh_login_btn_visibility()
 
     def show_download_view(self) -> None:
         if self.isFullScreen():
@@ -2801,6 +3221,7 @@ class SubtitleApp(QMainWindow):
         # Сначала переключить stack — иначе resize→moveEvent снова залочит download
         self.stack.setCurrentWidget(self.player_view)
         self._unlock_player_window_size(reset_geometry=from_download)
+        self._refresh_login_btn_visibility()
         # Фокус в WebView — пробел = play/pause YouTube, не клик по кнопкам
         QTimer.singleShot(0, lambda: self.web_view.setFocus())
 
@@ -3158,17 +3579,11 @@ class SubtitleApp(QMainWindow):
             self.ai_summary.clear()
 
         self._all_marks = list(payload["marks"])
-        self._fill_mark_buttons(
-            self.timed_layout_all,
-            self._all_marks,
-            "Нет таймкодов — проверь 1_текст_с_таймкодами.txt",
-        )
-        self._clear_layout_buttons(self.timed_layout_ai)
         self._last_ai_analysis = None
 
         saved = load_saved_analysis(folder_name)
         if saved:
-            self._apply_ai_analysis(saved, switch_tab=False)
+            self._apply_ai_analysis(saved)
             action = saved.get("action") or "—"
             verdict = (saved.get("verdict_1_line") or "")[:80]
             n_h = len(saved.get("highlights") or [])
@@ -3176,18 +3591,12 @@ class SubtitleApp(QMainWindow):
                 f"ИИ: сохранённый разбор · {action} · {n_h} моментов"
                 + (f" · {verdict}" if verdict else "")
             )
-            self.sidebar_tabs.setCurrentIndex(0)
             return True
 
+        self._set_ai_mode_bar_visible(False)
         self.ai_summary.setHtml(
             "<i>Нажми «✨ ИИ» для разбора субтитров</i>"
         )
-        self._fill_mark_buttons(
-            self.timed_layout_ai,
-            [],
-            "Сначала запусти «✨ ИИ»",
-        )
-        self.sidebar_tabs.setCurrentIndex(2)
         return False
 
     def _get_current_youtube_url(self, callback: Callable[[str], None]) -> None:
@@ -3250,8 +3659,18 @@ class SubtitleApp(QMainWindow):
         )
 
     def on_ai_analyze(self) -> None:
-        """ИИ по ролику из WebView (не stale `_current_player_folder`)."""
+        """ИИ по ролику из WebView (не stale `_current_player_folder`).
+
+        Первый клик только показывает Инвест/Обычный — выбор режима.
+        Второй клик (когда полоска уже видна) — запуск разбора.
+        """
         if self._ai_busy or self._busy:
+            return
+        if not hasattr(self, "ai_mode_bar") or not self.ai_mode_bar.isVisible():
+            self._set_ai_mode_bar_visible(True)
+            self._set_player_status_core(
+                "ИИ: выбери Инвест или Обычный, потом снова «✨ ИИ»"
+            )
             return
 
         def _on_href(href: str) -> None:
@@ -3342,6 +3761,21 @@ class SubtitleApp(QMainWindow):
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _cookies_look_logged_in(self) -> bool:
+        """True, если залогинены cookies для yt-dlp и/или WebView-профиля."""
+        if _inspect_youtube_cookies(_ytdlp_cookies_file()).get("looks_logged_in"):
+            return True
+        return _yt_profile_looks_logged_in()
+
+    def _refresh_login_btn_visibility(self) -> None:
+        """«Войти» только если нет логина; в режиме «Назад» всегда видна."""
+        if not hasattr(self, "login_btn"):
+            return
+        if self._login_mode:
+            self.login_btn.setVisible(True)
+            return
+        self.login_btn.setVisible(not self._cookies_look_logged_in())
+
     def _login_btn_clicked(self) -> None:
         if not self._login_mode:
             # → открыть страницу входа
@@ -3350,11 +3784,13 @@ class SubtitleApp(QMainWindow):
             self.login_btn.setText("Назад")
             self.login_btn.setToolTip("Назад к видео")
             self._login_mode = True
+            self.login_btn.setVisible(True)
         else:
             # → вернуться на видео
             self.login_btn.setText("Войти")
             self.login_btn.setToolTip("Войти в YouTube")
             self._login_mode = False
+            self._refresh_login_btn_visibility()
             if self._current_player_folder:
                 vid = _extract_id_from_folder(self._current_player_folder)
                 if vid:
@@ -3476,14 +3912,31 @@ class SubtitleApp(QMainWindow):
         self._start_audio_download(url, from_player=False)
 
     def on_open_overlay(self) -> None:
-        """IDEA-022: always-on-top overlay с каталогом Music/YouTube_DL."""
+        """IDEA-022: overlay с каталогом Music/YouTube_DL (обычное окно)."""
         win = open_overlay_player(start_dir=default_audio_output_dir(), parent=self)
         if win is None:
             return
         self._overlay_window = win
+        try:
+            win.closed.disconnect(self._on_overlay_closed)
+        except (TypeError, RuntimeError):
+            pass
+        win.closed.connect(self._on_overlay_closed)
+        self.hide()
         self._set_status(
-            "Статус: overlay «Фон» открыт (🔊 громкость в окне; Ctrl+Shift+O — клики насквозь)"
+            "Статус: overlay «Фон» открыт (← Назад / крестик — сюда; Ctrl+O — сквозь)"
         )
+
+    def _on_overlay_closed(self) -> None:
+        self._overlay_window = None
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        close_overlay_player()
+        self._overlay_window = None
+        super().closeEvent(event)
 
     def on_download_audio_from_player(self) -> None:
         if self._busy:
@@ -3767,6 +4220,29 @@ class SubtitleApp(QMainWindow):
 # =====================================================================
 # 4. ТОЧКА ВХОДА
 # =====================================================================
+
+# AUMID ярлыка Desktop «Subtitle Ripper Pro.lnk» — иначе taskbar = иконка pythonw
+_SR_AUMID = "Random2079.SubtitleRipperPro.1"
+
+
+def _apply_sr_aumid() -> None:
+    if os.name != "nt":
+        return
+    import ctypes
+
+    try:
+        set_aumid = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
+        set_aumid.argtypes = [ctypes.c_wchar_p]
+        set_aumid.restype = ctypes.HRESULT
+        try:
+            set_aumid.errcheck = None  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        set_aumid(_SR_AUMID)
+    except Exception:
+        pass
+
+
 def _configure_stdio() -> None:
     if hasattr(sys.stdout, "reconfigure") and sys.stdout is not None:
         try:
@@ -3780,11 +4256,127 @@ def _configure_stdio() -> None:
             pass
 
 
+def _find_sr_hwnd() -> int:
+    """HWND главного окна SR (видимое, свёрнутое или временно скрытое)."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    hwnd = user32.FindWindowW(None, "Subtitle Ripper Pro")
+    if hwnd:
+        return int(hwnd)
+
+    found = ctypes.c_void_p(0)
+    EnumProc = ctypes.WINFUNCTYPE(
+        ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
+    )
+
+    @EnumProc
+    def _enum(h, _lp):  # type: ignore[misc]
+        # Не фильтруем IsWindowVisible — иначе второй ярлык может
+        # не найти окно и убить живой процесс как «зомби».
+        buf = ctypes.create_unicode_buffer(512)
+        user32.GetWindowTextW(h, buf, 512)
+        title = buf.value or ""
+        if title == "Subtitle Ripper Pro" or title.startswith("Subtitle Ripper"):
+            found.value = h
+            return False
+        return True
+
+    user32.EnumWindows(_enum, 0)
+    return int(found.value or 0)
+
+
+def _live_sr_pids() -> list[int]:
+    """PID других python* с Subtitle_App.py (кроме текущего)."""
+    me = os.getpid()
+    pids: list[int] = []
+    try:
+        import psutil
+    except ImportError:
+        return pids
+
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            pid = proc.info.get("pid")
+            if pid == me:
+                continue
+            name = (proc.info.get("name") or "").lower()
+            if name not in ("python.exe", "pythonw.exe"):
+                continue
+            cmd = " ".join(proc.info.get("cmdline") or []).lower().replace("\\", "/")
+            if "subtitle_app.py" not in cmd:
+                continue
+            pids.append(int(pid))
+        except (psutil.Error, OSError, ProcessLookupError, TypeError, ValueError):
+            continue
+    return pids
+
+
+def _kill_orphan_sr_processes() -> int:
+    """Убивает python/pythonw с Subtitle_App.py этого проекта. Возвращает число."""
+    root = os.path.abspath(os.path.dirname(__file__)).lower()
+    killed = 0
+    try:
+        import psutil
+    except ImportError:
+        psutil = None  # type: ignore[assignment]
+
+    if psutil is not None:
+        me = os.getpid()
+        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                if proc.info.get("pid") == me:
+                    continue
+                name = (proc.info.get("name") or "").lower()
+                if name not in ("python.exe", "pythonw.exe"):
+                    continue
+                cmd = " ".join(proc.info.get("cmdline") or []).lower()
+                if "subtitle_app.py" not in cmd.replace("\\", "/"):
+                    continue
+                # тот же проект или любой Subtitle_App — для зомби ок
+                proc.kill()
+                killed += 1
+            except (psutil.Error, OSError, ProcessLookupError):
+                continue
+        return killed
+
+    # без psutil: WMI через PowerShell — один раз
+    import subprocess
+
+    ps = (
+        "Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" | "
+        "Where-Object { $_.CommandLine -match 'Subtitle_App\\.py' } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }"
+    )
+    try:
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command", ps],
+            text=True,
+            errors="replace",
+            timeout=15,
+            creationflags=(0x08000000 if os.name == "nt" else 0),
+        )
+        killed = len([ln for ln in out.splitlines() if ln.strip().isdigit()])
+    except (OSError, subprocess.SubprocessError):
+        killed = 0
+    return killed
+
+
+def _bring_sr_to_front(hwnd: int) -> None:
+    """Показать / развернуть уже запущенный SR."""
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.SetForegroundWindow(hwnd)
+
+
 def _ensure_single_instance() -> object | None:
     """
     Именованный мьютекс Windows.
-    Второй запуск не молчит: поднимает уже открытое окно.
-    Если процесс есть, а окна нет (зомби) — говорим убить pythonw.
+    Второй запуск: поднимает окно и выходит — живой процесс НЕ убиваем.
+    Kill orphans — только если мьютекс занят, окна нет и нет живого Subtitle_App.
     """
     if os.name != "nt":
         return None
@@ -3796,20 +4388,44 @@ def _ensure_single_instance() -> object | None:
     if kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
         return mutex
 
-    hwnd = user32.FindWindowW(None, "Subtitle Ripper Pro")
+    hwnd = _find_sr_hwnd()
     if hwnd:
-        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-        user32.SetForegroundWindow(hwnd)
-    else:
+        _bring_sr_to_front(hwnd)
+        return None
+
+    live = _live_sr_pids()
+    if live:
+        # Окно не нашли, но процесс жив — не kill (это и был «краш» на 2-м ярлыке).
         user32.MessageBoxW(
             0,
-            "Процесс уже сидит в фоне, но окна нет.\n"
-            "Диспетчер задач → pythonw.exe / Subtitle_App → Снять задачу,\n"
-            "потом снова launch.vbs.",
+            "Subtitle Ripper уже запущен (PID: "
+            + ", ".join(str(p) for p in live[:5])
+            + ").\n"
+            "Окно не нашлось автоматически — Alt+Tab.\n"
+            "Второй экземпляр не открываю.",
+            "Уже запущено",
+            0x40,
+        )
+        return None
+
+    # Мьютекс-призрак без процесса — пробуем снять и забрать запуск
+    n = _kill_orphan_sr_processes()
+    import time
+
+    time.sleep(0.35)
+    kernel32.CloseHandle(mutex)
+    mutex2 = kernel32.CreateMutexW(None, True, "SubtitleRipperPro_Mutex")
+    if kernel32.GetLastError() == 183:
+        user32.MessageBoxW(
+            0,
+            "Не смог снять старый мьютекс (убито попыток: "
+            f"{n}).\n"
+            "Диспетчер → pythonw.exe → Снять задачу, потом снова ярлык.",
             "Уже запущено",
             0x30,
         )
-    return None
+        return None
+    return mutex2
 
 
 if __name__ == "__main__":
@@ -3828,6 +4444,7 @@ if __name__ == "__main__":
     if _mutex_handle is None and os.name == "nt":
         sys.exit(0)
 
+    _apply_sr_aumid()
     app = QApplication(sys.argv)
     app.setWindowIcon(make_app_icon())
     configure_qt_theme(app)
@@ -3838,5 +4455,5 @@ if __name__ == "__main__":
     window.activateWindow()
     window._ensure_window_on_screen()
     QTimer.singleShot(0, window._ensure_window_on_screen)
-
+    app._sr_mutex_handle = _mutex_handle  # type: ignore[attr-defined]
     sys.exit(app.exec())
