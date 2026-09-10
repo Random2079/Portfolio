@@ -23,7 +23,7 @@ from portfolio_news.metrics_moex import (
     fetch_metrics_for,
     metric_to_dict,
 )
-from portfolio_news.poll_job import get_poll_status, start_poll_job
+from portfolio_news.poll_job import get_poll_status, request_cancel_poll, start_poll_job
 
 _settings = get_settings()
 _SessionLocal = make_session_factory(_settings.database_url)
@@ -115,19 +115,44 @@ def _scoped_tickers(
     kind: Optional[str],
     category: Optional[str],
     limit: int,
+    ids: Optional[list[str]] = None,
 ) -> list[Ticker]:
     q = select(Ticker).order_by(Ticker.id)
     if ticker_id:
         q = q.where(Ticker.id == ticker_id)
+    elif ids:
+        clean = [x.strip() for x in ids if x and str(x).strip()]
+        if clean:
+            q = q.where(Ticker.id.in_(clean))
+        if kind:
+            q = q.where(Ticker.kind == kind)
+        if category:
+            q = q.where(Ticker.category == category)
     else:
         if kind:
             q = q.where(Ticker.kind == kind)
         if category:
             q = q.where(Ticker.category == category)
     rows = list(db.scalars(q))
+    if ids and not ticker_id:
+        # preserve UI order (BCS list), drop unknown
+        by_id = {t.id: t for t in rows}
+        ordered: list[Ticker] = []
+        for raw in ids:
+            tid = (raw or "").strip()
+            if tid and tid in by_id:
+                ordered.append(by_id[tid])
+        rows = ordered
     if limit:
         rows = rows[:limit]
     return rows
+
+
+def _parse_ids(ids: Optional[str]) -> Optional[list[str]]:
+    if not ids or not str(ids).strip():
+        return None
+    parts = [p.strip() for p in str(ids).split(",") if p.strip()]
+    return parts or None
 
 
 @app.on_event("startup")
@@ -144,6 +169,36 @@ def _ensure_tickers():
 @app.get("/")
 def ui_index():
     path = _STATIC / "index.html"
+    return FileResponse(
+        path,
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.get("/demo")
+def ui_demo():
+    """Snowball-like portfolio demo (does not replace main index)."""
+    path = _STATIC / "dashboard-demo.html"
+    return FileResponse(
+        path,
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.get("/legacy")
+def ui_legacy():
+    """Rollback snapshot of index.html from before Snowball demo."""
+    path = _STATIC / "backups" / "index.backup-2026-09-10-before-snowball-demo.html"
+    if not path.is_file():
+        path = _STATIC / "index.html"
     return FileResponse(
         path,
         media_type="text/html; charset=utf-8",
@@ -221,19 +276,46 @@ def poll_status():
     return get_poll_status()
 
 
+@app.post("/api/poll/cancel")
+def poll_cancel():
+    """Soft-cancel: stop after current ticker/source, don't start new ones."""
+    return request_cancel_poll()
+
+
 @app.get("/api/metrics")
 def list_metrics(
     ticker_id: Optional[str] = Query(None),
     kind: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
-    limit: int = Query(0, ge=0, le=100),
+    ids: Optional[str] = Query(None, description="Comma-separated ticker ids (BCS portfolio order)"),
+    limit: int = Query(0, ge=0, le=200),
     db: Session = Depends(get_db),
 ):
+    id_list = _parse_ids(ids)
     eff = effective_moex_limit(ticker_id=ticker_id, limit=limit)
     rows = _scoped_tickers(
-        db, ticker_id=ticker_id, kind=kind, category=category, limit=eff
+        db,
+        ticker_id=ticker_id,
+        kind=kind,
+        category=category,
+        limit=eff,
+        ids=id_list,
     )
-    items = [(t.id, t.kind, t.name, t.isin or "") for t in rows]
+    by_id = {t.id: t for t in rows}
+    order = [ticker_id] if ticker_id else (id_list or [t.id for t in rows])
+    items: list[tuple[str, str, str, str]] = []
+    seen: set[str] = set()
+    for tid in order:
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        t = by_id.get(tid)
+        if t:
+            items.append((t.id, t.kind, t.name, t.isin or ""))
+        elif id_list is not None:
+            items.append((tid, kind or "equity", tid, ""))
+    if limit:
+        items = items[:limit]
     metrics = fetch_metrics_for(items)
     return [metric_to_dict(m) for m in metrics]
 
@@ -243,14 +325,35 @@ def list_dividends(
     ticker_id: Optional[str] = Query(None),
     kind: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
-    limit: int = Query(0, ge=0, le=100),
+    ids: Optional[str] = Query(None),
+    limit: int = Query(0, ge=0, le=200),
     db: Session = Depends(get_db),
 ):
+    id_list = _parse_ids(ids)
     eff = effective_moex_limit(ticker_id=ticker_id, limit=limit)
     rows = _scoped_tickers(
-        db, ticker_id=ticker_id, kind=kind, category=category, limit=eff
+        db,
+        ticker_id=ticker_id,
+        kind=kind,
+        category=category,
+        limit=eff,
+        ids=id_list,
     )
-    items = [(t.id, t.kind, t.name) for t in rows]
+    by_id = {t.id: t for t in rows}
+    order = [ticker_id] if ticker_id else (id_list or [t.id for t in rows])
+    items: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for tid in order:
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        t = by_id.get(tid)
+        if t:
+            items.append((t.id, t.kind, t.name))
+        elif id_list is not None:
+            items.append((tid, kind or "equity", tid))
+    if limit:
+        items = items[:limit]
     return [
         DividendOut(
             ticker_id=d.ticker_id,
@@ -272,14 +375,35 @@ def list_coupons(
     ticker_id: Optional[str] = Query(None),
     kind: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
-    limit: int = Query(0, ge=0, le=100),
+    ids: Optional[str] = Query(None),
+    limit: int = Query(0, ge=0, le=200),
     db: Session = Depends(get_db),
 ):
+    id_list = _parse_ids(ids)
     eff = effective_moex_limit(ticker_id=ticker_id, limit=limit)
     rows = _scoped_tickers(
-        db, ticker_id=ticker_id, kind=kind, category=category, limit=eff
+        db,
+        ticker_id=ticker_id,
+        kind=kind,
+        category=category,
+        limit=eff,
+        ids=id_list,
     )
-    items = [(t.id, t.kind, t.name) for t in rows]
+    by_id = {t.id: t for t in rows}
+    order = [ticker_id] if ticker_id else (id_list or [t.id for t in rows])
+    items: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for tid in order:
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        t = by_id.get(tid)
+        if t:
+            items.append((t.id, t.kind, t.name))
+        elif id_list is not None:
+            items.append((tid, kind or "bond", tid))
+    if limit:
+        items = items[:limit]
     return [
         CouponOut(
             ticker_id=c.ticker_id,

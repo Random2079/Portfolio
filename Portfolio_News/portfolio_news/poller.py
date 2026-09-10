@@ -94,6 +94,7 @@ def poll_once(
     kind: Optional[str] = None,
     category: Optional[str] = None,
     on_progress: ProgressCallback | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict:
     """Fetch news for scoped tickers; insert new URLs; notify per mode."""
     if isinstance(notify, bool):
@@ -112,6 +113,7 @@ def poll_once(
 
     result = PollResult(sources=[s.name for s in sources])
     digest_titles: list[str] = []
+    cancelled = False
 
     def emit(progress: PollProgress) -> None:
         if on_progress:
@@ -121,6 +123,9 @@ def poll_once(
     emit(PollProgress(running=True, current=0, total=total, ticker_id="", inserted=0))
 
     for idx, t in enumerate(tickers, start=1):
+        if should_cancel and should_cancel():
+            cancelled = True
+            break
         emit(
             PollProgress(
                 running=True,
@@ -133,6 +138,9 @@ def poll_once(
         result.tickers += 1
         query = t.search_query or t.name or t.id
         for src in sources:
+            if should_cancel and should_cancel():
+                cancelled = True
+                break
             try:
                 items = src.fetch(t.id, query, t.kind)
             except Exception as exc:  # noqa: BLE001
@@ -156,8 +164,10 @@ def poll_once(
                 elif mode == "digest":
                     row.notified = 1
                     session.commit()
+        if cancelled:
+            break
 
-    if mode == "digest" and result.inserted > 0:
+    if not cancelled and mode == "digest" and result.inserted > 0:
         preview = " · ".join(digest_titles[:2])
         body = f"+{result.inserted} новостей"
         if preview:
@@ -169,12 +179,13 @@ def poll_once(
     emit(
         PollProgress(
             running=False,
-            current=total,
+            current=result.tickers if cancelled else total,
             total=total,
             ticker_id="",
             inserted=result.inserted,
             notified=result.notified,
             done=True,
+            error="cancelled" if cancelled else "",
         )
     )
     return {
@@ -183,4 +194,5 @@ def poll_once(
         "notified": result.notified,
         "sources": result.sources,
         "titles": result.new_titles,
+        "cancelled": cancelled,
     }

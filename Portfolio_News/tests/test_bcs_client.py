@@ -7,6 +7,7 @@ import unittest
 from portfolio_news.bcs_client import (
     Holding,
     match_holding,
+    friendly_bcs_error,
     _parse_portfolio,
     _parse_summary,
     _merge_limits,
@@ -84,6 +85,14 @@ class ParsePortfolioTests(unittest.TestCase):
         self.assertEqual(match_holding(hs, ticker_id="SBER").isin, "RU0009029540")
         self.assertEqual(match_holding(hs, isin="RU000A10EF52").quantity, 2)
         self.assertIsNone(match_holding(hs, ticker_id="NOPE"))
+
+    def test_friendly_dns_and_timeout(self):
+        dns = friendly_bcs_error(
+            Exception("Failed to resolve 'be.broker.ru' ([Errno 11001] getaddrinfo failed)")
+        )
+        self.assertIn("DNS", dns)
+        to = friendly_bcs_error(Exception("Connection to be.broker.ru timed out. (connect timeout=30)"))
+        self.assertIn("таймаут", to.lower())
 
 
 if __name__ == "__main__":

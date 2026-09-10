@@ -26,6 +26,31 @@ LIMITS_URL = "https://be.broker.ru/trade-api-bff-limit/api/v1/limits"
 CLIENT_ID_READ = "trade-api-read"
 # Soft cache so UI tab switches don't hammer BCS
 _CACHE_TTL_SEC = 45.0
+# Connect fails fast; read can wait a bit for portfolio JSON
+_TIMEOUT = (5.0, 20.0)
+
+
+def friendly_bcs_error(exc: BaseException) -> str:
+    """Short RU message for UI (not a raw urllib dump)."""
+    text = str(exc)
+    low = text.lower()
+    if "getaddrinfo failed" in low or "nameresolutionerror" in low or "failed to resolve" in low:
+        return (
+            "Не резолвится be.broker.ru (DNS). "
+            "Проверь интернет / VPN / zapret — без доступа к БКС позиции не обновятся."
+        )
+    if "connecttimeout" in low or "timed out" in low or "timeout" in low:
+        return (
+            "БКС не ответил вовремя (таймаут до be.broker.ru). "
+            "Сеть режет или API лежит — лента/MOEX могут работать, позиции — нет."
+        )
+    if "connection" in low and ("refused" in low or "reset" in low or "aborted" in low):
+        return "Связь с be.broker.ru оборвалась. Попробуй позже или другой сеть/VPN."
+    if "refresh token" in low or "invalid/expired" in low:
+        return text
+    if len(text) > 220:
+        return text[:200] + "…"
+    return text
 
 
 @dataclass
@@ -58,6 +83,7 @@ class HoldingsSnapshot:
     currency: str = "RUB"
     holdings: list[Holding] = field(default_factory=list)
     raw_keys: list[str] = field(default_factory=list)  # debug: top-level keys seen
+    stale: bool = False  # True = показали кэш после сетевого фейла
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -76,6 +102,18 @@ class BcsClient:
         self._session.headers.update(
             {"User-Agent": "PortfolioNews/0.3 (+local; BCS read-only)"}
         )
+        # No urllib3 connect retries — UI already waits once
+        try:
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+
+            adapter = HTTPAdapter(
+                max_retries=Retry(total=0, connect=0, read=0, redirect=0, status=0)
+            )
+            self._session.mount("https://", adapter)
+            self._session.mount("http://", adapter)
+        except Exception:  # noqa: BLE001
+            pass
 
     @property
     def configured(self) -> bool:
@@ -94,7 +132,7 @@ class BcsClient:
             AUTH_URL,
             data=data,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=30,
+            timeout=_TIMEOUT,
         )
         if resp.status_code == 401:
             raise RuntimeError(
@@ -121,11 +159,11 @@ class BcsClient:
         return {"Authorization": f"Bearer {self._access_token}"}
 
     def _get_json(self, url: str) -> Any:
-        resp = self._session.get(url, headers=self._auth_headers(), timeout=30)
+        resp = self._session.get(url, headers=self._auth_headers(), timeout=_TIMEOUT)
         if resp.status_code == 401:
             # one retry after forced refresh
             self._access_expires_at = 0
-            resp = self._session.get(url, headers=self._auth_headers(), timeout=30)
+            resp = self._session.get(url, headers=self._auth_headers(), timeout=_TIMEOUT)
         if resp.status_code == 429:
             raise RuntimeError("BCS rate limit (429) — подожди и обнови снова")
         if resp.status_code != 200:
@@ -144,18 +182,41 @@ class BcsClient:
                 not force
                 and self._cache
                 and self._cache.ok
+                and not self._cache.stale
                 and time.time() - self._cache.fetched_at < _CACHE_TTL_SEC
             ):
                 return self._cache
             try:
                 snap = self._fetch_uncached()
+                snap.stale = False
+                snap.error = ""
             except Exception as exc:  # noqa: BLE001
+                msg = friendly_bcs_error(exc)
                 log.warning("BCS holdings failed: %s", exc)
+                # Keep last good snapshot so UI doesn't blank for 30s every tab switch
+                if self._cache and self._cache.ok and self._cache.holdings:
+                    stale = HoldingsSnapshot(
+                        configured=True,
+                        ok=True,
+                        error=msg,
+                        fetched_at=self._cache.fetched_at,
+                        total_value=self._cache.total_value,
+                        cash=self._cache.cash,
+                        pnl=self._cache.pnl,
+                        pnl_pct=self._cache.pnl_pct,
+                        currency=self._cache.currency,
+                        holdings=list(self._cache.holdings),
+                        raw_keys=list(self._cache.raw_keys),
+                        stale=True,
+                    )
+                    self._cache = stale
+                    return stale
                 snap = HoldingsSnapshot(
                     configured=True,
                     ok=False,
-                    error=str(exc),
+                    error=msg,
                     fetched_at=time.time(),
+                    stale=False,
                 )
             self._cache = snap
             return snap

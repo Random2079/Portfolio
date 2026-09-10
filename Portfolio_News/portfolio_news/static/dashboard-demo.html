@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portfolio News · Demo (Snowball-like)</title>
+    <style>
+      :root {
+        --bg: #e8ecf1;
+        --card: #ffffff;
+        --text: #1a2330;
+        --muted: #6b7a8c;
+        --border: #d8dee8;
+        --up: #0f7a5a;
+        --down: #b42318;
+        --accent: #2f6fed;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .wrap { max-width: 920px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+      .top {
+        display: flex; flex-wrap: wrap; justify-content: space-between;
+        align-items: flex-start; gap: 0.75rem; margin-bottom: 1.25rem;
+      }
+      .top h1 { margin: 0; font-size: 1.35rem; }
+      .top .sub { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.88rem; }
+      .links { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+      .links a {
+        text-decoration: none; color: var(--text); font-weight: 600; font-size: 0.85rem;
+        background: var(--card); border: 1px solid var(--border);
+        border-radius: 999px; padding: 0.4rem 0.85rem;
+      }
+      .links a.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+      .banner {
+        font-size: 0.8rem; color: var(--muted); background: #fff8e6;
+        border: 1px solid #f0d78c; border-radius: 10px; padding: 0.65rem 0.85rem;
+        margin-bottom: 1rem;
+      }
+      .kpis {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 0.65rem; margin-bottom: 1rem;
+      }
+      .kpi {
+        background: var(--card); border-radius: 14px; padding: 0.85rem 1rem;
+        border: 1px solid var(--border);
+      }
+      .kpi .k { color: var(--muted); font-size: 0.75rem; font-weight: 600; }
+      .kpi .v { font-size: 1.25rem; font-weight: 700; margin-top: 0.25rem; font-variant-numeric: tabular-nums; }
+      .kpi .s { font-size: 0.8rem; margin-top: 0.2rem; color: var(--muted); }
+      .cards { display: flex; flex-direction: column; gap: 0.65rem; }
+      .card {
+        background: var(--card); border-radius: 16px; border: 1px solid var(--border);
+        overflow: hidden;
+      }
+      .card-head {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 0.75rem 1rem;
+        align-items: center;
+        padding: 0.95rem 1.1rem;
+        cursor: pointer;
+        width: 100%;
+        border: none;
+        background: transparent;
+        text-align: left;
+        color: inherit;
+        font: inherit;
+      }
+      .card-head:hover { background: #f7f9fc; }
+      .card-head .title { font-weight: 700; font-size: 1rem; }
+      .card-head .count { color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; }
+      .card-head .chips {
+        display: flex; align-items: center;
+      }
+      .chip-dot {
+        width: 28px; height: 28px; border-radius: 50%;
+        border: 2px solid #fff; margin-left: -8px;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 0.55rem; font-weight: 700; color: #fff;
+        background: #5b6b7c;
+      }
+      .chip-dot:first-child { margin-left: 0; }
+      .chip-more {
+        margin-left: 0.35rem; background: #e8ecf1; color: var(--muted);
+        border-radius: 999px; font-size: 0.7rem; font-weight: 700;
+        padding: 0.2rem 0.45rem;
+      }
+      .card-head .nums { text-align: right; }
+      .card-head .pnl { font-weight: 700; font-variant-numeric: tabular-nums; }
+      .card-head .val { color: var(--muted); font-size: 0.85rem; margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+      .chev { color: var(--muted); transition: transform 0.15s; }
+      .card.open .chev { transform: rotate(180deg); }
+      .card-body { display: none; border-top: 1px solid var(--border); padding: 0.5rem 0.75rem 0.85rem; }
+      .card.open .card-body { display: block; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+      th, td { text-align: left; padding: 0.45rem 0.35rem; border-bottom: 1px solid var(--border); }
+      th { color: var(--muted); font-weight: 600; }
+      td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+      .up { color: var(--up); }
+      .down { color: var(--down); }
+      .error { color: var(--down); margin: 0.5rem 0; }
+      .feed-box {
+        margin-top: 1.5rem; background: var(--card); border-radius: 16px;
+        border: 1px solid var(--border); padding: 1rem 1.1rem;
+      }
+      .feed-box h2 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+      .feed-box p { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
+      .feed-box ul { list-style: none; margin: 0; padding: 0; }
+      .feed-box li { padding: 0.55rem 0; border-bottom: 1px solid var(--border); }
+      .feed-box li:last-child { border-bottom: none; }
+      .feed-box a { color: var(--text); font-weight: 600; text-decoration: none; }
+      .feed-box a:hover { color: var(--accent); }
+      .meta { color: var(--muted); font-size: 0.75rem; margin-top: 0.25rem; }
+      .empty { color: var(--muted); padding: 0.5rem 0; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div>
+          <h1>Портфель · демо</h1>
+          <p class="sub" id="subtitle">Загрузка БКС…</p>
+        </div>
+        <div class="links">
+          <a href="/">Старый UI</a>
+          <a href="/legacy">Бэкап UI</a>
+          <a class="primary" href="/#tabNews">Лента (отдельно)</a>
+        </div>
+      </div>
+
+      <div class="banner">
+        Демо-макет «как Snowball»: сводка счёта и карточки по типам. Лента новостей — отдельный блок внизу / старый UI.
+        Основной <code>index.html</code> не затирали; откат: <code>/legacy</code> или файл в <code>static/backups/</code>.
+      </div>
+
+      <div id="error" class="error" hidden></div>
+
+      <div class="kpis" id="kpis">
+        <div class="kpi"><div class="k">Стоимость</div><div class="v" id="kpiValue">—</div><div class="s" id="kpiInvest">вложено —</div></div>
+        <div class="kpi"><div class="k">PnL</div><div class="v" id="kpiPnl">—</div><div class="s" id="kpiPnlPct">—</div></div>
+        <div class="kpi"><div class="k">Позиций</div><div class="v" id="kpiCount">—</div><div class="s">без валют в списке</div></div>
+      </div>
+
+      <div class="cards" id="cards"></div>
+
+      <section class="feed-box">
+        <h2>Ситуация рынка · лента</h2>
+        <p>Отдельно от портфеля: свежие новости из локальной базы (не смешиваем с карточками активов).</p>
+        <ul id="feed"></ul>
+      </section>
+    </div>
+    <script>
+      const KIND = {
+        cash: { title: "Денег на счёте", color: "#6b8cae" },
+        equity: { title: "Акции", color: "#3d8bfd" },
+        fund: { title: "Фонды", color: "#0f7a5a" },
+        bond: { title: "Облигации", color: "#8b5cf6" },
+      };
+
+      function fmtMoney(v) {
+        if (v == null || Number.isNaN(Number(v))) return "—";
+        return Number(v).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₽";
+      }
+      function fmtPct(v) {
+        if (v == null || Number.isNaN(Number(v))) return "—";
+        const n = Number(v);
+        const sign = n > 0 ? "+" : "";
+        return sign + n.toFixed(2) + "%";
+      }
+      function pnlClass(v) {
+        if (v == null || Number.isNaN(Number(v)) || Number(v) === 0) return "";
+        return Number(v) > 0 ? "up" : "down";
+      }
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function guessKind(h, dbById, dbByIsin) {
+        const id = String(h.ticker || h.sec_code || "").toUpperCase();
+        if (/^(RUB|USD|EUR|CNY|HKD|GBP|CHF)$/.test(id)) return "cash";
+        const db = dbById[id] || (h.isin ? dbByIsin[String(h.isin).toUpperCase()] : null);
+        if (db && db.kind) return db.kind;
+        const cc = String(h.class_code || "").toUpperCase();
+        const name = String(h.name || "");
+        if (/TQTF|ETF|BPIF|ПИФ/i.test(cc + " " + name)) return "fund";
+        if (/TQCB|TQOB|TQIR|BOND|ОФЗ|обл/i.test(cc + " " + name)) return "bond";
+        return "equity";
+      }
+
+      function sumField(rows, key) {
+        let s = 0, ok = false;
+        for (const r of rows) {
+          if (r[key] != null && !Number.isNaN(Number(r[key]))) {
+            s += Number(r[key]);
+            ok = true;
+          }
+        }
+        return ok ? s : null;
+      }
+
+      function renderCard(kind, rows) {
+        const meta = KIND[kind] || { title: kind, color: "#888" };
+        const value = sumField(rows, "market_value");
+        const pnl = sumField(rows, "pnl");
+        const cost = sumField(rows, "cost_value");
+        const pnlPct =
+          pnl != null && cost != null && cost !== 0 ? (pnl / cost) * 100 : null;
+        const show = rows.slice(0, 4);
+        const more = Math.max(0, rows.length - show.length);
+        let chips = show
+          .map((h, i) => {
+            const label = String(h.ticker || h.sec_code || "?").slice(0, 4);
+            return (
+              '<span class="chip-dot" style="background:' +
+              meta.color +
+              ";opacity:" +
+              (0.55 + i * 0.1) +
+              '">' +
+              esc(label) +
+              "</span>"
+            );
+          })
+          .join("");
+        if (more) chips += '<span class="chip-more">+' + more + "</span>";
+
+        const pnlLine =
+          (pnl == null ? "—" : (pnl > 0 ? "+" : "") + fmtMoney(pnl).replace(" ₽", "") + " ₽") +
+          " · " +
+          fmtPct(pnlPct);
+
+        let bodyRows = "";
+        for (const h of rows) {
+          const hp = h.pnl;
+          bodyRows +=
+            "<tr><td><strong>" +
+            esc(h.ticker || h.sec_code || "—") +
+            "</strong><br><span class='meta'>" +
+            esc(h.name || "") +
+            "</span></td><td class='num'>" +
+            (h.quantity == null ? "—" : Number(h.quantity).toLocaleString("ru-RU")) +
+            "</td><td class='num'>" +
+            fmtMoney(h.market_value) +
+            "</td><td class='num " +
+            pnlClass(hp) +
+            "'>" +
+            (hp == null ? "—" : (hp > 0 ? "+" : "") + fmtMoney(hp)) +
+            "</td></tr>";
+        }
+
+        const el = document.createElement("div");
+        el.className = "card";
+        el.dataset.kind = kind;
+        el.innerHTML =
+          '<button type="button" class="card-head">' +
+          '<div><div class="title">' +
+          esc(meta.title) +
+          '</div><div class="count">' +
+          rows.length +
+          " позици" +
+          (rows.length === 1 ? "я" : rows.length < 5 ? "и" : "й") +
+          "</div></div>" +
+          '<div class="chips">' +
+          chips +
+          "</div>" +
+          '<div class="nums"><div class="pnl ' +
+          pnlClass(pnl) +
+          '">' +
+          esc(pnlLine) +
+          '</div><div class="val">' +
+          fmtMoney(value) +
+          '</div></div>' +
+          '<span class="chev">▾</span>' +
+          "</button>" +
+          '<div class="card-body"><table><thead><tr>' +
+          "<th>Бумага</th><th class='num'>Кол-во</th><th class='num'>Стоимость</th><th class='num'>PnL</th>" +
+          "</tr></thead><tbody>" +
+          bodyRows +
+          "</tbody></table></div>";
+
+        el.querySelector(".card-head").addEventListener("click", () => {
+          el.classList.toggle("open");
+        });
+        return el;
+      }
+
+      async function load() {
+        const err = document.getElementById("error");
+        err.hidden = true;
+        try {
+          const [snap, tickers, news] = await Promise.all([
+            fetch("/api/holdings").then((r) => r.json()),
+            fetch("/api/tickers").then((r) => r.json()),
+            fetch("/api/news?limit=12").then((r) => r.json()),
+          ]);
+          if (!snap.configured) throw new Error("Нет BCS токена в .env");
+          if (!snap.ok) throw new Error(snap.error || "БКС ошибка");
+
+          const dbById = {};
+          const dbByIsin = {};
+          for (const t of tickers || []) {
+            dbById[String(t.id).toUpperCase()] = t;
+            if (t.isin) dbByIsin[String(t.isin).toUpperCase()] = t;
+          }
+
+          const holdings = snap.holdings || [];
+          const groups = { cash: [], equity: [], fund: [], bond: [] };
+          for (const h of holdings) {
+            const k = guessKind(h, dbById, dbByIsin);
+            (groups[k] || groups.equity).push(h);
+          }
+
+          const papers = holdings.filter((h) => guessKind(h, dbById, dbByIsin) !== "cash");
+          document.getElementById("subtitle").textContent =
+            "БКС · " +
+            papers.length +
+            " бумаг · демо UI (референс Snowball)";
+
+          const total =
+            snap.total_value != null ? snap.total_value : sumField(holdings, "market_value");
+          const pnl = snap.pnl != null ? snap.pnl : sumField(holdings, "pnl");
+          const cost = sumField(holdings, "cost_value");
+          const pnlPct =
+            snap.pnl_pct != null
+              ? snap.pnl_pct
+              : pnl != null && cost
+                ? (pnl / cost) * 100
+                : null;
+
+          document.getElementById("kpiValue").textContent = fmtMoney(total);
+          document.getElementById("kpiInvest").textContent =
+            "вложено " + fmtMoney(cost);
+          const pnlEl = document.getElementById("kpiPnl");
+          pnlEl.textContent =
+            pnl == null ? "—" : (pnl > 0 ? "+" : "") + fmtMoney(pnl);
+          pnlEl.className = "v " + pnlClass(pnl);
+          document.getElementById("kpiPnlPct").textContent = fmtPct(pnlPct);
+          document.getElementById("kpiPnlPct").className = "s " + pnlClass(pnlPct);
+          document.getElementById("kpiCount").textContent = String(papers.length);
+
+          const host = document.getElementById("cards");
+          host.innerHTML = "";
+          for (const k of ["cash", "equity", "fund", "bond"]) {
+            if (!groups[k].length) continue;
+            host.appendChild(renderCard(k, groups[k]));
+          }
+          if (!host.children.length) {
+            host.innerHTML = '<p class="empty">Нет позиций в ответе БКС.</p>';
+          }
+
+          const feed = document.getElementById("feed");
+          feed.innerHTML = "";
+          if (!(news || []).length) {
+            feed.innerHTML = '<li class="empty">Лента пуста — новости появятся после опроса (старый UI → Искать).</li>';
+          } else {
+            for (const n of news) {
+              const li = document.createElement("li");
+              const href = String(n.url || "");
+              const safe =
+                href.startsWith("http://") || href.startsWith("https://") ? href : "";
+              li.innerHTML =
+                (safe
+                  ? '<a href="' + esc(safe) + '" target="_blank" rel="noreferrer">'
+                  : "<span>") +
+                esc(n.title || "(без заголовка)") +
+                (safe ? "</a>" : "</span>") +
+                '<div class="meta">' +
+                esc([n.ticker_id, n.source].filter(Boolean).join(" · ")) +
+                "</div>";
+              feed.appendChild(li);
+            }
+          }
+        } catch (e) {
+          err.hidden = false;
+          err.textContent = String(e.message || e);
+          document.getElementById("subtitle").textContent = "Ошибка загрузки";
+        }
+      }
+
+      load();
+    </script>
+  </body>
+</html>

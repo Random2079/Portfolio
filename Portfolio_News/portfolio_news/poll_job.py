@@ -28,12 +28,30 @@ class PollJobStatus:
 _lock = threading.Lock()
 _status = PollJobStatus()
 _thread: threading.Thread | None = None
+_cancel_requested = False
 
 
 def get_poll_status() -> dict[str, Any]:
     _reap_dead_thread()
     with _lock:
-        return _status.to_dict()
+        d = _status.to_dict()
+        d["cancel_requested"] = _cancel_requested
+        return d
+
+
+def request_cancel_poll() -> dict[str, Any]:
+    """Ask running poll to stop between tickers (soft cancel)."""
+    global _cancel_requested
+    _reap_dead_thread()
+    with _lock:
+        if not _status.running:
+            d = _status.to_dict()
+            d["cancel_requested"] = _cancel_requested
+            return {"ok": False, "error": "poll_not_running", "status": d}
+        _cancel_requested = True
+        d = _status.to_dict()
+        d["cancel_requested"] = True
+        return {"ok": True, "status": d}
 
 
 def _set_status(**kwargs: Any) -> None:
@@ -44,7 +62,7 @@ def _set_status(**kwargs: Any) -> None:
 
 def _reap_dead_thread() -> None:
     """If worker died without clearing running — unlock."""
-    global _thread
+    global _thread, _cancel_requested
     with _lock:
         if _status.running and _thread is not None and not _thread.is_alive():
             _status.running = False
@@ -52,6 +70,7 @@ def _reap_dead_thread() -> None:
             if not _status.error:
                 _status.error = "poll_worker_died"
             _thread = None
+            _cancel_requested = False
 
 
 def _on_progress(p: PollProgress) -> None:
@@ -67,6 +86,11 @@ def _on_progress(p: PollProgress) -> None:
     )
 
 
+def _should_cancel() -> bool:
+    with _lock:
+        return _cancel_requested
+
+
 def start_poll_job(
     *,
     ticker_id: Optional[str] = None,
@@ -77,7 +101,7 @@ def start_poll_job(
     force: bool = False,
 ) -> dict[str, Any]:
     """Start background poll; returns immediately. Rejects if already running unless force."""
-    global _thread
+    global _thread, _cancel_requested
     _reap_dead_thread()
 
     with _lock:
@@ -97,6 +121,7 @@ def start_poll_job(
                 "hint": "Дождись конца текущего опроса или обнови статус",
             }
 
+        _cancel_requested = False
         _status.running = True
         _status.current = 0
         _status.total = 0
@@ -108,6 +133,7 @@ def start_poll_job(
         _status.result = None
 
     def worker() -> None:
+        global _cancel_requested
         settings = get_settings()
         Session = make_session_factory(settings.database_url)
         try:
@@ -120,10 +146,20 @@ def start_poll_job(
                     kind=kind,
                     category=category,
                     on_progress=_on_progress,
+                    should_cancel=_should_cancel,
                 )
-            _set_status(running=False, done=True, result=result, error="")
+            cancelled = bool(result.get("cancelled"))
+            _set_status(
+                running=False,
+                done=True,
+                result=result,
+                error="cancelled" if cancelled else "",
+            )
         except Exception as exc:  # noqa: BLE001
             _set_status(running=False, done=True, error=str(exc), result=None)
+        finally:
+            with _lock:
+                _cancel_requested = False
 
     _thread = threading.Thread(target=worker, name="portfolio-news-poll", daemon=True)
     _thread.start()
