@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SR — главная + плеер · 3 варианта</title>
+  <style>
+    :root { font-family: "Segoe UI", system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 20px 56px;
+      background: #080a0e;
+      color: #e2e8f0;
+    }
+    h1 { font-size: 1.2rem; margin: 0 0 6px; font-weight: 600; }
+    .hint {
+      color: #94a3b8;
+      font-size: 0.92rem;
+      max-width: 760px;
+      line-height: 1.45;
+      margin: 0 0 6px;
+    }
+    .pick { color: #64748b; font-size: 0.85rem; margin-bottom: 20px; }
+    .variant {
+      margin-bottom: 36px;
+      padding: 16px;
+      border-radius: 14px;
+      border: 1px solid #1e2533;
+      background: #0c0f14;
+    }
+    .vhead {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .vhead h2 { margin: 0; font-size: 1.05rem; }
+    .tag {
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #1e293b;
+      color: #94a3b8;
+    }
+    .cols {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 900px) {
+      .cols { grid-template-columns: 1fr; }
+    }
+    .win {
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #1e2533;
+      box-shadow: 0 12px 40px rgba(0,0,0,.45);
+    }
+    .titlebar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 12px;
+      font-size: 11px;
+      color: #64748b;
+    }
+    .dots span {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 4px;
+      background: #3f3f46;
+    }
+    .body { padding: 14px 14px 12px; }
+    .app-title { margin: 0 0 4px; font-size: 1.15rem; font-weight: 700; }
+    .sub { margin: 0 0 12px; font-size: 0.75rem; color: #94a3b8; line-height: 1.35; }
+    .url {
+      width: 100%;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 0.82rem;
+      border: 1px solid #2a3548;
+      background: #151a24;
+      color: #cbd5e1;
+      margin-bottom: 10px;
+    }
+    .lang {
+      display: flex; gap: 6px; align-items: center;
+      margin-bottom: 8px; font-size: 0.8rem; color: #94a3b8;
+    }
+    .pill {
+      border: none; border-radius: 8px;
+      padding: 5px 12px; font-size: 0.75rem; font-weight: 600;
+    }
+    .status { font-size: 0.75rem; color: #64748b; margin-bottom: 10px; }
+    .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+    .btns button {
+      border: none; border-radius: 10px;
+      padding: 8px 10px; font-size: 0.75rem; font-weight: 600;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .btns svg { width: 14px; height: 14px; flex-shrink: 0; }
+    .player {
+      display: grid;
+      grid-template-columns: 1.4fr 0.9fr;
+      min-height: 280px;
+    }
+    @media (max-width: 700px) {
+      .player { grid-template-columns: 1fr; }
+    }
+    .vid {
+      background:
+        radial-gradient(ellipse at 40% 40%, rgba(56,189,248,.12), transparent 55%),
+        #05070c;
+      min-height: 220px;
+      position: relative;
+      display: grid;
+      place-items: center;
+      color: #475569;
+      font-size: 0.8rem;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 8px 10px;
+      border-top: 1px solid #1e2533;
+      align-items: center;
+    }
+    .ico {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #cbd5e1;
+      display: grid; place-items: center;
+    }
+    .ico svg { width: 16px; height: 16px; }
+    .side {
+      border-left: 1px solid #1e2533;
+      display: flex;
+      flex-direction: column;
+      min-height: 220px;
+    }
+    .tabs {
+      display: flex;
+      gap: 2px;
+      padding: 8px 8px 0;
+      border-bottom: 1px solid #1e2533;
+    }
+    .tab {
+      padding: 6px 10px;
+      font-size: 0.72rem;
+      border-radius: 8px 8px 0 0;
+      color: #94a3b8;
+      background: transparent;
+      border: none;
+    }
+    .tab.on { color: #f1f5f9; background: #151a24; }
+    .side-body {
+      padding: 10px;
+      flex: 1;
+      font-size: 0.78rem;
+      color: #94a3b8;
+      line-height: 1.4;
+    }
+    .verdict {
+      color: #e2e8f0;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .modes { display: flex; gap: 6px; margin-bottom: 8px; }
+    .pros {
+      margin: 10px 0 0;
+      padding-left: 16px;
+      color: #94a3b8;
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+
+    /* A slate */
+    .a .win, .a .side { background: #0f1115; }
+    .a .titlebar { background: #0c0e12; border-bottom: 1px solid #1c1f26; }
+    .a .pill.on { background: #334155; color: #f8fafc; }
+    .a .pill.off { background: #1c212b; color: #94a3b8; }
+    .a .primary { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; }
+    .a .secondary { background: #151a24; color: #cbd5e1; border: 1px solid #2a3548; }
+    .a .toolbar { background: #10141c; }
+    .a .ico:hover { background: #1a2230; border-color: #2a3548; }
+
+    /* B glass cold */
+    .b .win {
+      background: linear-gradient(165deg, #0c1220, #0a1018);
+    }
+    .b .titlebar {
+      background: rgba(0,0,0,.25);
+      border-bottom: 1px solid rgba(56,189,248,.12);
+    }
+    .b .url {
+      background: rgba(255,255,255,.04);
+      border-color: rgba(56,189,248,.2);
+    }
+    .b .pill.on { background: #0ea5e9; color: #082f49; }
+    .b .pill.off { background: rgba(255,255,255,.06); color: #94a3b8; }
+    .b .primary { background: #0284c7; color: #fff; }
+    .b .secondary {
+      background: rgba(255,255,255,.05);
+      color: #e2e8f0;
+      border: 1px solid rgba(148,163,184,.2);
+    }
+    .b .toolbar {
+      background: rgba(12,16,24,.85);
+      border-top-color: rgba(56,189,248,.15);
+    }
+    .b .side {
+      background: rgba(8,12,20,.9);
+      border-left-color: rgba(56,189,248,.12);
+    }
+    .b .tab.on { background: rgba(14,165,233,.15); color: #7dd3fc; }
+    .b .ico { background: rgba(255,255,255,.03); border-color: rgba(148,163,184,.12); }
+
+    /* C warm */
+    .c .win, .c .side { background: #12100e; }
+    .c .titlebar { background: #0e0c0a; border-bottom: 1px solid #2a241c; }
+    .c .url { background: #1c1814; border-color: #3f3428; color: #e7e5e4; }
+    .c .pill.on { background: #b45309; color: #fff7ed; }
+    .c .pill.off { background: #1c1814; color: #a8a29e; }
+    .c .primary { background: #92400e; color: #fff7ed; }
+    .c .secondary { background: #1c1814; color: #e7e5e4; border: 1px solid #3f3428; }
+    .c .toolbar { background: #161310; border-top-color: #2a241c; }
+    .c .side { border-left-color: #2a241c; }
+    .c .tab.on { background: #1c1814; color: #f5d0a9; }
+    .c .ico { color: #e7e5e4; }
+    .c .sub, .c .status, .c .side-body { color: #a8a29e; }
+  </style>
+</head>
+<body>
+  <h1>Главная вкладка + плеер — три варианта</h1>
+  <p class="hint">
+    Не Фон. Это <strong>Subtitle Ripper</strong>: экран скачивания и экран плеера с сайдбаром ИИ.
+    Иконки — одна SVG-тема. Напиши в чат <strong>A</strong>, <strong>B</strong> или <strong>C</strong>.
+  </p>
+  <p class="pick">Выбрано: <strong>A — Slate</strong> (накатано на главную + плеер). B/C — архив превью.</p>
+
+  <!-- A -->
+  <section class="variant a">
+    <div class="vhead">
+      <h2>A — Slate</h2>
+      <span class="tag">спокойный · близко к текущему Фону</span>
+    </div>
+    <div class="cols">
+      <div class="win">
+        <div class="titlebar"><span class="dots"><span></span><span></span><span></span></span>Скачивание</div>
+        <div class="body">
+          <div class="app-title">Subtitle Ripper</div>
+          <p class="sub">Вставь ссылку YouTube → субтитры → ИИ / музыка / фон</p>
+          <div class="url">https://youtube.com/watch?v=…</div>
+          <div class="lang"><span>Язык</span><span class="pill on">EN</span><span class="pill off">RU</span></div>
+          <div class="status">Готов</div>
+          <div class="btns">
+            <button class="primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M5 19h14"/></svg>Скачать</button>
+            <button class="secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>Плеер</button>
+            <button class="secondary">✨ ИИ</button>
+            <button class="secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12 6.5"/></svg>Музыка</button>
+            <button class="secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>Фон</button>
+          </div>
+        </div>
+      </div>
+      <div class="win">
+        <div class="titlebar"><span class="dots"><span></span><span></span><span></span></span>Плеер</div>
+        <div class="player">
+          <div>
+            <div class="vid">YouTube / WebView</div>
+            <div class="toolbar">
+              <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg></button>
+              <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button>
+              <button class="secondary" style="padding:6px 10px;font-size:0.72rem">⛶ Театр</button>
+              <button class="secondary" style="padding:6px 10px;font-size:0.72rem">✨ ИИ</button>
+              <button class="secondary" style="padding:6px 10px;font-size:0.72rem">📥 Субы</button>
+            </div>
+          </div>
+          <div class="side">
+            <div class="tabs">
+              <button class="tab on">Разбор</button>
+              <button class="tab">ИИ-моменты</button>
+              <button class="tab">Все</button>
+            </div>
+            <div class="side-body">
+              <div class="modes"><span class="pill on">Обычный</span><span class="pill off">Инвест</span></div>
+              <div class="verdict">Вердикт: смотреть стоит</div>
+              Краткий разбор ролика… таймкоды слева в видео.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="pros"><li>Не орёт цветом</li><li>Хорошо рядом с кодом</li><li>Единый язык с новым Фоном</li></ul>
+  </section>
+
+  <!-- B -->
+  <section class="variant b">
+    <div class="vhead">
+      <h2>B — Glass / холодный</h2>
+      <span class="tag">голубой акцент · чуть «продуктовее»</span>
+    </div>
+    <div class="cols">
+      <div class="win">
+        <div class="titlebar"><span class="dots"><span></span><span></span><span></span></span>Скачивание</div>
+        <div class="body">
+          <div class="app-title">Subtitle Ripper</div>
+          <p class="sub">Вставь ссылку YouTube → субтитры → ИИ / музыка / фон</p>
+          <div class="url">https://youtube.com/watch?v=…</div>
+          <div class="lang"><span>Язык</span><span class="pill on">EN</span><span class="pill off">RU</span></div>
+          <div class="status">Готов</div>
+          <div class="btns">
+            <button class="primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M5 19h14"/></svg>Скачать</button>
+            <button class="secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>Плеер</button>
+            <button class="secondary">✨ ИИ</button>
+            <button class="secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12 6.5"/></svg>Музыка</button>
+            <button class="secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>Фон</button>
+          </div>
+        </div>
+      </div>
+      <div class="win">
+        <div class="titlebar"><span class="dots"><span></span><span></span><span></span></span>Плеер</div>
+        <div class="player">
+          <div>
+            <div class="vid">YouTube / WebView</div>
+            <div class="toolbar">
+              <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg></button>
+              <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button>
+              <button class="secondary" style="padding:6px 10px;font-size:0.72rem">⛶ Театр</button>
+              <button class="secondary" style="padding:6px 10px;font-size:0.72rem">✨ ИИ</button>
+              <button class="secondary" style="padding:6px 10px;font-size:0.72rem">📥 Субы</button>
+            </div>
+          </div>
+          <div class="side">
+            <div class="tabs">
+              <button class="tab on">Разбор</button>
+              <button class="tab">ИИ-моменты</button>
+              <button class="tab">Все</button>
+            </div>
+            <div class="side-body">
+              <div class="modes"><span class="pill on">Обычный</span><span class="pill off">Инвест</span></div>
+              <div class="verdict">Вердикт: смотреть стоит</div>
+              Краткий разбор ролика… таймкоды слева в видео.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="pros"><li>Главная кнопка заметнее</li><li>Плеер/сайдбар чуть «стеклом»</li><li>Если хочется живее, чем серый инструмент</li></ul>
+  </section>
+
+  <!-- C -->
+  <section class="variant c">
+    <div class="vhead">
+      <h2>C — Тёплый ink</h2>
+      <span class="tag">янтарь · мягче вечером</span>
+    </div>
+    <div class="cols">
+      <div class="win">
+        <div class="titlebar"><span class="dots"><span></span><span></span><span></span></span>Скачивание</div>
+        <div class="body">
+          <div class="app-title">Subtitle Ripper</div>
+          <p class="sub">Вставь ссылку YouTube → субтитры → ИИ / музыка / фон</p>
+          <div class="url">https://youtube.com/watch?v=…</div>
+          <div class="lang"><span>Язык</span><span class="pill on">EN</span><span class="pill off">RU</span></div>
+          <div class="status">Готов</div>
+          <div class="btns">
+            <button class="primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M5 19h14"/></svg>Скачать</button>
+            <button class="secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg>Плеер</button>
+            <button class="secondary">✨ ИИ</button>
+            <button class="secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12 6.5"/></svg>Музыка</button>
+            <button class="secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>Фон</button>
+          </div>
+        </div>
+      </div>
+      <div class="win">
+        <div class="titlebar"><span class="dots"><span></span><span></span><span></span></span>Плеер</div>
+        <div class="player">
+          <div>
+            <div class="vid">YouTube / WebView</div>
+            <div class="toolbar">
+              <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg></button>
+              <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button>
+              <button class="secondary" style="padding:6px 10px;font-size:0.72rem">⛶ Театр</button>
+              <button class="secondary" style="padding:6px 10px;font-size:0.72rem">✨ ИИ</button>
+              <button class="secondary" style="padding:6px 10px;font-size:0.72rem">📥 Субы</button>
+            </div>
+          </div>
+          <div class="side">
+            <div class="tabs">
+              <button class="tab on">Разбор</button>
+              <button class="tab">ИИ-моменты</button>
+              <button class="tab">Все</button>
+            </div>
+            <div class="side-body">
+              <div class="modes"><span class="pill on">Обычный</span><span class="pill off">Инвест</span></div>
+              <div class="verdict">Вердикт: смотреть стоит</div>
+              Краткий разбор ролика… таймкоды слева в видео.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="pros"><li>Меньше «синего монитора»</li><li>Мягче глазам ночью</li><li>Если slate/cyan бесит</li></ul>
+  </section>
+</body>
+</html>

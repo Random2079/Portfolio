@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SR — карточка №3 (сайдбар плеера)</title>
+  <style>
+    :root { font-family: "Segoe UI", system-ui, sans-serif; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px 20px 64px; background: #080a0e; color: #e2e8f0; }
+    h1 { font-size: 1.15rem; margin: 0 0 6px; }
+    .hint { color: #94a3b8; max-width: 720px; line-height: 1.45; margin: 0 0 8px; font-size: 0.92rem; }
+    .pick { color: #64748b; font-size: 0.85rem; margin-bottom: 22px; }
+    .variant {
+      margin-bottom: 32px; padding: 16px; border-radius: 14px;
+      border: 1px solid #1e2533; background: #0c0f14;
+    }
+    .vhead { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 12px; }
+    .vhead h2 { margin: 0; font-size: 1.02rem; }
+    .tag { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; background: #1e293b; color: #94a3b8; }
+    .stage {
+      display: grid; grid-template-columns: 1.5fr 0.85fr auto;
+      min-height: 300px; border-radius: 12px; overflow: hidden;
+      border: 1px solid #1c1f26; background: #0f1115;
+    }
+    .vid {
+      background: radial-gradient(ellipse at 40% 35%, rgba(71,85,105,.2), transparent 55%), #05070c;
+      display: grid; place-items: center; color: #475569; font-size: 0.8rem;
+    }
+    .rail {
+      width: 36px; background: #0c0e12; border-left: 1px solid #1c1f26;
+      display: grid; place-items: center; color: #cbd5e1;
+    }
+    .rail svg { width: 18px; height: 18px; }
+    .side {
+      background: #0f1115; border-left: 1px solid #1c1f26;
+      display: flex; flex-direction: column; min-height: 300px;
+    }
+    .modes { display: flex; gap: 6px; padding: 10px 10px 8px; align-items: center; }
+    .modes span { color: #64748b; font-size: 0.78rem; }
+    .pill {
+      border: none; border-radius: 8px; padding: 5px 11px; font-size: 0.75rem; font-weight: 600;
+      background: #1c212b; color: #94a3b8;
+    }
+    .pill.on { background: #334155; color: #f8fafc; outline: 1px solid #475569; }
+    .body { padding: 0 10px 12px; flex: 1; overflow: auto; font-size: 0.8rem; color: #94a3b8; line-height: 1.45; }
+    .verdict { color: #e2e8f0; font-weight: 600; margin-bottom: 8px; }
+    .seg {
+      display: flex; gap: 4px; padding: 0 10px 8px;
+    }
+    .seg button {
+      flex: 1; border: 1px solid #1c1f26; background: #151a24; color: #94a3b8;
+      border-radius: 8px; padding: 6px 8px; font-size: 0.72rem; font-weight: 600;
+    }
+    .seg button.on { background: #1e293b; color: #f1f5f9; border-color: #334155; }
+    .mark {
+      display: block; width: 100%; text-align: left; margin: 0 0 6px; padding: 8px 10px;
+      border: 1px solid #1c1f26; border-radius: 8px; background: #151a24; color: #cbd5e1;
+      font-size: 0.75rem;
+    }
+    .mark .t { color: #64748b; margin-right: 6px; font-variant-numeric: tabular-nums; }
+    .split { display: grid; grid-template-rows: 1fr 1fr; gap: 0; flex: 1; min-height: 0; }
+    .split .top { border-bottom: 1px solid #1c1f26; padding: 0 10px 10px; overflow: auto; }
+    .split .bot { padding: 10px; overflow: auto; }
+    .h3 { font-size: 0.68rem; text-transform: uppercase; letter-spacing: .06em; color: #64748b; margin: 0 0 8px; }
+    .bad-tabs {
+      display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid #1c1f26;
+    }
+    .bad-tabs span {
+      padding: 6px 10px; font-size: 0.72rem; color: #64748b; border-radius: 8px 8px 0 0;
+    }
+    .bad-tabs .on { background: #151a24; color: #f1f5f9; }
+    .pros { margin: 10px 0 0; padding-left: 18px; color: #94a3b8; font-size: 0.82rem; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <h1>Карточка №3 — сайдбар плеера</h1>
+  <p class="hint">
+    Без «ИИ-моменты» / «Все». Справа — SVG сворачивания (уже в коде).
+    Сейчас в приложении стоит <strong>A</strong> (только текст). Напиши <strong>A / B / C</strong>.
+  </p>
+  <p class="pick">file → docs/design-previews/player-sidebar-card3.html</p>
+
+  <section class="variant">
+    <div class="vhead">
+      <h2>0 — было (плохо)</h2>
+      <span class="tag">QTab · моменты · Все</span>
+    </div>
+    <div class="stage">
+      <div class="vid">видео</div>
+      <div class="side">
+        <div class="modes"><span>ИИ:</span><button class="pill on">Инвест</button><button class="pill">Обычный</button></div>
+        <div class="bad-tabs"><span class="on">Разбор</span><span>ИИ-моменты</span><span>Все</span></div>
+        <div class="body"><div class="verdict">Вердикт…</div>Три вкладки жрут место и выглядят как Win95.</div>
+      </div>
+      <div class="rail" title="было: слово Разбор">Р<br>а<br>з…</div>
+    </div>
+  </section>
+
+  <section class="variant">
+    <div class="vhead">
+      <h2>A — Только текст</h2>
+      <span class="tag">сейчас в коде</span>
+    </div>
+    <div class="stage">
+      <div class="vid">видео</div>
+      <div class="side">
+        <div class="modes"><span>ИИ:</span><button class="pill on">Инвест</button><button class="pill">Обычный</button></div>
+        <div class="body">
+          <div class="verdict">Держать — сильный разбор Claude Code</div>
+          Плюсы / минусы / действие — одним скроллом. Метки — в player.html / seek из текста позже.
+        </div>
+      </div>
+      <div class="rail" aria-label="collapse">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/><polyline points="10 9 13 12 10 15"/>
+        </svg>
+      </div>
+    </div>
+    <ul class="pros"><li>Чисто, без вкладок</li><li>Максимум места под разбор</li></ul>
+  </section>
+
+  <section class="variant">
+    <div class="vhead">
+      <h2>B — Сегменты Текст | Метки</h2>
+      <span class="tag">без QTab</span>
+    </div>
+    <div class="stage">
+      <div class="vid">видео</div>
+      <div class="side">
+        <div class="modes"><span>ИИ:</span><button class="pill on">Инвест</button><button class="pill">Обычный</button></div>
+        <div class="seg"><button class="on">Текст</button><button>Метки</button></div>
+        <div class="body">
+          <div class="mark"><span class="t">[08:14]</span> But, overall…</div>
+          <div class="mark"><span class="t">[09:07]</span> This is important.</div>
+          <div class="mark"><span class="t">[11:17]</span> Probably won't…</div>
+        </div>
+      </div>
+      <div class="rail">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/><polyline points="10 9 13 12 10 15"/></svg>
+      </div>
+    </div>
+    <ul class="pros"><li>Метки остаются, но не «ИИ-моменты»</li><li>Две ghost-кнопки вместо трёх вкладок</li></ul>
+  </section>
+
+  <section class="variant">
+    <div class="vhead">
+      <h2>C — Сплит: текст сверху, метки снизу</h2>
+      <span class="tag">всё видно сразу</span>
+    </div>
+    <div class="stage">
+      <div class="vid">видео</div>
+      <div class="side">
+        <div class="modes"><span>ИИ:</span><button class="pill on">Инвест</button><button class="pill">Обычный</button></div>
+        <div class="split">
+          <div class="top body" style="padding-top:0">
+            <div class="h3">Разбор</div>
+            <div class="verdict">Держать</div>
+            Короткий текст без переключения.
+          </div>
+          <div class="bot">
+            <div class="h3">Прыжки</div>
+            <div class="mark"><span class="t">[08:14]</span> overall…</div>
+            <div class="mark"><span class="t">[09:07]</span> important</div>
+          </div>
+        </div>
+      </div>
+      <div class="rail">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/><polyline points="10 9 13 12 10 15"/></svg>
+      </div>
+    </div>
+    <ul class="pros"><li>Нет вкладок</li><li>Seek-кнопки всегда под рукой</li></ul>
+  </section>
+</body>
+</html>

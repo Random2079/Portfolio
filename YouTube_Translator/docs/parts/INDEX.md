@@ -14,5 +14,7 @@
 | 10 | [Music MP3](10-music-download.md) | `Subtitle_App.py` | №7 / M | ✅ |
 | 11 | [Parked 021 / статус 022](11-parked-021-022.md) | — | №9–10 | 021 ⬜ · 022 → 12 |
 | 12 | [Overlay музыка/mp4](12-overlay-music.md) | `overlay_player.py` | №10 / IDEA-022 | 🟡 |
+| 16 | [Overlay UX polish P1–P9](16-overlay-ux-polish.md) | `overlay_player.py`, `Subtitle_App.py` | №13–18 | ✅ |
+| 17 | [UI backup / запас интерфейса](17-ui-backup.md) | `backups/ui/`, `overlay_player.py` | **№19 / U** | 🟡 |
 
 [TZ](../TZ.md) · [PROMPT](../PROMPT_FOR_AGENT.md) · [карта docs](../README.md)

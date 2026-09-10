@@ -4,7 +4,7 @@
 
 | Файл | Роль |
 |------|------|
-| [TZ.md](TZ.md) | Цель, карточки №1–10, слои, «не делаем», проверка |
+| [TZ.md](TZ.md) | Цель, карточки №1–19, слои, «не делаем», проверка |
 | [PROMPT_FOR_AGENT.md](PROMPT_FOR_AGENT.md) | Блок для нового чата |
 | [parts/INDEX.md](parts/INDEX.md) | Список parts |
 
@@ -24,5 +24,7 @@
 | 10 Music | `Subtitle_App.py` (audio yt-dlp) |
 | 11 Parked 021 / статус 022 | `IDEAS.md` · 022 → part 12 |
 | 12 Overlay (IDEA-022) | `overlay_player.py`, кнопка «Фон» в `Subtitle_App.py` |
+| 16 Overlay UX polish | `overlay_player.py` (P1–P9) |
+| 17 UI backup / запас | `backups/ui/`, контракт UX · карточка №19 |
 
 Вход для человека (быстрый старт): [../README.md](../README.md).

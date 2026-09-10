@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Фон / overlay — 3 варианта UI</title>
+  <style>
+    :root { font-family: "Segoe UI", system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px 24px 48px;
+      background: #0a0c10;
+      color: #e2e8f0;
+    }
+    h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 6px; }
+    .hint { color: #94a3b8; font-size: 0.92rem; margin: 0 0 8px; max-width: 720px; line-height: 1.45; }
+    .pick { color: #64748b; font-size: 0.85rem; margin-bottom: 22px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+      gap: 22px;
+    }
+    .card-label {
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: 8px;
+    }
+    .card-label strong { color: #f1f5f9; }
+    .tag {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      letter-spacing: 0;
+      text-transform: none;
+      vertical-align: middle;
+    }
+    .tag-now { background: #14532d; color: #86efac; }
+    .mock {
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #1e2533;
+      box-shadow: 0 16px 48px rgba(0,0,0,.5);
+      background: #000;
+    }
+    .stage {
+      height: 160px;
+      background:
+        radial-gradient(ellipse at 30% 40%, rgba(56,189,248,.15), transparent 50%),
+        radial-gradient(ellipse at 70% 60%, rgba(99,102,241,.12), transparent 45%),
+        #05070c;
+      position: relative;
+    }
+    .stage::after {
+      content: "видео / анимация";
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: #475569;
+      font-size: 0.8rem;
+    }
+    .bar {
+      padding: 10px 12px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .row { display: flex; align-items: center; gap: 6px; }
+    .row.grow > .seek { flex: 1; }
+    .ico {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      display: grid; place-items: center;
+      border: 1px solid transparent;
+      background: transparent;
+      cursor: default;
+      color: #cbd5e1;
+    }
+    .ico svg { width: 18px; height: 18px; }
+    .ghost {
+      height: 32px;
+      padding: 0 10px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      border: 1px solid #2a3548;
+      background: #151a24;
+      color: #e2e8f0;
+    }
+    .ghost svg { width: 14px; height: 14px; }
+    .meta { color: #94a3b8; font-size: 0.75rem; min-width: 72px; }
+    .seek, .op {
+      height: 4px;
+      border-radius: 2px;
+      background: #1e2533;
+      position: relative;
+      flex: 1;
+    }
+    .seek::after, .op::after {
+      content: "";
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 35%;
+      border-radius: 2px;
+      background: #475569;
+    }
+    .op { height: 6px; }
+    .knob {
+      position: absolute;
+      top: 50%;
+      left: 35%;
+      width: 12px; height: 12px;
+      margin: -6px 0 0 -6px;
+      border-radius: 50%;
+      background: #e2e8f0;
+      border: 1px solid #64748b;
+    }
+    .cap { color: #94a3b8; font-size: 0.75rem; }
+    .foot { color: #64748b; font-size: 0.7rem; margin-top: 2px; }
+    .pros {
+      margin: 10px 0 0;
+      padding: 0 0 0 16px;
+      color: #94a3b8;
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+
+    /* A — сейчас (slate / ghost) */
+    .a .bar { background: #10141c; border-top: 1px solid #1e2533; }
+    .a .ico:hover { background: #1a2230; border-color: #2a3548; }
+    .a .op {
+      background: linear-gradient(90deg, #0b0e14, #94a3b8);
+    }
+    .a .op::after { display: none; }
+
+    /* B — glass / colder */
+    .b .bar {
+      background: rgba(12, 16, 24, 0.82);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid rgba(148,163,184,.18);
+    }
+    .b .ico {
+      border-radius: 10px;
+      background: rgba(255,255,255,.03);
+      border-color: rgba(148,163,184,.12);
+    }
+    .b .ghost {
+      background: rgba(255,255,255,.04);
+      border-color: rgba(148,163,184,.2);
+    }
+    .b .seek::after, .b .op::after { background: #38bdf8; }
+    .b .knob { background: #7dd3fc; border-color: #0ea5e9; }
+    .b .op { background: rgba(255,255,255,.08); }
+
+    /* C — warm ink / amber accent */
+    .c .bar {
+      background: #12100e;
+      border-top: 1px solid #2a241c;
+    }
+    .c .ico { color: #e7e5e4; }
+    .c .ghost {
+      background: #1c1814;
+      border-color: #3f3428;
+      color: #fafaf9;
+    }
+    .c .seek::after, .c .op::after { background: #d6a56a; }
+    .c .knob { background: #f5d0a9; border-color: #b45309; }
+    .c .op {
+      background: linear-gradient(90deg, #0c0a09, #a8a29e);
+    }
+    .c .op::after { display: none; }
+    .c .meta, .c .cap, .c .foot { color: #a8a29e; }
+  </style>
+</head>
+<body>
+  <h1>Фон — три варианта панели (одна семья SVG-иконок)</h1>
+  <p class="hint">
+    Иконки везде одинаковые (stroke, без зоопарка PNG).
+    Отличается только «кожа»: фон панели, акценты слайдеров, настроение.
+    Напиши в чат <strong>A</strong>, <strong>B</strong> или <strong>C</strong> — дотянем весь overlay под выбранный.
+  </p>
+  <p class="pick">Не дизайнерский бриф — просто «какой глаз не бесит».</p>
+
+  <div class="grid">
+    <!-- A -->
+    <div>
+      <div class="card-label"><strong>A — Slate</strong><span class="tag tag-now">сейчас в коде</span></div>
+      <div class="mock a">
+        <div class="stage"></div>
+        <div class="bar">
+          <div class="row grow">
+            <button class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg></button>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg></button>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+            <span class="meta">0:01 / 3:46</span>
+            <div class="seek"><span class="knob"></span></div>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button>
+          </div>
+          <div class="row">
+            <span class="cap">Плотность</span>
+            <div class="op"><span class="knob" style="left:70%"></span></div>
+            <span class="cap">70%</span>
+            <span class="cap">Сквозь: выкл</span>
+            <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>Каталог</span>
+            <span class="ghost">Скрыть</span>
+          </div>
+          <div class="foot">Space play · Ctrl+O сквозь · Esc каталог</div>
+        </div>
+      </div>
+      <ul class="pros">
+        <li>Уже стоит в приложении</li>
+        <li>Спокойный, не орёт цветом</li>
+        <li>Хорошо рядом с Cursor / тёмным кодом</li>
+      </ul>
+    </div>
+
+    <!-- B -->
+    <div>
+      <div class="card-label"><strong>B — Glass / холодный</strong></div>
+      <div class="mock b">
+        <div class="stage"></div>
+        <div class="bar">
+          <div class="row grow">
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg></button>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg></button>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+            <span class="meta">0:01 / 3:46</span>
+            <div class="seek"><span class="knob"></span></div>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button>
+          </div>
+          <div class="row">
+            <span class="cap">Плотность</span>
+            <div class="op"><span class="knob" style="left:70%"></span></div>
+            <span class="cap">70%</span>
+            <span class="cap">Сквозь: выкл</span>
+            <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>Каталог</span>
+            <span class="ghost">Скрыть</span>
+          </div>
+          <div class="foot">Space play · Ctrl+O сквозь · Esc каталог</div>
+        </div>
+      </div>
+      <ul class="pros">
+        <li>Панель чуть «стеклянная», видео просвечивает</li>
+        <li>Голубой акцент на seek — заметнее управление</li>
+        <li>Чуть больше «продуктовый» вид</li>
+      </ul>
+    </div>
+
+    <!-- C -->
+    <div>
+      <div class="card-label"><strong>C — Тёплый ink</strong></div>
+      <div class="mock c">
+        <div class="stage"></div>
+        <div class="bar">
+          <div class="row grow">
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6 4 20 12 6 20 6 4"/></svg></button>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg></button>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+            <span class="meta">0:01 / 3:46</span>
+            <div class="seek"><span class="knob"></span></div>
+            <button class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button>
+          </div>
+          <div class="row">
+            <span class="cap">Плотность</span>
+            <div class="op"><span class="knob" style="left:70%"></span></div>
+            <span class="cap">70%</span>
+            <span class="cap">Сквозь: выкл</span>
+            <span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>Каталог</span>
+            <span class="ghost">Скрыть</span>
+          </div>
+          <div class="foot">Space play · Ctrl+O сквозь · Esc каталог</div>
+        </div>
+      </div>
+      <ul class="pros">
+        <li>Менее «синий монитор», теплее</li>
+        <li>Янтарный акцент — мягче глаз вечером</li>
+        <li>Если холодный slate бесит — это альтернатива</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

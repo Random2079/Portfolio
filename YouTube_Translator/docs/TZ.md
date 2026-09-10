@@ -35,6 +35,13 @@
 | 8 | ui_motion (микроанимации) | G | ✅ | Hover/press + BusyPulse на Скачать / ИИ |
 | 9 | Файлы `dist/` внутри приложения | IDEA-021 | ⬜ парковка | Список / копировать / переименовать / удалить — **не стартовать** без команды |
 | 10 | Overlay музыка/mp4 поверх окон | IDEA-022 | 🟡 MVP | Кнопка **🎞 Фон** → `overlay_player.py`: каталог, play+визуал, opacity, click-through |
+| **13** | Overlay: opacity каталога / Esc | 022p / P1 | ✅ | Каталог непрозрачный; opacity только в play · [part 16](parts/16-overlay-ux-polish.md) |
+| **14** | Overlay: обычные окна | 022p / P2 | ✅ | Без always-on-top у SR/Фона |
+| **15** | Overlay: Назад → SR | 022p / P3 | ✅ | Кнопка закрывает Фон, показывает Translator |
+| **16** | Overlay: без «Обновить» | 022p / P4 | ✅ | Rescan на show / смена папки |
+| **17** | Overlay: Levan Polka | 022p / P5 | ✅ | Удалён трек из Music/YouTube_DL |
+| **18** | Overlay: Настр. + хоткеи + фон | 022p / P6–P9 | ✅ | Антизависание, плеер-клавиши, play when hidden, remap |
+| **19** | UI backup / запас интерфейса | U | 🟡 | Перед ломкой UI — копия в `backups/ui/`; не переписывать логику с нуля · [part 17](parts/17-ui-backup.md) |
 
 Легенда: ✅ сделано в коде · 🟡 частично / есть gap · ⬜ не начато / парковка.
 
@@ -57,7 +64,8 @@
 | G — ui_motion | ✅ | `ui_motion.py` |
 | E — «Полный браузер-клон» | 🚫 | **не в scope** |
 | IDEA-021 | ⬜ | парковка в `IDEAS.md` |
-| IDEA-022 overlay | 🟡 | MVP: `overlay_player.py` + кнопка «Фон» |
+| IDEA-022 overlay | 🟡→polish ✅ | MVP + UX polish P1–P9 · [part 16](parts/16-overlay-ux-polish.md) |
+| **U — UI backup / запас** | **🟡** | Копии UI перед крупными правками; контракт UX · [part 17](parts/17-ui-backup.md) |
 
 ---
 
@@ -99,6 +107,7 @@
 - Полноценный Chrome-клон (вкладки на весь интернет, расширения, sync).
 - Авто-ИИ при каждом открытии плеера / смене URL без клика.
 - Переписывание GUI с нуля / возврат на CustomTkinter как боевой UI.
+- Крупные UI-правки overlay/хоткеев/кликов **без** копии в `backups/ui/` (см. карточку №19 / [part 17](parts/17-ui-backup.md)) — иначе снова настраивать всю логику интерфейса с нуля.
 - Реализация IDEA-021 без явной команды; IDEA-022 MVP уже в коде (`overlay_player.py`) — не раздувать без запроса.
 - Торговые сигналы buy/sell «с ролика» (запрет уже в промпте invest).
 - Коммит/пуш без просьбы пользователя.
@@ -170,6 +179,8 @@ python Subtitle_App.py
 | 10 | [10-music-download.md](parts/10-music-download.md) | `Subtitle_App.py` | №7 / M |
 | 11 | [11-parked-021-022.md](parts/11-parked-021-022.md) | 021 парковка · 022 → 12 | №9–10 |
 | 12 | [12-overlay-music.md](parts/12-overlay-music.md) | `overlay_player.py`, `Subtitle_App.py` | №10 / IDEA-022 |
+| 16 | [16-overlay-ux-polish.md](parts/16-overlay-ux-polish.md) | `overlay_player.py`, `Subtitle_App.py` | №13–18 |
+| 17 | [17-ui-backup.md](parts/17-ui-backup.md) | `backups/ui/`, `overlay_player.py` | **№19 / U** |
 
 ---
 
