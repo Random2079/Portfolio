@@ -282,6 +282,7 @@ def _icon_button(tooltip: str, icon_name: str, slot) -> QPushButton:
 GWL_EXSTYLE = -20
 WS_EX_LAYERED = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
+WS_EX_TOPMOST = 0x00000008
 WM_HOTKEY = 0x0312
 WH_KEYBOARD_LL = 13
 WM_KEYDOWN = 0x0100
@@ -382,6 +383,8 @@ def _dbg_log(
     *,
     run_id: str = "pre-fix",
 ) -> None:
+    # Отключено: запись в OneDrive на каждый хоткей/CT подвешивала UI.
+    return
     try:
         payload = {
             "sessionId": "ec7f7f",
@@ -398,11 +401,24 @@ def _dbg_log(
         pass
 
 
-def _dbg_exstyle(hwnd: int) -> int:
+def _win_long_fns():
     user32 = ctypes.windll.user32
     if ctypes.sizeof(ctypes.c_void_p) == 8:
-        return int(user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE))
-    return int(user32.GetWindowLongW(hwnd, GWL_EXSTYLE))
+        get_long = user32.GetWindowLongPtrW
+        set_long = user32.SetWindowLongPtrW
+        get_long.restype = ctypes.c_longlong
+        set_long.restype = ctypes.c_longlong
+        get_long.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        set_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_longlong]
+    else:
+        get_long = user32.GetWindowLongW
+        set_long = user32.SetWindowLongW
+    return get_long, set_long
+
+
+def _dbg_exstyle(hwnd: int) -> int:
+    get_long, _ = _win_long_fns()
+    return int(get_long(hwnd, GWL_EXSTYLE))
 
 
 def _dbg_count_transparent_children(root_hwnd: int) -> dict:
@@ -777,10 +793,11 @@ class OverlayPlayerWindow(QWidget):
     """Окно фона: каталог → play; always-on-top; Назад → close."""
 
     closed = Signal()
+    hidden_keep = Signal()  # устарело: Ctrl+Shift+O больше не поднимает Translator
 
     def __init__(self, start_dir: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Фон — overlay (IDEA-022)")
+        self.setWindowTitle(_OVERLAY_WINDOW_TITLE)
         # Каталог — обычное окно; topmost только в полном экране (см. _sync_topmost_state)
         self.setWindowFlags(
             Qt.WindowType.Window
@@ -815,10 +832,6 @@ class OverlayPlayerWindow(QWidget):
         self._hotkey_hwnd: int | None = None
         self._last_hk_id: int | None = None
         self._last_hk_t: float = 0.0
-        # В stage: нижний хром в отдельном окне (opacity 100%), видео — в основном
-        self._chrome_host: QWidget | None = None
-        self._chrome_host_layout: QVBoxLayout | None = None
-
         self._player: QMediaPlayer | None = None
         self._audio: QAudioOutput | None = None
         if _HAS_MULTIMEDIA:
@@ -965,7 +978,9 @@ class OverlayPlayerWindow(QWidget):
         dens.setSpacing(6)
         self.opacity_caption = QLabel("Плотность")
         self.opacity_caption.setObjectName("opacityCaption")
-        self.opacity_caption.setToolTip("Только полное окно: насколько видно видео поверх стола")
+        self.opacity_caption.setToolTip(
+            "Работает при Ctrl+O (сквозь): насколько видно видео поверх стола. Без сквозь — всегда 100%."
+        )
         dens.addWidget(self.opacity_caption)
         self.opacity_down_btn = _icon_button(
             "Прозрачнее (−). Ctrl+[ · только полное окно",
@@ -980,7 +995,7 @@ class OverlayPlayerWindow(QWidget):
         self.opacity_slider.setValue(int(self._prefs.get("stage_opacity", 85)))
         self.opacity_slider.setMinimumWidth(120)
         self.opacity_slider.setToolTip(
-            "Только полное окно — прозрачность видео. Панель снизу всегда плотная."
+            "Плотность только в режиме сквозь (Ctrl+O). Без сквозь картинка всегда плотная."
         )
         self.opacity_slider.valueChanged.connect(self._on_opacity)
         dens.addWidget(self.opacity_slider, stretch=1)
@@ -1102,7 +1117,8 @@ class OverlayPlayerWindow(QWidget):
                 continue
             seq = QKeySequence(str(spec).strip())
             sc = QShortcut(seq, self)
-            sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            # WindowShortcut: не жрать Space/стрелки у других окон того же Qt-процесса
+            sc.setContext(Qt.ShortcutContext.WindowShortcut)
             sc.setAutoRepeat(False)
             sc.activated.connect(slot)
             self._shortcuts.append(sc)
@@ -1344,20 +1360,25 @@ class OverlayPlayerWindow(QWidget):
         self.list.hide()
         self.list.setMaximumWidth(0)
         self._splitter.setSizes([0, max(self._splitter.width(), 1)])
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.showFullScreen()
         self.raise_()
         self.activateWindow()
         self._sync_topmost_state()
         self._update_chrome_visibility()
+        QTimer.singleShot(50, self._sync_topmost_state)
         self._apply_output_volume()
         self._refresh_hint()
         self._register_hotkeys()
+        if not self._click_through:
+            self.setWindowOpacity(1.0)
+            self._repair_video_surface()
         if self._playing:
             self._apply_stage_opacity()
-        QTimer.singleShot(0, self._sync_chrome_host_geometry)
-        QTimer.singleShot(50, self._sync_chrome_host_geometry)
         if not self._click_through:
-            self.status.setText("Полное окно · снизу Каталог · Ctrl+O — сквозь без панели")
+            self.status.setText(
+                "Полное окно · Ctrl+O — сквозь (UI спрячется) · Ctrl+Shift+O — скрыть"
+            )
         # #region agent log
         try:
             hwnd = int(self.winId()) if self.winId() else 0
@@ -1368,13 +1389,15 @@ class OverlayPlayerWindow(QWidget):
                 {
                     "ct": self._click_through,
                     "opacity": float(self.windowOpacity()),
+                    "slider": int(self.opacity_slider.value()),
                     "fullscreen": self.isFullScreen(),
                     "root_has_transparent": bool((_dbg_exstyle(hwnd) if hwnd else 0) & WS_EX_TRANSPARENT),
                     "children": _dbg_count_transparent_children(hwnd) if hwnd else None,
                 },
+                run_id="post-fix",
             )
         except Exception as e:
-            _dbg_log("H4-H5", "overlay_player.py:_enter_stage", "stage log fail", {"err": str(e)})
+            _dbg_log("H4-H5", "overlay_player.py:_enter_stage", "stage log fail", {"err": str(e)}, run_id="post-fix")
         # #endregion
 
     def _enter_catalog(self) -> None:
@@ -1387,6 +1410,7 @@ class OverlayPlayerWindow(QWidget):
         self._stage_mode = False
         self.list.setMaximumWidth(16777215)
         self.list.show()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
         self.showNormal()
         if self._normal_geometry is not None:
             self.setGeometry(self._normal_geometry)
@@ -1544,115 +1568,59 @@ class OverlayPlayerWindow(QWidget):
 
     def _apply_catalog_opacity(self) -> None:
         self.setWindowOpacity(1.0)
-        if self._chrome_host is not None:
-            self._chrome_host.setWindowOpacity(1.0)
+        self._write_root_exstyle()
 
     def _apply_stage_opacity(self) -> None:
-        """Плотность только у окна с видео; нижняя панель (chrome host) — всегда 100%."""
-        val = self.opacity_slider.value()
-        self.setWindowOpacity(max(0.15, min(1.0, val / 100.0)))
-        if self._chrome_is_detached() and self._chrome_host is not None:
-            self._chrome_host.setWindowOpacity(1.0)
-            self._chrome_host.raise_()
+        """Без сквозь — плотное видео. Со сквозь — слайдер плотности (фон)."""
+        if not self._click_through:
+            self.setWindowOpacity(1.0)
+        else:
+            val = self.opacity_slider.value()
+            self.setWindowOpacity(max(0.15, min(1.0, val / 100.0)))
+        self._write_root_exstyle()
 
     def _chrome_is_detached(self) -> bool:
-        return (
-            self._chrome_host is not None
-            and self.chrome_bottom.parentWidget() is self._chrome_host
-        )
-
-    def _ensure_chrome_host(self) -> QWidget:
-        if self._chrome_host is not None:
-            return self._chrome_host
-        host = QWidget(None)
-        host.setObjectName("chromeHost")
-        host.setWindowTitle("Фон — панель")
-        host.setWindowFlags(
-            Qt.WindowType.Tool
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-        )
-        host.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        host.setStyleSheet(
-            "QWidget#chromeHost { background: #10141c; border-top: 1px solid #1e2533; }"
-        )
-        lay = QVBoxLayout(host)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
-        self._chrome_host = host
-        self._chrome_host_layout = lay
-        return host
+        return False
 
     def _detach_chrome_for_stage(self) -> None:
-        """Transport + нижняя панель → отдельное непрозрачное окно поверх видео."""
-        host = self._ensure_chrome_host()
-        assert self._chrome_host_layout is not None
-        if self.transport_bar.parentWidget() is not host:
-            shell = getattr(self, "_video_shell", None)
-            if shell is not None:
-                shell.removeWidget(self.transport_bar)
-            self.transport_bar.setParent(host)
-            self._chrome_host_layout.insertWidget(0, self.transport_bar)
-            self.transport_bar.show()
-        if self.chrome_bottom.parentWidget() is not host:
-            root = self.layout()
-            if root is not None:
-                root.removeWidget(self.chrome_bottom)
-            self.chrome_bottom.setParent(host)
-            self._chrome_host_layout.addWidget(self.chrome_bottom)
-            self.chrome_bottom.show()
+        """Панель в том же окне. Ctrl+O — спрятать управление (только видео)."""
+        if self._click_through:
+            self._hide_stage_controls()
+            return
         self.hide_btn.show()
-        self.density_bar.show()
+        if hasattr(self, "density_bar"):
+            self.density_bar.show()
         if hasattr(self, "chrome_actions"):
             self.chrome_actions.show()
-        host.show()
-        host.setWindowOpacity(1.0)
-        self._sync_chrome_host_geometry()
-        self._force_topmost_widget(host, topmost=True)
+        self.catalog_btn.show()
+        self.transport_bar.show()
+        self.chrome_bottom.show()
+
+    def _hide_stage_controls(self) -> None:
+        self.chrome_top.hide()
+        self.transport_bar.hide()
+        self.chrome_bottom.hide()
+        self.hint.hide()
+        self.catalog_btn.hide()
+        self.hide_btn.hide()
+        if hasattr(self, "density_bar"):
+            self.density_bar.hide()
+        if hasattr(self, "chrome_actions"):
+            self.chrome_actions.hide()
+        lay = self.layout()
+        if lay is not None:
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(0)
 
     def _attach_chrome_to_main(self) -> None:
-        """Вернуть transport под видео и chrome в основное окно (каталог)."""
-        host = self._chrome_host
-        if host is not None and self._chrome_host_layout is not None:
-            if self.transport_bar.parentWidget() is host:
-                self._chrome_host_layout.removeWidget(self.transport_bar)
-            if self.chrome_bottom.parentWidget() is host:
-                self._chrome_host_layout.removeWidget(self.chrome_bottom)
-            host.hide()
-            self._force_topmost_widget(host, topmost=False)
-        if self.transport_bar.parentWidget() is not self.video_column:
-            self.transport_bar.setParent(self.video_column)
-            shell = getattr(self, "_video_shell", None)
-            if shell is not None:
-                shell.addWidget(self.transport_bar, stretch=0)
-            self.transport_bar.show()
-        root = self.layout()
-        if self.chrome_bottom.parentWidget() is not self:
-            self.chrome_bottom.setParent(self)
-            if root is not None:
-                root.addWidget(self.chrome_bottom)
-        self.chrome_bottom.show()
         self.hide_btn.hide()
-        self.density_bar.hide()
+        if hasattr(self, "density_bar"):
+            self.density_bar.hide()
+        self.transport_bar.show()
+        self.chrome_bottom.show()
 
     def _sync_chrome_host_geometry(self) -> None:
-        if self._chrome_host is None or not self._chrome_host.isVisible():
-            return
-        if self.chrome_bottom.parentWidget() is not self._chrome_host:
-            return
-        self.transport_bar.adjustSize()
-        self.chrome_bottom.adjustSize()
-        th = max(48, self.transport_bar.sizeHint().height())
-        ch = max(80, self.chrome_bottom.sizeHint().height())
-        total = th + ch + 8
-        g = self.geometry()
-        self._chrome_host.setGeometry(
-            g.x(),
-            g.y() + max(0, g.height() - total),
-            max(200, g.width()),
-            total,
-        )
-        self._chrome_host.setWindowOpacity(1.0)
+        return
 
     def _force_topmost_widget(self, widget: QWidget, *, topmost: bool = True) -> None:
         if sys.platform != "win32":
@@ -1661,29 +1629,26 @@ class OverlayPlayerWindow(QWidget):
             hwnd = int(widget.winId())
         except Exception:
             return
-        HWND_TOPMOST = -1
-        HWND_NOTOPMOST = -2
+        HWND_TOPMOST = ctypes.c_void_p(-1)
+        HWND_NOTOPMOST = ctypes.c_void_p(-2)
         SWP_NOMOVE = 0x0002
         SWP_NOSIZE = 0x0001
         SWP_NOACTIVATE = 0x0010
+        SWP_SHOWWINDOW = 0x0040
         ctypes.windll.user32.SetWindowPos(
-            hwnd,
+            ctypes.c_void_p(hwnd),
             HWND_TOPMOST if topmost else HWND_NOTOPMOST,
             0,
             0,
             0,
             0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
         )
 
     def _sync_topmost_state(self) -> None:
         """Topmost только в полном окне. Каталог — обычный z-order."""
         want = bool(self._stage_mode)
         self._force_topmost_widget(self, topmost=want)
-        if self._chrome_host is not None and self._chrome_host.isVisible():
-            self._force_topmost_widget(self._chrome_host, topmost=want)
-        elif self._chrome_host is not None:
-            self._force_topmost_widget(self._chrome_host, topmost=False)
 
     def _update_ct_label(self) -> None:
         if self._click_through:
@@ -1694,23 +1659,10 @@ class OverlayPlayerWindow(QWidget):
             self.ct_label.setStyleSheet("")
 
     def _update_chrome_visibility(self) -> None:
-        """При сквозь — без нижней панели; только хоткеи.
-        В stage панель — отдельное непрозрачное окно + блок плотности.
-        """
+        """Каталог / сцена: одна панель в том же окне (без второго HWND)."""
         lay = self.layout()
         if self._click_through:
-            self.chrome_top.hide()
-            if hasattr(self, "density_bar"):
-                self.density_bar.hide()
-            if self._chrome_host is not None:
-                self._chrome_host.hide()
-            self.chrome_bottom.hide()
-            if hasattr(self, "transport_bar") and not self._stage_mode:
-                # в stage transport в host (уже hide); в каталоге CT не должен быть
-                pass
-            if lay is not None:
-                lay.setContentsMargins(0, 0, 0, 0)
-                lay.setSpacing(0)
+            self._hide_stage_controls()
             return
         if self._stage_mode:
             self.chrome_top.hide()
@@ -1752,91 +1704,42 @@ class OverlayPlayerWindow(QWidget):
             self.status.setText("Click-through только на Windows")
             return
         self._click_through = bool(enabled)
-        # #region agent log
-        try:
-            hwnd = int(self.winId()) if self.winId() else 0
-            pre = {
-                "enabled": enabled,
-                "stage": self._stage_mode,
-                "visible": self.isVisible(),
-                "minimized": self.isMinimized(),
-                "opacity": float(self.windowOpacity()),
-                "root_ex": _dbg_exstyle(hwnd) if hwnd else None,
-                "children_pre": _dbg_count_transparent_children(hwnd) if hwnd else None,
-            }
-            ch = self._chrome_host
-            if ch is not None and ch.winId():
-                ch_hwnd = int(ch.winId())
-                pre["chrome_visible"] = ch.isVisible()
-                pre["chrome_ex"] = _dbg_exstyle(ch_hwnd)
-                pre["chrome_children"] = _dbg_count_transparent_children(ch_hwnd)
-            _dbg_log("H1-H2", "overlay_player.py:_set_click_through:pre", "CT toggle before apply", pre)
-        except Exception as e:
-            _dbg_log("H1-H2", "overlay_player.py:_set_click_through:pre", "CT pre log fail", {"err": str(e)})
-        # #endregion
         self._apply_exstyle()
         self._update_ct_label()
         self._update_chrome_visibility()
         if enabled:
-            # Не оставлять «кирпич» 100% — иначе кодить под фоном нельзя
-            if self._stage_mode and self.opacity_slider.value() > 70:
-                self.opacity_slider.setValue(40)
-            elif self._stage_mode:
+            # Без бэкапа: в сквозь сразу рабочая плотность + только видео
+            if self._stage_mode:
+                if self.opacity_slider.value() > 55:
+                    self.opacity_slider.blockSignals(True)
+                    self.opacity_slider.setValue(40)
+                    self.opacity_slider.blockSignals(False)
+                    if hasattr(self, "opacity_value"):
+                        self.opacity_value.setText("40%")
                 self._apply_stage_opacity()
+                self.status.setText("Сквозь · UI скрыт · Ctrl+O — вернуть · Ctrl+Shift+O — скрыть окно")
             self._sync_topmost_state()
-            # Native video HWND часто появляется с задержкой — добить TRANSPARENT
             QTimer.singleShot(50, self._reapply_ct_children)
-            QTimer.singleShot(250, self._reapply_ct_children)
+            QTimer.singleShot(50, self._sync_topmost_state)
         else:
             if self._stage_mode:
                 self._apply_stage_opacity()
-                self.status.setText(
-                    "Сквозь выкл · панель снова внизу · Ctrl+O — снова сквозь"
-                )
+                self.status.setText("Сквозь выкл · живое видео · Ctrl+O — фон/сквозь")
             else:
                 self._apply_catalog_opacity()
                 self.status.setText("Сквозь выкл")
             self._sync_topmost_state()
-        # #region agent log
-        try:
-            hwnd = int(self.winId()) if self.winId() else 0
-            post = {
-                "enabled": self._click_through,
-                "stage": self._stage_mode,
-                "visible": self.isVisible(),
-                "opacity": float(self.windowOpacity()),
-                "root_ex": _dbg_exstyle(hwnd) if hwnd else None,
-                "root_has_transparent": bool((_dbg_exstyle(hwnd) if hwnd else 0) & WS_EX_TRANSPARENT),
-                "children_post": _dbg_count_transparent_children(hwnd) if hwnd else None,
-            }
-            ch = self._chrome_host
-            if ch is not None and ch.winId():
-                ch_hwnd = int(ch.winId())
-                post["chrome_visible"] = ch.isVisible()
-                post["chrome_ex"] = _dbg_exstyle(ch_hwnd)
-                post["chrome_has_transparent"] = bool(_dbg_exstyle(ch_hwnd) & WS_EX_TRANSPARENT)
-            _dbg_log("H1-H2", "overlay_player.py:_set_click_through:post", "CT toggle after apply", post)
-        except Exception as e:
-            _dbg_log("H1-H2", "overlay_player.py:_set_click_through:post", "CT post log fail", {"err": str(e)})
-        # #endregion
+            self._write_root_exstyle()
+            if self._stage_mode:
+                self._detach_chrome_for_stage()
+            QTimer.singleShot(0, self._repair_video_surface)
+            QTimer.singleShot(50, self._sync_topmost_state)
 
     def _reapply_ct_children(self) -> None:
         if not self._click_through or sys.platform != "win32":
             return
         try:
-            self._set_click_through_on_tree(int(self.winId()), True)
-            # #region agent log
-            hwnd = int(self.winId())
-            _dbg_log(
-                "H1",
-                "overlay_player.py:_reapply_ct_children",
-                "reapplied TRANSPARENT on children",
-                {
-                    "children": _dbg_count_transparent_children(hwnd),
-                    "root_has_transparent": bool(_dbg_exstyle(hwnd) & WS_EX_TRANSPARENT),
-                },
-            )
-            # #endregion
+            self._set_video_input_enabled(False)
         except Exception:
             pass
 
@@ -1844,71 +1747,51 @@ class OverlayPlayerWindow(QWidget):
         self._set_click_through(not self._click_through)
 
     def _hide_keep_music(self) -> None:
-        """P8: hide без stop."""
+        """Спрятать Фон, музыка играет. Translator не трогаем — фокус остаётся где был."""
+        if self._click_through:
+            self._set_click_through(False)
+        self.hide()
+        # Не emit hidden_keep: иначе Translator вылезает поверх Cursor.
+
+    def present_visible(self) -> None:
+        """Кнопка «Фон» / повторный show: каталог на экране, не невидимый leftover."""
+        if self._click_through:
+            self._set_click_through(False)
+        if self._stage_mode:
+            self._enter_catalog()
+        self.showNormal()
+        if self._normal_geometry is not None:
+            self.setGeometry(self._normal_geometry)
+        else:
+            self.resize(1100, 640)
+        self.raise_()
+        self.activateWindow()
         # #region agent log
         try:
+            g = self.geometry()
             hwnd = int(self.winId()) if self.winId() else 0
-            data = {
-                "stage": self._stage_mode,
-                "ct": self._click_through,
-                "visible_before": self.isVisible(),
-                "root_ex": _dbg_exstyle(hwnd) if hwnd else None,
-                "root_has_transparent": bool((_dbg_exstyle(hwnd) if hwnd else 0) & WS_EX_TRANSPARENT),
-                "children": _dbg_count_transparent_children(hwnd) if hwnd else None,
-            }
-            ch = self._chrome_host
-            if ch is not None:
-                data["chrome_visible_before"] = ch.isVisible()
-                if ch.winId():
-                    data["chrome_ex"] = _dbg_exstyle(int(ch.winId()))
-            _dbg_log("H3", "overlay_player.py:_hide_keep_music", "hide keep music", data)
-        except Exception as e:
-            _dbg_log("H3", "overlay_player.py:_hide_keep_music", "hide log fail", {"err": str(e)})
-        # #endregion
-        if self._chrome_host is not None:
-            self._chrome_host.hide()
-        self.hide()
-        # #region agent log
-        def _after_hide():
-            try:
-                hwnd = int(self.winId()) if self.winId() else 0
-                user32 = ctypes.windll.user32
-                data = {
-                    "qt_visible": self.isVisible(),
-                    "win_visible": bool(user32.IsWindowVisible(hwnd)) if hwnd else None,
+            _dbg_log(
+                "W1-W2",
+                "overlay_player.py:present_visible",
+                "presented catalog",
+                {
+                    "visible": self.isVisible(),
+                    "geom": [g.x(), g.y(), g.width(), g.height()],
+                    "opacity": float(self.windowOpacity()),
+                    "root_ex": _dbg_exstyle(hwnd) if hwnd else None,
                     "ct": self._click_through,
                     "stage": self._stage_mode,
-                    "root_ex": _dbg_exstyle(hwnd) if hwnd else None,
-                    "children": _dbg_count_transparent_children(hwnd) if hwnd else None,
-                }
-                ch = self._chrome_host
-                if ch is not None and ch.winId():
-                    chh = int(ch.winId())
-                    data["chrome_qt_visible"] = ch.isVisible()
-                    data["chrome_win_visible"] = bool(user32.IsWindowVisible(chh))
-                _dbg_log("H3", "overlay_player.py:_hide_keep_music:after", "post-hide Win32 visibility", data)
-            except Exception as e:
-                _dbg_log("H3", "overlay_player.py:_hide_keep_music:after", "after-hide fail", {"err": str(e)})
-
-        QTimer.singleShot(100, _after_hide)
+                },
+                run_id="post-fix",
+            )
+        except Exception as e:
+            _dbg_log("W1-W2", "overlay_player.py:present_visible", "present fail", {"err": str(e)}, run_id="post-fix")
         # #endregion
 
     def _toggle_hide_or_show(self) -> None:
         if self.isVisible() and not self.isMinimized():
             self._hide_keep_music()
             return
-        # #region agent log
-        _dbg_log(
-            "H3-H4",
-            "overlay_player.py:_toggle_hide_or_show",
-            "showing after hide",
-            {
-                "stage": self._stage_mode,
-                "ct": self._click_through,
-                "was_minimized": self.isMinimized(),
-            },
-        )
-        # #endregion
         self.show()
         if self._stage_mode:
             self.showFullScreen()
@@ -1920,30 +1803,56 @@ class OverlayPlayerWindow(QWidget):
             self._update_chrome_visibility()
             self._apply_stage_opacity()
             self._sync_topmost_state()
-        QTimer.singleShot(0, self._sync_chrome_host_geometry)
+            self._set_video_input_enabled(True)
+            QTimer.singleShot(0, self._repair_video_surface)
+
+    def _write_root_exstyle(self) -> None:
+        """Сквозь: LAYERED+TRANSPARENT. Иначе не форсить LAYERED — иначе окно невидимо."""
+        if sys.platform != "win32":
+            return
+        try:
+            hwnd = int(self.winId())
+        except Exception:
+            return
+        if not hwnd:
+            return
+        get_long, set_long = _win_long_fns()
+        cur = int(get_long(hwnd, GWL_EXSTYLE))
+        if (self._base_exstyle is None or self._base_exstyle == 0) and (cur & ~WS_EX_TRANSPARENT):
+            self._base_exstyle = cur & ~WS_EX_TRANSPARENT
+        if self._click_through:
+            style = (cur | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+        else:
+            style = cur & ~WS_EX_TRANSPARENT
+        if self._stage_mode:
+            style |= WS_EX_TOPMOST
+        else:
+            style &= ~WS_EX_TOPMOST
+        set_long(hwnd, GWL_EXSTYLE, style)
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_NOACTIVATE = 0x0010
+        SWP_FRAMECHANGED = 0x0020
+        after = ctypes.c_void_p(-1) if self._stage_mode else ctypes.c_void_p(-2)
+        ctypes.windll.user32.SetWindowPos(
+            ctypes.c_void_p(hwnd),
+            after,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
 
     def _apply_exstyle(self) -> None:
         if sys.platform != "win32":
             return
         hwnd = int(self.winId())
-        user32 = ctypes.windll.user32
-        if ctypes.sizeof(ctypes.c_void_p) == 8:
-            get_long = user32.GetWindowLongPtrW
-            set_long = user32.SetWindowLongPtrW
-        else:
-            get_long = user32.GetWindowLongW
-            set_long = user32.SetWindowLongW
-        if self._base_exstyle is None:
-            self._base_exstyle = int(get_long(hwnd, GWL_EXSTYLE))
-        style = self._base_exstyle | WS_EX_LAYERED
-        if self._click_through:
-            style |= WS_EX_TRANSPARENT
-        else:
-            style &= ~WS_EX_TRANSPARENT
-        set_long(hwnd, GWL_EXSTYLE, style)
-        # QVideoWidget/native children иначе ЛОВЯТ клики при «сквозь» →
-        # жмутся чужие кнопки / открываются ярлыки под невидимым хитбоксом
-        self._set_click_through_on_tree(hwnd, self._click_through)
+        self._write_root_exstyle()
+        # Не WS_EX_TRANSPARENT на children (убивает QVideoWidget).
+        # Клики с video: EnableWindow(False) — рисует, но не принимает мышь.
+        self._clear_child_transparent_styles(hwnd)
+        self._set_video_input_enabled(not self._click_through)
         for w in (self.media_stack, self.video, self.pulse, self.video_column):
             try:
                 w.setAttribute(
@@ -1952,43 +1861,81 @@ class OverlayPlayerWindow(QWidget):
                 )
             except Exception:
                 pass
+        if not self._click_through:
+            self._repair_video_surface()
         if self._stage_mode:
             self._apply_stage_opacity()
         else:
             self._apply_catalog_opacity()
+        self._write_root_exstyle()
 
-    def _set_click_through_on_tree(self, root_hwnd: int, enabled: bool) -> None:
-        """WS_EX_TRANSPARENT на все дочерние HWND (в т.ч. native video)."""
+    def _clear_child_transparent_styles(self, root_hwnd: int) -> None:
+        """Снять залипший TRANSPARENT/LAYERED с children (не ставить заново)."""
         if sys.platform != "win32":
             return
         user32 = ctypes.windll.user32
-        if ctypes.sizeof(ctypes.c_void_p) == 8:
-            get_long = user32.GetWindowLongPtrW
-            set_long = user32.SetWindowLongPtrW
-        else:
-            get_long = user32.GetWindowLongW
-            set_long = user32.SetWindowLongW
+        get_long, set_long = _win_long_fns()
         from ctypes import wintypes
 
-        EnumProc = ctypes.WINFUNCTYPE(
-            ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
-        )
+        EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
         @EnumProc
         def _enum(h, _lp):  # type: ignore[misc]
             try:
                 st = int(get_long(h, GWL_EXSTYLE))
-                st |= WS_EX_LAYERED
-                if enabled:
-                    st |= WS_EX_TRANSPARENT
-                else:
+                if st & (WS_EX_TRANSPARENT | WS_EX_LAYERED):
                     st &= ~WS_EX_TRANSPARENT
-                set_long(h, GWL_EXSTYLE, st)
+                    st &= ~WS_EX_LAYERED
+                    set_long(h, GWL_EXSTYLE, st)
             except Exception:
                 pass
             return True
 
         user32.EnumChildWindows(root_hwnd, _enum, 0)
+
+    def _set_video_input_enabled(self, enabled: bool) -> None:
+        """R1: EnableWindow на QVideoWidget и его детях — без WS_EX_TRANSPARENT."""
+        if sys.platform != "win32":
+            return
+        if not hasattr(self, "video") or self.video is None:
+            return
+        try:
+            if not self.video.winId():
+                return
+            root = int(self.video.winId())
+        except Exception:
+            return
+        user32 = ctypes.windll.user32
+        from ctypes import wintypes
+
+        targets: list[int] = [root]
+        EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+        @EnumProc
+        def _enum(h, _lp):  # type: ignore[misc]
+            targets.append(int(h))
+            return True
+
+        user32.EnumChildWindows(root, _enum, 0)
+        for h in targets:
+            try:
+                user32.EnableWindow(h, bool(enabled))
+            except Exception:
+                pass
+
+    def _repair_video_surface(self) -> None:
+        """После CT/hide: снять залипшие стили, EnableWindow(True). Без pause/play."""
+        if sys.platform != "win32":
+            return
+        if self._click_through:
+            return
+        try:
+            root = int(self.winId()) if self.winId() else 0
+            if root:
+                self._clear_child_transparent_styles(root)
+                self._set_video_input_enabled(True)
+        except Exception:
+            pass
 
     def _open_settings(self) -> None:
         # P6: пауза перед модальным диалогом
@@ -2051,13 +1998,10 @@ class OverlayPlayerWindow(QWidget):
         QTimer.singleShot(0, self._sync_topmost_state)
         QTimer.singleShot(0, self._register_hotkeys)
         QTimer.singleShot(0, self._install_shortcuts)
-        QTimer.singleShot(0, self._sync_chrome_host_geometry)
 
     def hideEvent(self, event) -> None:  # noqa: N802
         # P8: не стопаем музыку; хоткеи оставляем если play_when_hidden
         super().hideEvent(event)
-        if self._chrome_host is not None:
-            self._chrome_host.hide()
         if not self._prefs.get("play_when_hidden", True):
             self._unregister_hotkeys()
         # иначе RegisterHotKey остаётся — можно вернуть окно / сквозь
@@ -2077,10 +2021,6 @@ class OverlayPlayerWindow(QWidget):
             self._attach_chrome_to_main()
         except Exception:
             pass
-        if self._chrome_host is not None:
-            self._chrome_host.close()
-            self._chrome_host = None
-            self._chrome_host_layout = None
         self.closed.emit()
         super().closeEvent(event)
 
@@ -2101,7 +2041,7 @@ class OverlayPlayerWindow(QWidget):
             (_HOTKEY_NEXT, hk.get("next_track", "Ctrl+Shift+1")),
             (_HOTKEY_PREV, hk.get("prev_track", "Ctrl+Shift+2")),
             (_HOTKEY_STOP, hk.get("stop_track", "Ctrl+Shift+F1")),
-            (_HOTKEY_ESC, hk.get("back_esc", "Esc")),
+            # Esc НЕ RegisterHotKey: голый Esc крадёт клавишу у Cursor/всех приложений
         ]
         if self._stage_mode:
             mapping.extend(
@@ -2116,6 +2056,9 @@ class OverlayPlayerWindow(QWidget):
             if not parsed:
                 continue
             mods, vk = parsed
+            # Голые клавиши без модификаторов — только через QShortcut/LL с условиями
+            if (mods & ~MOD_NOREPEAT) == 0:
+                continue
             target = hwnd if hwnd else None
             if ctypes.windll.user32.RegisterHotKey(target, hk_id, mods, vk):
                 self._hotkeys_registered.add(hk_id)
@@ -2125,7 +2068,7 @@ class OverlayPlayerWindow(QWidget):
             (_HOTKEY_NEXT, hk.get("next_track", "Ctrl+Shift+1")),
             (_HOTKEY_PREV, hk.get("prev_track", "Ctrl+Shift+2")),
             (_HOTKEY_STOP, hk.get("stop_track", "Ctrl+Shift+F1")),
-            (_HOTKEY_ESC, hk.get("back_esc", "Esc")),
+            (_HOTKEY_ESC, hk.get("back_esc", "Esc")),  # в LL — только stage/ct + visible
         ]
         if self._stage_mode:
             priority.extend(
@@ -2183,6 +2126,24 @@ class OverlayPlayerWindow(QWidget):
                         and self.isVisible()
                         and (self._click_through or self._stage_mode)
                     ):
+                        # #region agent log
+                        _dbg_log(
+                            "H6-H7",
+                            "overlay_player.py:ll_hook",
+                            "LL swallow Esc",
+                            {
+                                "stage": self._stage_mode,
+                                "ct": self._click_through,
+                                "visible": self.isVisible(),
+                                "mods": {
+                                    "c": self._ll_ctrl,
+                                    "s": self._ll_shift,
+                                    "a": self._ll_alt,
+                                },
+                            },
+                            run_id="post-fix",
+                        )
+                        # #endregion
                         QTimer.singleShot(0, self._on_escape)
                         return 1
                     for mods, want_vk, hk_id in self._priority_binds:
@@ -2193,8 +2154,29 @@ class OverlayPlayerWindow(QWidget):
                             continue
                         if not self._ll_mods_match(mods):
                             continue
+                        # #region agent log
+                        _dbg_log(
+                            "H6-H7",
+                            "overlay_player.py:ll_hook",
+                            "LL swallow hotkey",
+                            {
+                                "hk_id": hk_id,
+                                "vk": vk,
+                                "mods_need": mods,
+                                "mods_ll": {
+                                    "c": self._ll_ctrl,
+                                    "s": self._ll_shift,
+                                    "a": self._ll_alt,
+                                },
+                                "visible": self.isVisible(),
+                                "stage": self._stage_mode,
+                            },
+                            run_id="post-fix",
+                        )
+                        # #endregion
                         # Съесть клавишу — AIMP/другие не получат
                         QTimer.singleShot(0, lambda hid=hk_id: self._on_global_hotkey(hid))
+                        QTimer.singleShot(0, self._release_stuck_modifiers)
                         return 1
             return user32.CallNextHookEx(self._ll_hook, n_code, w_param, l_param)
 
@@ -2203,6 +2185,40 @@ class OverlayPlayerWindow(QWidget):
         if not self._ll_hook:
             self._ll_proc = None
             self._priority_binds = []
+
+    def _release_stuck_modifiers(self) -> None:
+        """После Ctrl+O хук съедает O — Windows думает Ctrl ещё зажат (Cursor: b → новый чат)."""
+        if sys.platform != "win32":
+            return
+        user32 = ctypes.windll.user32
+        KEYEVENTF_KEYUP = 0x0002
+        released: list[int] = []
+        for vk in (
+            VK_CONTROL,
+            VK_LCONTROL,
+            VK_RCONTROL,
+            VK_SHIFT,
+            VK_LSHIFT,
+            VK_RSHIFT,
+            VK_MENU,
+            VK_LMENU,
+            VK_RMENU,
+        ):
+            if user32.GetAsyncKeyState(vk) & 0x8000:
+                user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+                released.append(vk)
+        self._ll_ctrl = False
+        self._ll_shift = False
+        self._ll_alt = False
+        # #region agent log
+        _dbg_log(
+            "K1",
+            "overlay_player.py:_release_stuck_modifiers",
+            "released stuck modifiers",
+            {"released_vk": released},
+            run_id="post-fix",
+        )
+        # #endregion
 
     def _ll_mods_match(self, mods: int) -> bool:
         """Mods из LL keydown/keyup — GetAsyncKeyState в LL-хуке часто врёт."""
@@ -2239,6 +2255,21 @@ class OverlayPlayerWindow(QWidget):
             return
         self._last_hk_id = hotkey_id
         self._last_hk_t = now
+        self._release_stuck_modifiers()
+        # #region agent log
+        _dbg_log(
+            "H6-H7",
+            "overlay_player.py:_on_global_hotkey",
+            "hotkey fired",
+            {
+                "hk_id": hotkey_id,
+                "stage": self._stage_mode,
+                "ct": self._click_through,
+                "visible": self.isVisible(),
+            },
+            run_id="post-fix",
+        )
+        # #endregion
         if hotkey_id == _HOTKEY_HIDE:
             self._toggle_hide_or_show()
             return
@@ -2274,7 +2305,26 @@ class OverlayPlayerWindow(QWidget):
             return
 
 
+_OVERLAY_WINDOW_TITLE = "Фон — overlay (IDEA-022)"
 _overlay_singleton: OverlayPlayerWindow | None = None
+
+
+def _find_overlay_hwnd() -> int:
+    if sys.platform != "win32":
+        return 0
+    try:
+        return int(ctypes.windll.user32.FindWindowW(None, _OVERLAY_WINDOW_TITLE) or 0)
+    except Exception:
+        return 0
+
+
+def _bring_overlay_hwnd(hwnd: int) -> None:
+    if not hwnd:
+        return
+    user32 = ctypes.windll.user32
+    SW_RESTORE = 9
+    user32.ShowWindow(hwnd, SW_RESTORE)
+    user32.SetForegroundWindow(hwnd)
 
 
 def open_overlay_player(
@@ -2305,17 +2355,20 @@ def open_overlay_player(
         try:
             if start_dir and os.path.isdir(start_dir):
                 _overlay_singleton._set_folder(start_dir)
-            _overlay_singleton.show()
-            _overlay_singleton.raise_()
-            _overlay_singleton.activateWindow()
+            _overlay_singleton.present_visible()
             return _overlay_singleton
         except RuntimeError:
             _overlay_singleton = None
 
+    existing = _find_overlay_hwnd()
+    if existing:
+        _bring_overlay_hwnd(existing)
+        return _overlay_singleton
+
     win = OverlayPlayerWindow(start_dir=start_dir, parent=None)
     win.closed.connect(_clear_singleton)
     _overlay_singleton = win
-    win.show()
+    win.present_visible()
     return win
 
 
@@ -2335,6 +2388,10 @@ def _clear_singleton() -> None:
 
 
 if __name__ == "__main__":
+    existing = _find_overlay_hwnd()
+    if existing:
+        _bring_overlay_hwnd(existing)
+        sys.exit(0)
     app = QApplication(sys.argv)
     open_overlay_player()
     sys.exit(app.exec())

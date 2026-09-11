@@ -3922,10 +3922,15 @@ class SubtitleApp(QMainWindow):
         except (TypeError, RuntimeError):
             pass
         win.closed.connect(self._on_overlay_closed)
+        # Ctrl+Shift+O только прячет Фон — Translator не поднимаем (фокус в Cursor и т.п.)
         self.hide()
         self._set_status(
-            "Статус: overlay «Фон» открыт (← Назад / крестик — сюда; Ctrl+O — сквозь)"
+            "Статус: overlay «Фон» открыт (← Назад / крестик — сюда; Ctrl+O — сквозь; Ctrl+Shift+O — скрыть Фон)"
         )
+
+    def _on_overlay_hidden(self) -> None:
+        """Раньше поднимал Translator при Ctrl+Shift+O — больше не вызывается."""
+        return
 
     def _on_overlay_closed(self) -> None:
         self._overlay_window = None
