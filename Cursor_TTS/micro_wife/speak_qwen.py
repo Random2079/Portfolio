@@ -11,6 +11,40 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+
+def _compat_patch_check_model_inputs() -> None:
+    """qwen-tts 0.1.1: @check_model_inputs(); transformers>=5 ждёт @check_model_inputs.
+
+    На transformers 4.x патч НЕ нужен и ломает decode:
+    TypeError: unexpected keyword argument 'inputs_embeds'.
+    """
+    try:
+        import transformers
+        from transformers.utils import generic
+    except Exception:
+        return
+    ver = getattr(transformers, "__version__", "0")
+    try:
+        major = int(str(ver).split(".", 1)[0])
+    except ValueError:
+        major = 0
+    if major < 5:
+        return
+    original = getattr(generic, "check_model_inputs", None)
+    if original is None or getattr(original, "_cursor_tts_compat", False):
+        return
+
+    def check_model_inputs(func=None):
+        if func is None:
+            return original
+        return original(func)
+
+    check_model_inputs._cursor_tts_compat = True  # type: ignore[attr-defined]
+    generic.check_model_inputs = check_model_inputs  # type: ignore[attr-defined]
+
+
+_compat_patch_check_model_inputs()
+
 ROOT = Path(__file__).resolve().parent
 TTS_ROOT = ROOT.parent
 DESIGN_FILE = ROOT / "voice_design.txt"
@@ -147,12 +181,26 @@ def unload() -> bool:
         _lock.release()
 
 
+def _use_faster_backend() -> bool:
+    """faster-qwen3-tts CUDA graphs на 3050/TF 4.57 часто роняют весь CUDA-контекст.
+    По умолчанию — official. Включить: CURSOR_TTS_QWEN_FASTER=1
+    """
+    import os
+
+    return os.environ.get("CURSOR_TTS_QWEN_FASTER", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def warmup(
     model_id: str | None = None,
     *,
     speaker: str | None = None,
 ) -> None:
-    """Загрузить faster backend; официальный qwen_tts остаётся fallback."""
+    """Загрузить Qwen. По умолчанию official qwen_tts; faster — только по флагу."""
     global _model, _model_id, _model_backend
     mid = (model_id or DEFAULT_MODEL_ID).strip()
     with _lock:
@@ -162,41 +210,47 @@ def warmup(
 
         device = _pick_device()
         _enable_cuda_fast_paths()
-        # На RTX 3050: faster BF16+graphs ≈ 5–15 с вместо ~87 с FP32.
-        # 0.6B CustomVoice не поддерживает instruct ни в одном backend.
-        try:
-            if not device.startswith("cuda"):
-                raise RuntimeError("faster-qwen3-tts requires CUDA")
-            from faster_qwen3_tts import FasterQwen3TTS
+        # 0.6B CustomVoice: instruct в generate всё равно ограничен.
+        # faster BF16+graphs быстрее, но при сбое capture отравляет процесс
+        # (captures_underway.empty) — empty_cache в том же процессе не лечит.
+        if _use_faster_backend() and device.startswith("cuda"):
+            try:
+                from faster_qwen3_tts import FasterQwen3TTS
 
-            _model = FasterQwen3TTS.from_pretrained(
-                mid,
-                device="cuda",
-                dtype=torch.bfloat16,
-                attn_implementation="sdpa",
-                max_seq_len=512,
-            )
-            _model.warmup(prefill_len=100)
-            _model_backend = "faster"
-        except Exception as fast_error:
-            # Не оставляем частично захваченные CUDA graphs в тесных 4GB VRAM.
-            _model = None
-            _model_backend = None
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            from qwen_tts import Qwen3TTSModel
+                _model = FasterQwen3TTS.from_pretrained(
+                    mid,
+                    device="cuda",
+                    dtype=torch.bfloat16,
+                    attn_implementation="sdpa",
+                    max_seq_len=512,
+                )
+                _model.warmup(prefill_len=100)
+                _model_backend = "faster"
+                _model_id = mid
+                _ = speaker
+                return
+            except Exception as fast_error:
+                _model = None
+                _model_backend = None
+                # Не звать empty_cache после failed CUDA graph — это INTERNAL ASSERT.
+                print(
+                    f"faster-qwen3-tts failed (skip to official, new process if CUDA poisoned): {fast_error}",
+                    flush=True,
+                )
+                raise RuntimeError(
+                    "faster-qwen3-tts CUDA graph failed; restart TTS daemon "
+                    "and unset CURSOR_TTS_QWEN_FASTER (official is default)"
+                ) from fast_error
 
-            dtype = _pick_dtype()
-            _model = Qwen3TTSModel.from_pretrained(
-                mid,
-                device_map=device if device.startswith("cuda") else "cpu",
-                dtype=dtype,
-            )
-            _model_backend = "official"
-            print(
-                f"faster-qwen3-tts unavailable, using official backend: {fast_error}",
-                flush=True,
-            )
+        from qwen_tts import Qwen3TTSModel
+
+        dtype = _pick_dtype()
+        _model = Qwen3TTSModel.from_pretrained(
+            mid,
+            device_map=device if device.startswith("cuda") else "cpu",
+            dtype=dtype,
+        )
+        _model_backend = "official"
         _model_id = mid
         _ = speaker  # reserved for future speaker-specific preload
 

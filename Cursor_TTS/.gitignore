@@ -1,0 +1,45 @@
+# Secrets & runtime flags
+.env
+.env.*
+TTS_OFF
+TTS_PAUSED
+TTS_PANEL_ACTIVE
+tts_speech.pid
+
+# Logs & temp speech debug
+tts_debug.log
+tts_last_clean.txt
+ahk_err.txt
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local benches / scratch
+_b.py
+_bench_*
+bench_*.json
+
+# Heavy models (download locally)
+models/*.onnx
+models/*.onnx.json
+micro_wife/checkpoints/
+*.pt
+*.bin
+*.safetensors
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+tts_daemon.pid
+
+
+_qwen_probe*.wav
+_qwen_official_probe.wav
+
