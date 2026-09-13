@@ -205,6 +205,10 @@ def main() -> int:
     gen = str(data.get("generation_id") or "")
 
     if event == "stop":
+        # Cursor шлёт stop+completed сразу после afterAgentResponse — это не «Стоп» пользователя.
+        if status.strip().lower() == "completed":
+            log(f"hook stop ignored (status={status}) — keep TTS playback")
+            return 0
         try:
             from speak_edge import send_command
 
