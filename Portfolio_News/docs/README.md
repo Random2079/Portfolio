@@ -14,7 +14,7 @@
 | [02-tickers](parts/02-tickers.md) | `import_tickers.py`, `tickers.example.json` |
 | [03-sources](parts/03-sources.md) | `sources/*` |
 | [04-poll-toast](parts/04-poll-toast.md) | `poller.py`, `poll_job.py`, `notify_toast.py` |
-| [05-api-ui](parts/05-api-ui.md) | `api.py`, `static/index.html` |
+| [05-api-ui](parts/05-api-ui.md) | `api.py`, `static/dashboard-demo.html` |
 | [06-moex](parts/06-moex.md) | `metrics_moex.py` |
 | [07-bcs](parts/07-bcs.md) | `bcs_client.py` |
 | [08-ai-noise](parts/08-ai-noise.md) | *(план)* |

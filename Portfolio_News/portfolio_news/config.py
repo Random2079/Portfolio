@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     port: int = 8765
     tickers_json: Path = DEFAULT_TICKERS_JSON
 
+    # KA: MOEX → SQLite day snapshot (UI reads DB; no manual refresh habit)
+    day_poll_sec: int = 60
+
     # BCS Trade API (read-only). Never commit real token.
     bcs_trade_refresh_token: str = ""
     bcs_trade_client_id: str = "trade-api-read"

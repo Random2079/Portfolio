@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from portfolio_news.db import NewsItem, Ticker
+from portfolio_news.focus import list_focus_tickers, notify_allowed
 from portfolio_news.notify_toast import notify_toast
 from portfolio_news.sources import default_sources
 from portfolio_news.sources.base import NewsSource, RawNews
@@ -69,10 +70,26 @@ def select_tickers(
     kind: Optional[str] = None,
     category: Optional[str] = None,
     limit: int = 0,
+    ids: Optional[Sequence[str]] = None,
 ) -> list[Ticker]:
     q = select(Ticker).order_by(Ticker.id)
     if ticker_id:
         q = q.where(Ticker.id == ticker_id)
+    elif ids is not None:
+        clean = [str(x).strip().upper() for x in ids if x and str(x).strip()]
+        if not clean:
+            return []
+        q = q.where(Ticker.id.in_(clean))
+        if kind:
+            q = q.where(Ticker.kind == kind)
+        if category:
+            q = q.where(Ticker.category == category)
+        rows = list(session.scalars(q))
+        by_id = {t.id.upper(): t for t in rows}
+        ordered = [by_id[i] for i in clean if i in by_id]
+        if limit and limit > 0:
+            ordered = ordered[:limit]
+        return ordered
     else:
         if kind:
             q = q.where(Ticker.kind == kind)
@@ -95,21 +112,89 @@ def poll_once(
     category: Optional[str] = None,
     on_progress: ProgressCallback | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    notify_focus_only: bool = True,
+    bcs_only: bool = True,
+    ids: Optional[Sequence[str]] = None,
 ) -> dict:
-    """Fetch news for scoped tickers; insert new URLs; notify per mode."""
+    """Fetch news for scoped tickers; insert new URLs; notify per mode.
+
+    K5: default bcs_only=True → poll only current BCS holdings (not full Snowball DB).
+    Pass bcs_only=False for legacy full-table / unit tests.
+    KB: when Focus set is non-empty and notify_focus_only, toast only for Focus
+    (news still stored for all polled tickers).
+    """
     if isinstance(notify, bool):
         mode: NotifyMode = "each" if notify else "off"
     else:
         mode = notify
 
     sources = list(sources or default_sources())
+    scope_ids: Optional[list[str]] = list(ids) if ids is not None else None
+    scope_error = ""
+    if scope_ids is None and bcs_only:
+        from portfolio_news.bcs_scope import filter_ticker_id_to_scope, resolve_bcs_scope
+
+        scope_ids, scope_error = resolve_bcs_scope(session)
+        if scope_error and not scope_ids:
+            emit0 = PollProgress(
+                running=False,
+                current=0,
+                total=0,
+                ticker_id="",
+                inserted=0,
+                error=scope_error,
+                done=True,
+            )
+            if on_progress:
+                on_progress(emit0)
+            return {
+                "tickers": 0,
+                "inserted": 0,
+                "notified": 0,
+                "sources": [s.name for s in sources],
+                "new_titles": [],
+                "cancelled": False,
+                "scope": "bcs",
+                "scope_error": scope_error,
+                "scope_ids": [],
+            }
+        if ticker_id:
+            eff, terr = filter_ticker_id_to_scope(ticker_id, scope_ids)
+            if terr:
+                if on_progress:
+                    on_progress(
+                        PollProgress(
+                            running=False,
+                            done=True,
+                            error=terr,
+                        )
+                    )
+                return {
+                    "tickers": 0,
+                    "inserted": 0,
+                    "notified": 0,
+                    "sources": [s.name for s in sources],
+                    "new_titles": [],
+                    "cancelled": False,
+                    "scope": "bcs",
+                    "scope_error": terr,
+                    "scope_ids": scope_ids,
+                }
+            ticker_id = eff
+
     tickers = select_tickers(
         session,
         ticker_id=ticker_id,
         kind=kind,
         category=category,
         limit=limit,
+        ids=None if ticker_id else scope_ids,
     )
+
+    focus_ids: set[str] | None = None
+    if notify_focus_only:
+        focus_list = list_focus_tickers(session)
+        focus_ids = set(focus_list) if focus_list else None
 
     result = PollResult(sources=[s.name for s in sources])
     digest_titles: list[str] = []
@@ -151,8 +236,10 @@ def poll_once(
                 if row is None:
                     continue
                 result.inserted += 1
-                digest_titles.append(f"{t.id}: {raw.title}")
-                if mode == "each":
+                toast_ok = (not notify_focus_only) or notify_allowed(t.id, focus_ids)
+                if toast_ok:
+                    digest_titles.append(f"{t.id}: {raw.title}")
+                if mode == "each" and toast_ok:
                     notify_toast(
                         title=f"{t.id} · {raw.source}",
                         message=raw.title,
@@ -161,15 +248,20 @@ def poll_once(
                     row.notified = 1
                     session.commit()
                     result.notified += 1
-                elif mode == "digest":
+                elif mode == "digest" and toast_ok:
                     row.notified = 1
+                    session.commit()
+                elif mode == "digest" and not toast_ok:
+                    # Hold: keep in DB, skip toast (KB)
                     session.commit()
         if cancelled:
             break
 
-    if not cancelled and mode == "digest" and result.inserted > 0:
+    if not cancelled and mode == "digest" and digest_titles:
         preview = " · ".join(digest_titles[:2])
-        body = f"+{result.inserted} новостей"
+        body = f"+{len(digest_titles)} новостей"
+        if focus_ids:
+            body = f"{body} (Focus)"
         if preview:
             body = f"{body}\n{preview}"
         notify_toast(title="Portfolio News", message=body, url="http://127.0.0.1:8765/")
@@ -195,4 +287,7 @@ def poll_once(
         "sources": result.sources,
         "titles": result.new_titles,
         "cancelled": cancelled,
+        "scope": "bcs" if bcs_only or scope_ids is not None else "all",
+        "scope_error": scope_error,
+        "scope_ids": list(scope_ids) if scope_ids is not None else [],
     }

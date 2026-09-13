@@ -4,6 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Portfolio News · Demo (Snowball-like)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&display=swap" rel="stylesheet" />
     <style>
       :root {
         --bg: #e8ecf1;
@@ -14,6 +17,9 @@
         --up: #0f7a5a;
         --down: #b42318;
         --accent: #2f6fed;
+        --pay-coupon: #1d4ed8;
+        --pay-div: #047857;
+        --pay-red: #ea580c;
       }
       * { box-sizing: border-box; }
       body {
@@ -22,27 +28,35 @@
         background: var(--bg);
         color: var(--text);
       }
-      .wrap { max-width: 920px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+      .wrap { max-width: 1280px; margin: 0 auto; padding: 1.25rem 1.25rem 3rem; }
+      @media (max-width: 720px) {
+        .wrap { padding: 1rem 0.75rem 2.5rem; }
+      }
       .top {
         display: flex; flex-wrap: wrap; justify-content: space-between;
         align-items: flex-start; gap: 0.75rem; margin-bottom: 1.25rem;
       }
       .top h1 { margin: 0; font-size: 1.35rem; }
-      .top .sub { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.88rem; }
       .links { display: flex; flex-wrap: wrap; gap: 0.45rem; }
-      .links a {
+      .links a, .nav a {
         text-decoration: none; color: var(--text); font-weight: 600; font-size: 0.85rem;
         background: var(--card); border: 1px solid var(--border);
         border-radius: 999px; padding: 0.4rem 0.85rem;
+        cursor: pointer;
       }
-      .links a.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+      .links a.primary, .nav a.active {
+        background: var(--accent); color: #fff; border-color: var(--accent);
+      }
+      .nav { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+      .panel[hidden] { display: none !important; }
+      .ops-box, .feed-box { margin-top: 0; }
       .banner {
         font-size: 0.8rem; color: var(--muted); background: #fff8e6;
         border: 1px solid #f0d78c; border-radius: 10px; padding: 0.65rem 0.85rem;
         margin-bottom: 1rem;
       }
       .kpis {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
         gap: 0.65rem; margin-bottom: 1rem;
       }
       .kpi {
@@ -51,7 +65,61 @@
       }
       .kpi .k { color: var(--muted); font-size: 0.75rem; font-weight: 600; }
       .kpi .v { font-size: 1.25rem; font-weight: 700; margin-top: 0.25rem; font-variant-numeric: tabular-nums; }
-      .kpi .s { font-size: 0.8rem; margin-top: 0.2rem; color: var(--muted); }
+      .kpi .s {
+        font-size: 0.78rem;
+        margin-top: 0.2rem;
+        color: var(--muted);
+        font-family: Manrope, system-ui, sans-serif;
+        font-weight: 600;
+      }
+      .day-box {
+        background: var(--card); border-radius: 14px; border: 1px solid var(--border);
+        padding: 0.85rem 1rem; margin-bottom: 1rem;
+        position: relative;
+      }
+      .day-box.loading { opacity: 0.92; }
+      .day-box.loading::after {
+        content: "";
+        position: absolute; top: 0.85rem; right: 1rem;
+        width: 0.9rem; height: 0.9rem;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: day-spin 0.7s linear infinite;
+      }
+      @keyframes day-spin { to { transform: rotate(360deg); } }
+      .day-box h2 { margin: 0 0 0.35rem; font-size: 0.95rem; }
+      .day-box .lead { margin: 0 0 0.35rem; color: var(--muted); font-size: 0.8rem; }
+      .day-box .mkt-note {
+        margin: 0 0 0.55rem;
+        font-size: 0.72rem;
+        color: var(--muted);
+        font-weight: 500;
+        letter-spacing: 0.01em;
+      }
+      .day-box .mkt-note[hidden] { display: none !important; }
+      .day-box ol { margin: 0; padding-left: 1.15rem; }
+      .day-box li.day-row {
+        padding: 0.4rem 0.35rem;
+        font-size: 0.88rem;
+        display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; align-items: baseline;
+        cursor: pointer;
+        border-radius: 8px;
+        list-style-position: inside;
+      }
+      .day-box li.day-row:hover { background: #f0f5ff; }
+      .day-box li.day-row:focus-visible {
+        outline: 2px solid var(--accent); outline-offset: 1px;
+      }
+      .day-box li .t { font-weight: 700; min-width: 3.5rem; }
+      .day-box li .rub { font-variant-numeric: tabular-nums; font-weight: 600; }
+      .day-box li .pct { color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+      .day-box li .go {
+        margin-left: auto; font-size: 0.72rem; font-weight: 600; color: var(--accent);
+      }
+      .day-box .day-skel {
+        color: var(--muted); font-size: 0.85rem; padding: 0.35rem 0;
+      }
       .cards { display: flex; flex-direction: column; gap: 0.65rem; }
       .card {
         background: var(--card); border-radius: 16px; border: 1px solid var(--border);
@@ -78,12 +146,12 @@
         display: flex; align-items: center;
       }
       .chip-dot {
-        width: 28px; height: 28px; border-radius: 50%;
+        width: 28px; height: 28px; border-radius: 8px;
         border: 2px solid #fff; margin-left: -8px;
         display: inline-flex; align-items: center; justify-content: center;
-        font-size: 0.55rem; font-weight: 700; color: #fff;
-        background: #5b6b7c;
+        padding: 0; overflow: hidden; background: transparent;
       }
+      .chip-dot .logo-wrap { width: 100%; height: 100%; border-radius: 6px; }
       .chip-dot:first-child { margin-left: 0; }
       .chip-more {
         margin-left: 0.35rem; background: #e8ecf1; color: var(--muted);
@@ -93,10 +161,44 @@
       .card-head .nums { text-align: right; }
       .card-head .pnl { font-weight: 700; font-variant-numeric: tabular-nums; }
       .card-head .val { color: var(--muted); font-size: 0.85rem; margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+      .card-cash .card-head {
+        grid-template-columns: 1fr auto;
+        cursor: default;
+      }
+      .card-cash .card-head:hover { background: transparent; }
+      .card-cash .card-head .val {
+        color: inherit;
+        font-size: 1rem;
+        font-weight: 700;
+        margin-top: 0;
+      }
       .chev { color: var(--muted); transition: transform 0.15s; }
       .card.open .chev { transform: rotate(180deg); }
       .card-body { display: none; border-top: 1px solid var(--border); padding: 0.5rem 0.75rem 0.85rem; }
       .card.open .card-body { display: block; }
+      tr.asset-group th {
+        padding: 0.55rem 0.4rem;
+        font-size: 0.78rem; font-weight: 700; letter-spacing: 0.03em;
+        text-transform: uppercase; color: #3d4a5c;
+        background: linear-gradient(180deg, #eef3f9 0%, #f7f9fc 100%);
+        border-bottom: 1px solid var(--border);
+        cursor: pointer; user-select: none;
+      }
+      tr.asset-group th .group-chev {
+        display: inline-block; width: 0.9rem; color: var(--muted);
+        transition: transform 0.15s ease;
+      }
+      tbody.asset-block:not(.collapsed) tr.asset-group th .group-chev {
+        transform: rotate(90deg);
+      }
+      tr.asset-group th:hover { filter: brightness(0.97); }
+      tr.asset-group[data-ac="fund"] th { color: #0f7a5a; }
+      tr.asset-group[data-ac="bond"] th { color: #6d28d9; }
+      tr.asset-group[data-ac="stock"] th { color: #1d4ed8; }
+      tbody.asset-block.collapsed tr:not(.asset-group) { display: none; }
+      tbody.asset-block.collapsed tr.asset-group th {
+        border-bottom: 1px solid var(--border);
+      }
       table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
       th, td { text-align: left; padding: 0.45rem 0.35rem; border-bottom: 1px solid var(--border); }
       th { color: var(--muted); font-weight: 600; }
@@ -108,6 +210,49 @@
         margin-top: 1.5rem; background: var(--card); border-radius: 16px;
         border: 1px solid var(--border); padding: 1rem 1.1rem;
       }
+      .ops-box {
+        margin-top: 1.25rem; background: var(--card); border-radius: 16px;
+        border: 1px solid var(--border); padding: 1rem 1.1rem;
+      }
+      .ops-box h2 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+      .ops-box .lead { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
+      .ops-box .ops-scroll { overflow-x: auto; }
+      .ops-filters {
+        display: flex; flex-wrap: wrap; gap: 0.55rem 0.85rem;
+        align-items: center; margin: 0 0 0.75rem;
+      }
+      .ops-filters .pay-chip.on[data-kind="equity"] { background: #3d8bfd; border-color: #3d8bfd; }
+      .ops-filters .pay-chip.on[data-kind="bond"] { background: #8b5cf6; border-color: #8b5cf6; }
+      .ops-filters .pay-chip.on[data-kind="fund"] { background: #0f7a5a; border-color: #0f7a5a; }
+      .ops-search {
+        font: inherit; font-size: 0.82rem; width: 7rem;
+        border: 1px solid var(--border); border-radius: 8px; background: #fff;
+        padding: 0.28rem 0.5rem; color: var(--text);
+      }
+      .ops-csv-btn {
+        font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--border); background: #f7f9fc; color: var(--text);
+        border-radius: 8px; padding: 0.3rem 0.75rem; margin-left: auto;
+      }
+      .ops-csv-btn:hover { background: #eef3f9; }
+      .ops-kind-tag {
+        font-size: 0.72rem; font-weight: 600; color: var(--muted);
+      }
+      .ops-box .ops-more td,
+      tr.asset-more td {
+        text-align: center; padding: 0.55rem 0.35rem;
+        border-bottom: none;
+      }
+      .ops-box .ops-more-btn,
+      .asset-more-btn {
+        border: 1px solid var(--border); background: #f7f9fc; color: var(--text);
+        border-radius: 8px; padding: 0.35rem 0.85rem; font: inherit;
+        font-size: 0.8rem; font-weight: 600; cursor: pointer;
+      }
+      .ops-box .ops-more-btn:hover,
+      .asset-more-btn:hover { background: #eef3f9; }
+      .side-buy { color: var(--up); font-weight: 600; }
+      .side-sell { color: var(--down); font-weight: 600; }
       .feed-box h2 { margin: 0 0 0.35rem; font-size: 1.05rem; }
       .feed-box p { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
       .feed-box ul { list-style: none; margin: 0; padding: 0; }
@@ -117,42 +262,500 @@
       .feed-box a:hover { color: var(--accent); }
       .meta { color: var(--muted); font-size: 0.75rem; margin-top: 0.25rem; }
       .empty { color: var(--muted); padding: 0.5rem 0; }
+      .asset-cell {
+        display: flex; align-items: center; gap: 0.65rem;
+      }
+      .logo-wrap {
+        width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+        overflow: hidden; background: #eef2f7; position: relative;
+      }
+      .logo-wrap img {
+        width: 100%; height: 100%; object-fit: cover; display: block;
+      }
+      .logo-wrap .fb {
+        position: absolute; inset: 0; display: flex; align-items: center;
+        justify-content: center; font-size: 0.65rem; font-weight: 700;
+        color: #fff; letter-spacing: 0.02em;
+      }
+      .logo-wrap.has-img .fb { display: none; }
+      .asset-text strong { font-size: 0.88rem; }
+      .top h1.brand-toggle {
+        margin: 0; cursor: pointer; user-select: none;
+        border: none; background: none; padding: 0;
+        font-family: inherit;
+        font-size: 1.35rem;
+        font-weight: 700;
+        line-height: 1.2;
+        color: var(--text);
+        text-align: left;
+      }
+      .top h1.brand-toggle:hover { opacity: 0.85; }
+      .top h1.brand-toggle.on::after {
+        content: " · скрыто";
+        font-size: 0.75rem; font-weight: 600; color: var(--muted);
+        letter-spacing: 0;
+      }
+      body.privacy .money-hide { filter: blur(5px); user-select: none; }
+      .tier-btn {
+        border: 1px solid var(--border); background: #f3f5f8; color: var(--muted);
+        font-size: 0.68rem; font-weight: 700; border-radius: 999px;
+        padding: 0.15rem 0.45rem; cursor: pointer; font: inherit; white-space: nowrap;
+      }
+      .tier-btn.focus {
+        background: #e8f0ff; color: var(--accent); border-color: #b7ccf7;
+      }
+      .tier-btn.to-focus {
+        background: #fff; color: var(--accent); border-color: #b7ccf7;
+      }
+      .card[data-tier="focus"] { border-color: #b7ccf7; }
+      .card[data-tier="focus"] .card-head .title::after {
+        content: " · одна бумага"; color: var(--accent); font-weight: 600; font-size: 0.8rem;
+      }
+      .card[data-tier="hold"] .card-head .title::after {
+        content: " · остальное"; color: var(--muted); font-weight: 500; font-size: 0.75rem;
+      }
+      .examine-bar {
+        display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center;
+        margin: 0 0 0.75rem; padding: 0.55rem 0.7rem;
+        background: #eef4ff; border: 1px solid #b7ccf7; border-radius: 10px;
+        font-size: 0.82rem;
+      }
+      .examine-bar[hidden] { display: none !important; }
+      .examine-bar .ex-tid { font-weight: 700; color: var(--accent); }
+      .examine-bar button {
+        border: 1px solid var(--border); background: #fff; color: var(--text);
+        font: inherit; font-size: 0.78rem; font-weight: 600;
+        border-radius: 8px; padding: 0.28rem 0.65rem; cursor: pointer;
+      }
+      .examine-bar button.primary {
+        background: var(--accent); color: #fff; border-color: var(--accent);
+      }
+      .feed-box .lead-focus { color: var(--accent); }
+      .chart-box {
+        margin-top: 1.25rem; background: var(--card); border-radius: 16px;
+        border: 1px solid var(--border); padding: 1rem 1.1rem;
+      }
+      .chart-box h2 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+      .chart-box .lead { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
+      .chart-toolbar {
+        display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+        margin-bottom: 0.75rem;
+      }
+      .chart-toolbar label { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+      .chart-toolbar select {
+        font: inherit; font-size: 0.88rem; padding: 0.35rem 0.55rem;
+        border-radius: 8px; border: 1px solid var(--border); background: #fff;
+        min-width: 8rem;
+      }
+      .chart-toolbar .hint { font-size: 0.75rem; color: var(--muted); margin-left: auto; }
+      .chart-wrap { position: relative; height: 260px; width: 100%; }
+      .chart-wrap canvas { max-width: 100%; }
+
+      /* K7 payout calendar */
+      .pay-box {
+        margin-top: 1.25rem; background: var(--card); border-radius: 16px;
+        border: 1px solid var(--border); padding: 1rem 1.1rem;
+        container-type: inline-size;
+        container-name: pay;
+      }
+      .pay-head { display: flex; align-items: center; gap: 0.75rem; }
+      .pay-head h2 { margin: 0; font-size: 1.05rem; }
+      .pay-box .lead { margin: 0.3rem 0 0.9rem; color: var(--muted); font-size: 0.85rem; }
+      .pay-modes { margin-left: auto; display: flex; gap: 0.3rem; }
+      .pay-mode {
+        font: inherit; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--border); background: #fff; color: var(--muted);
+        border-radius: 8px; padding: 0.28rem 0.7rem;
+      }
+      .pay-mode.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+      .pay-top {
+        display: grid; grid-template-columns: minmax(180px, 1fr) 2.4fr;
+        gap: 0.9rem; align-items: stretch; margin-bottom: 0.9rem;
+      }
+      @media (max-width: 920px) { .pay-top { grid-template-columns: 1fr; } }
+      .pay-sum {
+        background: #f7f9fc; border: 1px solid var(--border); border-radius: 12px;
+        padding: 0.85rem 0.9rem; display: flex; flex-direction: column; gap: 0.5rem;
+      }
+      .pay-sum-k { color: var(--muted); font-size: 0.78rem; font-weight: 600; }
+      .pay-sum-v { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .pay-sum-rows { display: flex; flex-direction: column; gap: 0.3rem; margin-top: auto; }
+      .pay-sum-rows > div {
+        display: flex; justify-content: space-between; gap: 0.5rem;
+        font-size: 0.82rem; padding-top: 0.35rem; border-top: 1px dashed var(--border);
+      }
+      .pay-sum-rows span { color: var(--muted); }
+      .pay-sum-rows b { font-variant-numeric: tabular-nums; }
+      .pay-nav { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+      .pay-arrow {
+        font: inherit; cursor: pointer; line-height: 1;
+        border: 1px solid var(--border); background: #fff; color: var(--text);
+        border-radius: 8px; padding: 0.15rem 0.55rem 0.3rem;
+      }
+      .pay-month { font-weight: 700; font-size: 0.95rem; min-width: 8rem; }
+      .pay-badge {
+        margin-left: auto; font-size: 0.8rem; font-weight: 700;
+        color: var(--up); background: #eaf7f1; border: 1px solid #c9e9da;
+        border-radius: 999px; padding: 0.18rem 0.6rem; font-variant-numeric: tabular-nums;
+      }
+      .pay-grid {
+        display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 10px 12px; background: transparent; border: 0;
+      }
+      #payCalWrap[hidden],
+      #payList[hidden] { display: none !important; }
+      .pay-grid .pg-wd {
+        background: transparent; color: var(--muted); font-size: 0.72rem; font-weight: 700;
+        padding: 0.15rem 0 0.3rem; text-align: left; text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .pay-grid .pg-day {
+        background: transparent; min-height: 138px; padding: 0.2rem 0.12rem;
+        display: flex; flex-direction: column; gap: 0.5rem;
+        border: 0; border-radius: 0;
+      }
+      .pay-grid .pg-day.empty { background: transparent; }
+      .pay-grid .pg-day.today .pg-num {
+        color: var(--accent);
+        box-shadow: inset 0 0 0 1.5px #93c5fd;
+        border-radius: 999px;
+        width: 1.35rem; height: 1.35rem;
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .pay-grid .pg-top {
+        display: flex; align-items: baseline; gap: 0.25rem;
+        font-size: 0.84rem; color: var(--muted);
+      }
+      .pay-grid .pg-num { font-weight: 700; color: var(--text); font-size: 0.92rem; }
+      .pay-grid .pg-sum {
+        margin-left: auto; color: var(--up); font-weight: 700;
+        font-variant-numeric: tabular-nums; font-size: 0.8rem;
+        white-space: nowrap;
+      }
+      .pay-ev {
+        border: 0;
+        border-radius: 14px; background: #e8ecf2; padding: 0.7rem 0.8rem;
+        font-size: 0.92rem; line-height: 1.35; cursor: default;
+        display: flex; flex-direction: row; align-items: flex-start; gap: 0.55rem;
+        min-height: 3.35rem;
+      }
+      .pay-ev .pe-dot {
+        width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+        margin-top: 0.38rem; background: var(--accent);
+      }
+      .pay-ev .pe-body { min-width: 0; flex: 1; overflow: hidden; }
+      .pay-grid .pay-ev .pe-t {
+        display: block; font-weight: 700; color: var(--text);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .pay-grid .pay-ev .pe-v {
+        display: block; margin-top: 0.18rem;
+        font-size: 0.84rem; color: var(--muted);
+        font-variant-numeric: tabular-nums; font-weight: 600;
+      }
+      .pay-ev.coupon, .pay-ev.dividend, .pay-ev.redemption { background: #eef1f6; }
+      .pay-ev.coupon .pe-dot { background: var(--pay-coupon); }
+      .pay-ev.dividend .pe-dot { background: var(--pay-div); }
+      .pay-ev.redemption .pe-dot { background: var(--pay-red); }
+      .pay-ev.st-announced .pe-dot,
+      .pay-ev.st-upcoming .pe-dot { opacity: 0.42; }
+      .pay-ev.st-paid .pe-dot { opacity: 1; box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.08); }
+      @container pay (max-width: 920px) {
+        .pay-grid { gap: 6px 7px; }
+        .pay-grid .pg-wd { font-size: 0.62rem; letter-spacing: 0.02em; padding-bottom: 0.12rem; }
+        .pay-grid .pg-day { min-height: 0; gap: 0.22rem; padding: 0.05rem 0; }
+        .pay-grid .pg-top { flex-direction: column; align-items: flex-start; gap: 0; font-size: 0.7rem; }
+        .pay-grid .pg-num { font-size: 0.78rem; }
+        .pay-grid .pg-sum { margin-left: 0; font-size: 0.62rem; white-space: nowrap; }
+        .pay-ev {
+          padding: 0.28rem 0.34rem; min-height: 0; font-size: 0.7rem;
+          gap: 0.28rem; border-radius: 8px; align-items: center;
+        }
+        .pay-ev .pe-dot { width: 7px; height: 7px; margin-top: 0; }
+        .pay-grid .pay-ev .pe-t {
+          font-size: 0.7rem;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .pay-grid .pay-ev .pe-v {
+          margin-top: 0.04rem; font-size: 0.66rem; white-space: nowrap;
+        }
+      }
+      .pay-filters {
+        display: flex; flex-wrap: wrap; gap: 0.55rem 0.85rem;
+        align-items: center; margin: 0 0 0.65rem;
+      }
+      .pay-period-wrap {
+        display: flex; align-items: center; gap: 0.4rem;
+        font-size: 0.78rem; color: var(--muted); font-weight: 600;
+      }
+      .pay-period-wrap select {
+        font: inherit; font-size: 0.82rem; font-weight: 600; color: var(--text);
+        border: 1px solid var(--border); border-radius: 8px; background: #fff;
+        padding: 0.28rem 0.5rem;
+      }
+      .pay-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+      .pay-chip {
+        font: inherit; font-size: 0.74rem; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--border); background: #fff; color: var(--muted);
+        border-radius: 999px; padding: 0.22rem 0.65rem;
+      }
+      .pay-chip.on { color: #fff; }
+      .pay-chip.on.coupon, .pay-chip.coupon.on { background: var(--pay-coupon); border-color: var(--pay-coupon); }
+      .pay-chip.on.dividend, .pay-chip.dividend.on { background: var(--pay-div); border-color: var(--pay-div); }
+      .pay-chip.on.redemption, .pay-chip.redemption.on {
+        background: var(--pay-red); border-color: var(--pay-red); color: #3f2a00;
+      }
+      .pay-chip[data-status="paid"].on { background: #1e293b; border-color: #1e293b; color: #fff; }
+      .pay-chip[data-status="announced"].on { background: #64748b; border-color: #64748b; color: #fff; }
+      .pay-chip[data-status="upcoming"].on { background: #cbd5e1; border-color: #cbd5e1; color: #334155; }
+      .pay-legend { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; margin: 0 0 0.7rem; font-size: 0.74rem; color: var(--muted); }
+      .pay-legend .lg::before {
+        content: ""; display: inline-block; width: 0.7rem; height: 0.7rem;
+        border-radius: 3px; margin-right: 0.35rem; vertical-align: -2px;
+      }
+      .pay-legend .lg.coupon::before { background: var(--pay-coupon); }
+      .pay-legend .lg.dividend::before { background: var(--pay-div); }
+      .pay-legend .lg.redemption::before { background: var(--pay-red); }
+      .pay-legend .lg.paid-ink::before {
+        width: 1.15rem;
+        background: linear-gradient(90deg, #1d4ed8 0 33%, #047857 33% 66%, #ea580c 66%);
+      }
+      .pay-legend .lg.ann-ink::before {
+        width: 1.15rem;
+        background: linear-gradient(90deg, #8aa6ee 0 33%, #6bb8a3 33% 66%, #f3b07e 66%);
+      }
+      .pay-legend .lg.upc-ink::before {
+        width: 1.15rem;
+        background: linear-gradient(90deg, #c5d4f6 0 33%, #b7ddd2 33% 66%, #f8d4b6 66%);
+      }
+      .pay-ev .pe-t { font-weight: 700; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pay-ev .pe-v { font-variant-numeric: tabular-nums; color: var(--muted); }
+      #payList { margin: 0.15rem 0 0; padding-left: 1.25rem; }
+      #payList li { padding: 0.45rem 0; font-size: 0.95rem; display: flex; gap: 0.65rem; }
+      #payList li .t { font-weight: 700; min-width: 3.2rem; }
+      #payList li .rub { font-variant-numeric: tabular-nums; font-weight: 600; }
+      #payList li .pct { color: var(--muted); font-size: 0.8rem; }
+      .chart-status { font-size: 0.8rem; color: var(--muted); margin-top: 0.35rem; min-height: 1.2em; }
+      .chart-status.err { color: var(--down); }
+      .chart-hover {
+        display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem;
+        margin-top: 0.45rem; min-height: 1.6em;
+      }
+      .chart-hover[hidden] { display: none !important; }
+      .chart-hover .hv { font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .chart-hover .hd { color: var(--muted); font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+      tr.chart-active td { background: #eef4ff; }
+      tr.chart-row { cursor: pointer; }
+      tr.chart-row:hover td { background: #f7f9fc; }
+      .pos-card {
+        margin-top: 0.85rem; padding-top: 0.85rem;
+        border-top: 1px solid var(--border);
+      }
+      .pos-card h3 {
+        margin: 0 0 0.45rem; font-size: 0.95rem; font-weight: 700;
+      }
+      .pos-card .pos-empty { font-size: 0.82rem; color: var(--muted); margin: 0; }
+      .pos-card .pos-empty.err { color: var(--down); }
+      .pos-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+        gap: 0.55rem 0.85rem;
+      }
+      .pos-grid .cell .k {
+        font-size: 0.72rem; color: var(--muted); font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.02em;
+      }
+      .pos-grid .cell .v {
+        font-size: 0.92rem; font-weight: 650; margin-top: 0.12rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .pos-grid .cell .s {
+        font-size: 0.75rem; color: var(--muted); margin-top: 0.08rem;
+      }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
   </head>
   <body>
     <div class="wrap">
       <div class="top">
         <div>
-          <h1>Портфель · демо</h1>
-          <p class="sub" id="subtitle">Загрузка БКС…</p>
+          <h1 class="brand-toggle" id="btnPrivacy" title="Клик: скрыть/показать суммы (останутся %)">Портфель</h1>
         </div>
-        <div class="links">
-          <a href="/">Старый UI</a>
-          <a href="/legacy">Бэкап UI</a>
-          <a class="primary" href="/#tabNews">Лента (отдельно)</a>
-        </div>
-      </div>
-
-      <div class="banner">
-        Демо-макет «как Snowball»: сводка счёта и карточки по типам. Лента новостей — отдельный блок внизу / старый UI.
-        Основной <code>index.html</code> не затирали; откат: <code>/legacy</code> или файл в <code>static/backups/</code>.
+        <nav class="nav" id="mainNav" aria-label="Разделы">
+          <a href="#/" data-nav="home" class="active">Сегодня</a>
+          <a href="#/news" data-nav="news">Новости</a>
+          <a href="#/ops" data-nav="ops">Сделки</a>
+        </nav>
       </div>
 
       <div id="error" class="error" hidden></div>
 
+      <div class="panel" data-panel="home" id="panelHome">
       <div class="kpis" id="kpis">
         <div class="kpi"><div class="k">Стоимость</div><div class="v" id="kpiValue">—</div><div class="s" id="kpiInvest">вложено —</div></div>
+        <div class="kpi"><div class="k">Денег на счёте</div><div class="v" id="kpiCash">—</div><div class="s">кэш</div></div>
+        <div class="kpi"><div class="k">За день</div><div class="v" id="kpiDay">—</div><div class="s" id="kpiDayPct">MOEX × позиции</div></div>
         <div class="kpi"><div class="k">PnL</div><div class="v" id="kpiPnl">—</div><div class="s" id="kpiPnlPct">—</div></div>
-        <div class="kpi"><div class="k">Позиций</div><div class="v" id="kpiCount">—</div><div class="s">без валют в списке</div></div>
+        <div class="kpi"><div class="k">Позиций</div><div class="v" id="kpiCount">—</div><div class="s" id="kpiCountKind">акц · облиг · фонд</div></div>
       </div>
+
+      <section class="day-box" id="dayBox" hidden>
+        <h2>Кто двинул день</h2>
+        <p class="lead" id="dayLead">Топ по вкладу в дневной Δ — клик по строке откроет разбор.</p>
+        <p class="mkt-note" id="dayMktNote" hidden>Биржа выходной · цифры за последнюю сессию MOEX (MSK)</p>
+        <ol id="dayTop"></ol>
+      </section>
+
+      <section class="chart-box" id="capitalBox">
+        <h2>Капитал</h2>
+        <p class="lead">Сколько стоил весь портфель по неделям с 2024. Журнал × закрытие MOEX.</p>
+        <div class="chart-wrap" style="height:200px"><canvas id="capitalChart" aria-label="График капитала"></canvas></div>
+        <div class="chart-hover" id="capitalHover" hidden>
+          <span class="hv" id="capitalHoverVal">—</span>
+          <span class="hd" id="capitalHoverDay">наведи на график</span>
+        </div>
+        <div class="chart-status" id="capitalStatus">Загрузка…</div>
+      </section>
+
+      <section class="pay-box" id="payBox">
+        <div class="pay-head">
+          <h2>Календарь выплат</h2>
+          <div class="pay-modes">
+            <button type="button" class="pay-mode on" id="payModeCal">Календарь</button>
+            <button type="button" class="pay-mode" id="payModeList">Список</button>
+          </div>
+        </div>
+        <p class="lead" id="payLead">Купоны, дивиденды и погашения по своим бумагам.</p>
+        <div class="pay-filters">
+          <label class="pay-period-wrap">
+            <span>Период</span>
+            <select id="payPeriod" aria-label="Период календаря">
+              <option value="ahead">На год вперёд</option>
+              <option value="year" selected>Текущий год</option>
+            </select>
+          </label>
+          <div class="pay-chips" id="payKindChips">
+            <button type="button" class="pay-chip on coupon" data-kind="coupon">Купоны</button>
+            <button type="button" class="pay-chip on dividend" data-kind="dividend">Дивиденды</button>
+            <button type="button" class="pay-chip on redemption" data-kind="redemption">Погашения</button>
+          </div>
+          <div class="pay-chips" id="payStatusChips">
+            <button type="button" class="pay-chip on" data-status="paid">Выплаченные</button>
+            <button type="button" class="pay-chip on" data-status="upcoming">Будут оплачены</button>
+            <button type="button" class="pay-chip on" data-status="announced">Объявлены</button>
+          </div>
+        </div>
+        <div class="pay-legend">
+          <span class="lg coupon">Купон</span>
+          <span class="lg dividend">Дивиденд</span>
+          <span class="lg redemption">Погашение</span>
+          <span class="lg paid-ink">Яркий = выплачено</span>
+          <span class="lg ann-ink">Бледнеет = объявлено</span>
+          <span class="lg upc-ink">Самый бледный = будет</span>
+        </div>
+
+        <div class="pay-top">
+          <div class="pay-sum">
+            <div class="pay-sum-k">Всего за 12 мес</div>
+            <div class="pay-sum-v" id="paySumTotal">—</div>
+            <div class="pay-sum-rows">
+              <div><span>В месяц</span><b id="paySumMonth">—</b></div>
+              <div><span>В день</span><b id="paySumDay">—</b></div>
+            </div>
+          </div>
+          <div class="pay-bars">
+            <div class="chart-wrap" style="height:280px"><canvas id="payMonthsChart" aria-label="Выплаты по месяцам"></canvas></div>
+          </div>
+        </div>
+
+        <div id="payCalWrap">
+        <div class="pay-nav">
+          <button type="button" class="pay-arrow" id="payPrev" aria-label="Предыдущий месяц">‹</button>
+          <span class="pay-month" id="payMonthLabel">—</span>
+          <button type="button" class="pay-arrow" id="payNext" aria-label="Следующий месяц">›</button>
+          <span class="pay-badge" id="payMonthTotal">—</span>
+        </div>
+
+        <div class="pay-grid" id="payGrid"></div>
+        </div>
+        <ol id="payList" hidden></ol>
+        <div class="chart-status" id="payStatus">Загрузка…</div>
+      </section>
 
       <div class="cards" id="cards"></div>
 
+      <section class="chart-box" id="chartBox">
+        <h2>Разбор бумаги</h2>
+        <p class="lead">Кликни тикер в портфеле или в «Кто двинул день».</p>
+        <div class="chart-toolbar">
+          <label for="chartTicker">Тикер</label>
+          <select id="chartTicker" aria-label="Тикер для графика">
+            <option value="">—</option>
+          </select>
+          <span class="hint" id="chartHint">цифры и график · не советы</span>
+        </div>
+        <div class="chart-wrap"><canvas id="priceChart" aria-label="График цены"></canvas></div>
+        <div class="chart-status" id="chartStatus">Выбери бумагу.</div>
+        <div class="pos-card" id="posCard" aria-live="polite">
+          <h3 id="posCardTitle">Карточка бумаги</h3>
+          <p class="pos-empty" id="posCardEmpty">Кликни тикер — avg, покупки, PnL, доля.</p>
+          <div class="pos-grid" id="posCardGrid" hidden></div>
+        </div>
+      </section>
+      </div>
+
+      <div class="panel" data-panel="news" id="panelNews" hidden>
       <section class="feed-box">
-        <h2>Ситуация рынка · лента</h2>
-        <p>Отдельно от портфеля: свежие новости из локальной базы (не смешиваем с карточками активов).</p>
+        <h2>Новости</h2>
+        <p id="feedLead">Новости из базы по бумагам портфеля. Опрос: CLI <code>once</code> / POST <code>/api/poll</code>.</p>
         <ul id="feed"></ul>
       </section>
+      </div>
+
+      <div class="panel" data-panel="ops" id="panelOps" hidden>
+      <section class="ops-box">
+        <h2>Сделки</h2>
+        <p class="lead" id="opsLead">Вся история: журнал Snowball + свежие сделки БКС.</p>
+        <div class="ops-filters">
+          <div class="pay-chips" id="opsKindChips">
+            <button type="button" class="pay-chip on" data-kind="equity">Акции</button>
+            <button type="button" class="pay-chip on" data-kind="bond">Облигации</button>
+            <button type="button" class="pay-chip on" data-kind="fund">Фонды</button>
+          </div>
+          <label class="pay-period-wrap">
+            <span>Период</span>
+            <select id="opsYear" aria-label="Период сделок">
+              <option value="">Всё время</option>
+            </select>
+          </label>
+          <input
+            type="search"
+            id="opsTicker"
+            class="ops-search"
+            placeholder="Тикер"
+            aria-label="Фильтр по тикеру"
+          />
+          <button type="button" class="ops-csv-btn" id="opsCsvBtn">Скачать CSV</button>
+        </div>
+        <div class="ops-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Дата / время</th>
+                <th>Тикер</th>
+                <th>Сторона</th>
+                <th class="num">Кол-во</th>
+                <th class="num">Цена</th>
+                <th class="num">Сумма</th>
+              </tr>
+            </thead>
+            <tbody id="opsBody">
+              <tr><td colspan="6" class="empty">Загрузка…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      </div>
     </div>
     <script>
       const KIND = {
@@ -162,15 +765,62 @@
         bond: { title: "Облигации", color: "#8b5cf6" },
       };
 
+      let privacyOn = localStorage.getItem("pn_privacy") === "1";
+      let lastRender = null;
+      let focusSet = new Set(); // uppercase tickers
+      let dayPending = false;
+      let lastDaySnap = null;
+      try {
+        const raw = sessionStorage.getItem("pn_day_last");
+        if (raw) lastDaySnap = JSON.parse(raw);
+      } catch (_) {
+        lastDaySnap = null;
+      }
+      let priceChart = null;
+      let capitalChart = null;
+      let lastCapitalPoints = null;
+      let payMonthsChart = null;
+      let lastPayData = null;
+      let payMonthKey = "";
+      let payMode = "calendar"; // calendar | list
+      let payPeriod = "year"; // ahead | year | YYYY
+      let payKinds = { coupon: true, dividend: true, redemption: true };
+      let payStatuses = { paid: true, upcoming: true, announced: true };
+      let chartTickerSel = "";
+      let chartLoadSeq = 0;
+      let posLoadSeq = 0;
+      let lastPosCard = null;
+
       function fmtMoney(v) {
         if (v == null || Number.isNaN(Number(v))) return "—";
         return Number(v).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₽";
+      }
+      function moneyShow(v) {
+        if (privacyOn) return "••• ₽";
+        return fmtMoney(v);
+      }
+      function qtyShow(v) {
+        if (v == null || Number.isNaN(Number(v))) return "—";
+        if (privacyOn) return "•••";
+        return Number(v).toLocaleString("ru-RU");
       }
       function fmtPct(v) {
         if (v == null || Number.isNaN(Number(v))) return "—";
         const n = Number(v);
         const sign = n > 0 ? "+" : "";
         return sign + n.toFixed(2) + "%";
+      }
+      function pnlAbsShow(v) {
+        if (v == null || Number.isNaN(Number(v))) return "—";
+        if (privacyOn) return "••• ₽";
+        return (v > 0 ? "+" : "") + fmtMoney(v);
+      }
+      function pnlLineShow(pnl, pnlPct) {
+        const pct = fmtPct(pnlPct);
+        if (privacyOn) return "••• · " + pct;
+        const abs =
+          pnl == null ? "—" : (pnl > 0 ? "+" : "") + fmtMoney(pnl).replace(" ₽", "") + " ₽";
+        return abs + " · " + pct;
       }
       function pnlClass(v) {
         if (v == null || Number.isNaN(Number(v)) || Number(v) === 0) return "";
@@ -183,15 +833,82 @@
       }
 
       function guessKind(h, dbById, dbByIsin) {
+        const ac = assetClassOf(h, dbById, dbByIsin);
+        if (ac === "cash") return "cash";
+        if (ac === "fund") return "fund";
+        if (ac === "bond") return "bond";
+        if (ac === "stock") return "equity";
+        return "equity";
+      }
+
+      /** Known TQBR БПИФ tickers (short name often without «фонд») */
+      const KNOWN_FUNDS = {
+        BCSR: 1, GOLD: 1, TMOS: 1, SBMX: 1, SBSP: 1,
+        FXGD: 1, FXUS: 1, FXRU: 1, FXDE: 1, FXCN: 1,
+      };
+
+      /** stock | fund | bond | cash | other - prefers API asset_class */
+      function assetClassOf(h, dbById, dbByIsin) {
+        const raw = String(h.asset_class || "").toLowerCase();
+        if (raw === "equity" || raw === "share" || raw === "shares") return "stock";
+        if (raw === "stock" || raw === "fund" || raw === "bond" || raw === "cash" || raw === "other") {
+          return raw;
+        }
         const id = String(h.ticker || h.sec_code || "").toUpperCase();
-        if (/^(RUB|USD|EUR|CNY|HKD|GBP|CHF)$/.test(id)) return "cash";
-        const db = dbById[id] || (h.isin ? dbByIsin[String(h.isin).toUpperCase()] : null);
-        if (db && db.kind) return db.kind;
+        const isin = String(h.isin || "").toUpperCase();
+        if (/^(RUB|USD|EUR|CNY|HKD|GBP|CHF|CASH)$/.test(id)) return "cash";
         const cc = String(h.class_code || "").toUpperCase();
         const name = String(h.name || "");
-        if (/TQTF|ETF|BPIF|ПИФ/i.test(cc + " " + name)) return "fund";
-        if (/TQCB|TQOB|TQIR|BOND|ОФЗ|обл/i.test(cc + " " + name)) return "bond";
-        return "equity";
+        const nameL = name.toLowerCase();
+        const hay = cc + " " + name;
+        if (/TQTF|TQIF|TQTD|TQTE|ETF|BPIF|БПИФ|ПИФ/i.test(hay) || /бпиф|etf|пиф/.test(nameL)) {
+          return "fund";
+        }
+        if (KNOWN_FUNDS[id]) return "fund";
+        if (/фонд/.test(nameL) || (/индекс/.test(nameL) && /мосбирж|мос биржа/.test(nameL))) {
+          return "fund";
+        }
+        if (/TQCB|TQOB|TQIR|EQOB|BOND|ОФЗ|обл|сери/i.test(hay)) return "bond";
+        if (/^RU000A/i.test(id) || /^RU000A/i.test(isin) || /^SU/i.test(id)) return "bond";
+        const db = dbById[id] || (isin ? dbByIsin[isin] : null);
+        if (db && db.kind) {
+          const k = String(db.kind).toLowerCase();
+          if (k === "fund") return "fund";
+          if (k === "bond") return "bond";
+          if (k === "equity" || k === "stock") return "stock";
+        }
+        if (/TQBR|SMAL|EQBR/i.test(cc)) return "stock";
+        if (id && !/^RU000/i.test(id)) return "stock";
+        return "other";
+      }
+
+      const ASSET_GROUPS = [
+        { key: "stock", title: "Акции" },
+        { key: "fund", title: "Фонды" },
+        { key: "bond", title: "Облигации" },
+        { key: "other", title: "Прочее" },
+      ];
+
+      function groupHoldingsByAssetClass(rows, dbById, dbByIsin) {
+        const buckets = { stock: [], fund: [], bond: [], other: [], cash: [] };
+        for (const h of rows) {
+          const ac = assetClassOf(h, dbById, dbByIsin);
+          (buckets[ac] || buckets.other).push(h);
+        }
+        for (const key of Object.keys(buckets)) {
+          buckets[key].sort((a, b) => {
+            const va = Number(a.market_value);
+            const vb = Number(b.market_value);
+            const na = Number.isFinite(va) ? va : -Infinity;
+            const nb = Number.isFinite(vb) ? vb : -Infinity;
+            return nb - na;
+          });
+        }
+        return ASSET_GROUPS.filter((g) => buckets[g.key] && buckets[g.key].length).map((g) => ({
+          key: g.key,
+          title: g.title,
+          rows: buckets[g.key],
+        }));
       }
 
       function sumField(rows, key) {
@@ -205,9 +922,106 @@
         return ok ? s : null;
       }
 
-      function renderCard(kind, rows) {
+      function countPapersByKind(papers, dbById, dbByIsin) {
+        const c = { equity: 0, bond: 0, fund: 0 };
+        for (const h of papers) {
+          const k = guessKind(h, dbById, dbByIsin);
+          if (k === "bond") c.bond += 1;
+          else if (k === "fund") c.fund += 1;
+          else if (k !== "cash") c.equity += 1;
+        }
+        return c;
+      }
+
+      function fmtPosBreakdown(c) {
+        const parts = [];
+        if (c.equity) parts.push("акц " + c.equity);
+        if (c.bond) parts.push("облиг " + c.bond);
+        if (c.fund) parts.push("фонд " + c.fund);
+        return parts.length ? parts.join(" · ") : "без бумаг";
+      }
+
+      function hueFor(id) {
+        let h = 0;
+        const s = String(id || "?");
+        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        return h % 360;
+      }
+
+      function resolveIsin(h, dbById, dbByIsin) {
+        const raw = String(h.isin || "").trim().toUpperCase();
+        if (raw) return raw;
+        const id = String(h.ticker || h.sec_code || "").trim().toUpperCase();
+        if (/^RU000/i.test(id)) return id;
+        const db = dbById[id] || null;
+        if (db && db.isin) return String(db.isin).toUpperCase();
+        return "";
+      }
+
+      /** Offline logos from Snowball CDN dumps in /static/logos/{TICKER}.png */
+      const LOCAL_LOGOS = Object.fromEntries(
+        [
+          "BELU", "BSPB", "CHMF", "GMKN", "GOLD", "HEAD", "HNFG", "IRAO", "LEAS",
+          "LKOH", "LSNGP", "MAGN", "MDMG", "MOEX", "MTSS", "OZON", "PLZL", "ROSN",
+          "SBER", "SIBN", "SPBE", "SVCB", "T", "TATN", "TATNP", "TRNFP", "X5", "YDEX",
+        ]
+          .map((t) => [t, "/static/logos/" + t + ".png"])
+          .concat([["BCSR", "/static/logos/BCSR.svg"]])
+      );
+
+      function logoUrl(ticker, isin) {
+        const id = String(ticker || "").trim().toUpperCase();
+        // Prefer local file if we shipped it; broken file → onerror → initials
+        if (id && LOCAL_LOGOS[id]) return LOCAL_LOGOS[id];
+        if (!isin) return "";
+        return "https://invest-brands.cdn-tinkoff.ru/" + encodeURIComponent(isin) + "x160.png";
+      }
+
+      function assetAvatarHtml(h, dbById, dbByIsin, accent) {
+        const id = String(h.ticker || h.sec_code || "?").toUpperCase();
+        const isin = resolveIsin(h, dbById, dbByIsin);
+        const initials = id.replace(/[^A-Z0-9]/g, "").slice(0, 2) || "?";
+        const bg = accent || "hsl(" + hueFor(id) + " 42% 42%)";
+        const url = logoUrl(id, isin);
+        const img = url
+          ? '<img alt="" loading="lazy" referrerpolicy="no-referrer" src="' +
+            esc(url) +
+            '" onload="this.parentElement.classList.add(\'has-img\')" onerror="this.remove()" />'
+          : "";
+        return (
+          '<span class="logo-wrap" title="' +
+          esc(isin || id) +
+          '">' +
+          img +
+          '<span class="fb" style="background:' +
+          esc(bg) +
+          '">' +
+          esc(initials) +
+          "</span></span>"
+        );
+      }
+
+      function renderCard(kind, rows, dbById, dbByIsin) {
         const meta = KIND[kind] || { title: kind, color: "#888" };
         const value = sumField(rows, "market_value");
+        const el = document.createElement("div");
+        el.dataset.kind = kind;
+
+        // Cash: static block — title + amount only (no expand, chips, count, PnL).
+        if (kind === "cash") {
+          el.className = "card card-cash";
+          el.innerHTML =
+            '<div class="card-head">' +
+            "<div><div class='title'>" +
+            esc(meta.title) +
+            "</div></div>" +
+            '<div class="nums"><div class="val">' +
+            moneyShow(value) +
+            "</div></div>" +
+            "</div>";
+          return el;
+        }
+
         const pnl = sumField(rows, "pnl");
         const cost = sumField(rows, "cost_value");
         const pnlPct =
@@ -216,66 +1030,67 @@
         const more = Math.max(0, rows.length - show.length);
         let chips = show
           .map((h, i) => {
-            const label = String(h.ticker || h.sec_code || "?").slice(0, 4);
             return (
-              '<span class="chip-dot" style="background:' +
-              meta.color +
-              ";opacity:" +
-              (0.55 + i * 0.1) +
+              '<span class="chip-dot" style="padding:0;width:28px;height:28px;border-radius:8px;overflow:hidden;opacity:' +
+              (0.75 + i * 0.05) +
               '">' +
-              esc(label) +
+              assetAvatarHtml(h, dbById, dbByIsin, meta.color) +
               "</span>"
             );
           })
           .join("");
         if (more) chips += '<span class="chip-more">+' + more + "</span>";
 
-        const pnlLine =
-          (pnl == null ? "—" : (pnl > 0 ? "+" : "") + fmtMoney(pnl).replace(" ₽", "") + " ₽") +
-          " · " +
-          fmtPct(pnlPct);
+        const countHtml =
+          '<div class="count">' +
+          rows.length +
+          " позици" +
+          (rows.length === 1 ? "я" : rows.length < 5 ? "и" : "й") +
+          "</div>";
+        const numsHtml =
+          '<div class="nums"><div class="pnl ' +
+          pnlClass(pnl) +
+          '">' +
+          esc(pnlLineShow(pnl, pnlPct)) +
+          '</div><div class="val">' +
+          moneyShow(value) +
+          "</div></div>";
 
         let bodyRows = "";
         for (const h of rows) {
           const hp = h.pnl;
+          const title = h.name || h.ticker || h.sec_code || "—";
+          const sub = h.ticker || h.sec_code || "";
           bodyRows +=
-            "<tr><td><strong>" +
-            esc(h.ticker || h.sec_code || "—") +
-            "</strong><br><span class='meta'>" +
-            esc(h.name || "") +
-            "</span></td><td class='num'>" +
-            (h.quantity == null ? "—" : Number(h.quantity).toLocaleString("ru-RU")) +
+            "<tr><td><div class='asset-cell'>" +
+            assetAvatarHtml(h, dbById, dbByIsin, meta.color) +
+            "<div class='asset-text'><strong>" +
+            esc(title) +
+            "</strong><div class='meta'>" +
+            esc(sub) +
+            "</div></div></div></td><td class='num'>" +
+            qtyShow(h.quantity) +
             "</td><td class='num'>" +
-            fmtMoney(h.market_value) +
+            moneyShow(h.market_value) +
             "</td><td class='num " +
             pnlClass(hp) +
             "'>" +
-            (hp == null ? "—" : (hp > 0 ? "+" : "") + fmtMoney(hp)) +
+            pnlAbsShow(hp) +
             "</td></tr>";
         }
 
-        const el = document.createElement("div");
         el.className = "card";
-        el.dataset.kind = kind;
         el.innerHTML =
           '<button type="button" class="card-head">' +
-          '<div><div class="title">' +
+          "<div><div class='title'>" +
           esc(meta.title) +
-          '</div><div class="count">' +
-          rows.length +
-          " позици" +
-          (rows.length === 1 ? "я" : rows.length < 5 ? "и" : "й") +
-          "</div></div>" +
+          "</div>" +
+          countHtml +
+          "</div>" +
           '<div class="chips">' +
           chips +
           "</div>" +
-          '<div class="nums"><div class="pnl ' +
-          pnlClass(pnl) +
-          '">' +
-          esc(pnlLine) +
-          '</div><div class="val">' +
-          fmtMoney(value) +
-          '</div></div>' +
+          numsHtml +
           '<span class="chev">▾</span>' +
           "</button>" +
           '<div class="card-body"><table><thead><tr>' +
@@ -290,17 +1105,2208 @@
         return el;
       }
 
+      function sideLabel(side) {
+        const s = String(side || "").toLowerCase();
+        if (s === "buy") return { text: "Покупка", cls: "side-buy" };
+        if (s === "sell") return { text: "Продажа", cls: "side-sell" };
+        return { text: side || "—", cls: "" };
+      }
+
+      function fmtWhen(iso) {
+        const s = String(iso || "").trim();
+        if (!s) return "—";
+        const d = new Date(s);
+        // Журнал Snowball по старым сделкам времени не знает — не рисуем «00:00»
+        if (!Number.isNaN(d.getTime()) && /T00:00:00/.test(s)) {
+          return d.toLocaleDateString("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+          });
+        }
+        if (!Number.isNaN(d.getTime())) {
+          return d.toLocaleString("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        }
+        return s.replace("T", " ").slice(0, 19);
+      }
+
+      const LIST_PREVIEW = 5;
+      const OPS_PREVIEW = 25; // своя панель — пять строк из сотен бессмысленны
+
+      const OPS_KIND_TAG = { equity: "акц", bond: "обл", fund: "фонд" };
+
+      function ruPlural(n, one, few, many) {
+        const a = Math.abs(n) % 100;
+        const b = a % 10;
+        if (a > 10 && a < 20) return many;
+        if (b === 1) return one;
+        if (b >= 2 && b <= 4) return few;
+        return many;
+      }
+
+      let opsKinds = { equity: true, bond: true, fund: true };
+      let opsYear = "";
+      let opsTickerQ = "";
+      let opsSearchTimer = null;
+      let lastOpsSnap = null;
+
+      function opsFilterParams() {
+        const p = new URLSearchParams();
+        const on = Object.keys(opsKinds).filter((k) => opsKinds[k]);
+        if (on.length && on.length < 3) p.set("kind", on.join(","));
+        if (opsYear) p.set("year", opsYear);
+        if (opsTickerQ) p.set("ticker", opsTickerQ);
+        return p;
+      }
+
+      function fillOpsYears(years) {
+        const sel = document.getElementById("opsYear");
+        if (!sel) return;
+        const list = (years || []).slice().sort().reverse();
+        const want = list.join(",");
+        if (sel.dataset.years !== want) {
+          sel.dataset.years = want;
+          sel.innerHTML =
+            '<option value="">Всё время</option>' +
+            list.map((y) => '<option value="' + y + '">' + y + "</option>").join("");
+        }
+        if ([...sel.options].some((o) => o.value === opsYear)) sel.value = opsYear;
+      }
+
+      async function loadOpsFiltered() {
+        const body = document.getElementById("opsBody");
+        const lead = document.getElementById("opsLead");
+        const anyKind = Object.values(opsKinds).some(Boolean);
+        if (!anyKind) {
+          if (lead) lead.textContent = "Выбери хотя бы один тип бумаг.";
+          if (body)
+            body.innerHTML =
+              '<tr><td colspan="6" class="empty">Все типы выключены.</td></tr>';
+          return;
+        }
+        const p = opsFilterParams();
+        p.set("limit", "0");
+        if (lead) lead.textContent = "Загрузка…";
+        try {
+          const r = await fetch("/api/operations?" + p.toString());
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          renderOps(await r.json());
+        } catch (e) {
+          if (lead) lead.textContent = "Сделки не загрузились: " + (e.message || e);
+        }
+      }
+
+      function downloadOpsCsv() {
+        const p = opsFilterParams();
+        window.location.href = "/api/operations.csv?" + p.toString();
+      }
+
+      function renderOps(opsSnap) {
+        const body = document.getElementById("opsBody");
+        const lead = document.getElementById("opsLead");
+        lastOpsSnap = opsSnap;
+        if (!opsSnap || !opsSnap.configured) {
+          lead.textContent = "Нет BCS токена и нет журнала — сделки недоступны.";
+          body.innerHTML = '<tr><td colspan="6" class="empty">Нет данных</td></tr>';
+          return;
+        }
+        fillOpsYears(opsSnap.years);
+        if (!opsSnap.ok) {
+          lead.textContent = opsSnap.error || "Не удалось загрузить сделки.";
+          body.innerHTML =
+            '<tr><td colspan="6" class="empty">' +
+            esc(opsSnap.error || "Ошибка БКС") +
+            "</td></tr>";
+          return;
+        }
+        const ops = opsSnap.operations || [];
+        const src = opsSnap.source ? " · " + opsSnap.source : "";
+        if (!ops.length) {
+          lead.textContent = "Под фильтры ничего не попало" + src;
+          body.innerHTML =
+            '<tr><td colspan="6" class="empty">Нет сделок в выбранном типе/периоде.</td></tr>';
+          return;
+        }
+
+        function opsExpanded() {
+          try {
+            return sessionStorage.getItem("pn_ops_expanded") === "1";
+          } catch (_) {
+            return false;
+          }
+        }
+        function setOpsExpanded(on) {
+          try {
+            sessionStorage.setItem("pn_ops_expanded", on ? "1" : "0");
+          } catch (_) {}
+        }
+
+        function opRowHtml(o) {
+          const side = sideLabel(o.side);
+          const tag = OPS_KIND_TAG[o.kind];
+          return (
+            "<tr><td>" +
+            esc(fmtWhen(o.executed_at)) +
+            "</td><td><strong>" +
+            esc(o.ticker || "—") +
+            "</strong>" +
+            (tag ? ' <span class="ops-kind-tag">' + tag + "</span>" : "") +
+            "</td><td class='" +
+            side.cls +
+            "'>" +
+            esc(side.text) +
+            "</td><td class='num'>" +
+            qtyShow(o.quantity) +
+            "</td><td class='num'>" +
+            moneyShow(o.price) +
+            "</td><td class='num'>" +
+            moneyShow(o.volume) +
+            "</td></tr>"
+          );
+        }
+
+        function paint(expanded) {
+          const limit = expanded ? ops.length : Math.min(OPS_PREVIEW, ops.length);
+          const shown = ops.slice(0, limit);
+          const rest = ops.length - OPS_PREVIEW;
+          const span = (opsSnap.years || []).length
+            ? " · " +
+              (opsYear
+                ? opsYear
+                : opsSnap.years[0] + "–" + opsSnap.years[opsSnap.years.length - 1])
+            : "";
+          lead.textContent =
+            "Сделки · показано " +
+            shown.length +
+            " из " +
+            (opsSnap.total != null ? opsSnap.total : ops.length) +
+            span +
+            src +
+            (opsSnap.error ? " · " + opsSnap.error : "");
+          let html = shown.map(opRowHtml).join("");
+          if (rest > 0) {
+            html +=
+              "<tr class='ops-more'><td colspan='6'>" +
+              "<button type='button' class='ops-more-btn' id='opsMoreBtn'>" +
+              (expanded
+                ? "Свернуть"
+                : "Ещё " +
+                  rest +
+                  " " +
+                  ruPlural(rest, "сделка", "сделки", "сделок") +
+                  " ▾") +
+              "</button></td></tr>";
+          }
+          body.innerHTML = html;
+          const btn = document.getElementById("opsMoreBtn");
+          if (btn) {
+            btn.addEventListener("click", () => {
+              const next = !expanded;
+              setOpsExpanded(next);
+              paint(next);
+            });
+          }
+        }
+
+        paint(opsExpanded() && ops.length > OPS_PREVIEW);
+      }
+
+      function setCapitalStatus(msg, isErr) {
+        const el = document.getElementById("capitalStatus");
+        if (!el) return;
+        el.textContent = msg || "";
+        el.className = "chart-status" + (isErr ? " err" : "");
+      }
+
+      function destroyCapitalChart() {
+        const canvas = document.getElementById("capitalChart");
+        if (typeof Chart !== "undefined" && Chart.getChart && canvas) {
+          const existing = Chart.getChart(canvas);
+          if (existing) {
+            try {
+              existing.destroy();
+            } catch (_) {}
+          }
+        }
+        if (capitalChart) {
+          try {
+            capitalChart.destroy();
+          } catch (_) {}
+        }
+        capitalChart = null;
+      }
+
+      function capitalDayHuman(iso) {
+        const p = String(iso || "").split("-");
+        if (p.length < 3) return iso || "—";
+        return p[2] + "." + p[1] + "." + p[0];
+      }
+
+      function setCapitalHover(pt) {
+        const box = document.getElementById("capitalHover");
+        const valEl = document.getElementById("capitalHoverVal");
+        const dayEl = document.getElementById("capitalHoverDay");
+        if (!box || !valEl || !dayEl) return;
+        if (!pt) {
+          box.hidden = true;
+          return;
+        }
+        box.hidden = false;
+        if (privacyOn) {
+          valEl.textContent = "••• ₽";
+          dayEl.textContent = capitalDayHuman(pt.day);
+          return;
+        }
+        valEl.textContent =
+          Number(pt.total_value).toLocaleString("ru-RU", {
+            maximumFractionDigits: 0,
+          }) + " ₽";
+        dayEl.textContent = capitalDayHuman(pt.day) + " · неделя";
+      }
+
+      const capitalCrosshair = {
+        id: "capitalCrosshair",
+        afterDraw(chart) {
+          const ae = chart.getActiveElements ? chart.getActiveElements() : [];
+          if (!ae.length) return;
+          const x = ae[0].element.x;
+          const area = chart.chartArea;
+          const ctx = chart.ctx;
+          ctx.save();
+          ctx.beginPath();
+          ctx.setLineDash([4, 3]);
+          ctx.strokeStyle = "rgba(15, 122, 90, 0.45)";
+          ctx.lineWidth = 1;
+          ctx.moveTo(x, area.top);
+          ctx.lineTo(x, area.bottom);
+          ctx.stroke();
+          ctx.restore();
+        },
+      };
+
+      function renderCapitalChart(points) {
+        lastCapitalPoints = points || [];
+        const canvas = document.getElementById("capitalChart");
+        if (!canvas || typeof Chart === "undefined") {
+          setCapitalStatus("Chart.js не загрузился", true);
+          return;
+        }
+        destroyCapitalChart();
+        if (!points || !points.length) {
+          setCapitalHover(null);
+          setCapitalStatus(
+            "Пока одна точка появится после удачного ответа брокера. История начнётся с сегодня."
+          );
+          return;
+        }
+        const labels = points.map((p) => p.day);
+        const values = points.map((p) =>
+          privacyOn ? null : Number(p.total_value)
+        );
+        setCapitalHover(points[points.length - 1]);
+        try {
+          capitalChart = new Chart(canvas, {
+            type: "line",
+            data: {
+              labels,
+              datasets: [
+                {
+                  label: "Портфель",
+                  data: privacyOn
+                    ? points.map(() => 0)
+                    : values,
+                  borderColor: "#0f7a5a",
+                  backgroundColor: "rgba(15, 122, 90, 0.12)",
+                  fill: true,
+                  tension: 0.2,
+                  pointRadius: 0,
+                  pointHoverRadius: 5,
+                  pointHitRadius: 18,
+                  borderWidth: 2,
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: "index", intersect: false, axis: "x" },
+              onHover: (_evt, els) => {
+                if (els && els.length) setCapitalHover(points[els[0].index]);
+              },
+              plugins: {
+                legend: { display: false },
+                capitalCrosshair: {},
+                tooltip: {
+                  enabled: false,
+                },
+              },
+              scales: {
+                x: {
+                  ticks: {
+                    maxRotation: 0,
+                    autoSkip: true,
+                    maxTicksLimit: 10,
+                    callback: function (val) {
+                      const raw = this.getLabelForValue(val);
+                      const p = String(raw || "").split("-");
+                      if (p.length < 2) return raw;
+                      const m = [
+                        "янв", "фев", "мар", "апр", "май", "июн",
+                        "июл", "авг", "сен", "окт", "ноя", "дек",
+                      ];
+                      return (m[Number(p[1]) - 1] || p[1]) + " " + p[0].slice(2);
+                    },
+                  },
+                },
+                y: {
+                  ticks: {
+                    callback: (v) => {
+                      if (privacyOn) return "•••";
+                      return Number(v).toLocaleString("ru-RU", {
+                        notation: "compact",
+                        maximumFractionDigits: 1,
+                      });
+                    },
+                  },
+                },
+              },
+            },
+            plugins: [capitalCrosshair],
+          });
+          canvas.onmouseleave = () => setCapitalHover(points[points.length - 1]);
+        } catch (e) {
+          setCapitalStatus(String(e.message || e), true);
+          return;
+        }
+        const first = points[0];
+        const last = points[points.length - 1];
+        if (privacyOn) {
+          setCapitalStatus(points.length + " дн. · скрыто");
+        } else if (points.length === 1) {
+          setCapitalStatus(
+            "Пока только сегодня: " +
+              Number(last.total_value).toLocaleString("ru-RU", {
+                maximumFractionDigits: 0,
+              }) +
+              " ₽ — история подтянется с сделок"
+          );
+        } else {
+          const a = Number(first.total_value);
+          const b = Number(last.total_value);
+          const d = b - a;
+          const sign = d > 0 ? "+" : "";
+          setCapitalStatus(
+            "Недели (сделки×биржа) " +
+              first.day +
+              " → " +
+              last.day +
+              " · " +
+              sign +
+              d.toLocaleString("ru-RU", { maximumFractionDigits: 0 }) +
+              " ₽"
+          );
+        }
+      }
+
+      async function loadCapital() {
+        setCapitalStatus("Загрузка…");
+        try {
+          let r = await fetch("/api/capital?days=1100");
+          if (r.status === 422) r = await fetch("/api/capital?days=900");
+          if (!r.ok) {
+            setCapitalStatus("Не удалось загрузить капитал (HTTP " + r.status + ")", true);
+            return;
+          }
+          const data = await r.json();
+          renderCapitalChart(data.points || []);
+        } catch (e) {
+          setCapitalStatus(String(e.message || e), true);
+        }
+      }
+
+      function payDateHuman(iso) {
+        const s = String(iso || "").slice(0, 10);
+        const parts = s.split("-");
+        if (parts.length !== 3) return s;
+        return parts[2] + "." + parts[1];
+      }
+
+      const PAY_MONTHS_SHORT = [
+        "янв.", "фев.", "март", "апр.", "май", "июнь",
+        "июль", "авг.", "сент.", "окт.", "нояб.", "дек.",
+      ];
+      const PAY_MONTHS_FULL = [
+        "январь", "февраль", "март", "апрель", "май", "июнь",
+        "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+      ];
+
+      function payMonthLabel(key, full) {
+        const p = String(key || "").split("-");
+        if (p.length < 2) return key || "—";
+        const mi = Number(p[1]) - 1;
+        const names = full ? PAY_MONTHS_FULL : PAY_MONTHS_SHORT;
+        const nm = names[mi] || p[1];
+        return full ? nm + " " + p[0].slice(2) : nm;
+      }
+
+      function parsePayMonthKey(key) {
+        const m = String(key || "").match(/^(\d{4})-(\d{2})$/);
+        if (!m) return null;
+        const yy = Number(m[1]);
+        const mm = Number(m[2]);
+        if (!yy || mm < 1 || mm > 12) return null;
+        return { yy, mm, key: m[1] + "-" + m[2] };
+      }
+
+      function payPeriodYear(today) {
+        if (payPeriod === "year") return String(today || "").slice(0, 4);
+        if (/^\d{4}$/.test(payPeriod)) return payPeriod;
+        return "";
+      }
+
+      function aheadMonthEnd(today) {
+        const start = String(today || "").slice(0, 7);
+        const parsed = parsePayMonthKey(start);
+        if (!parsed) return "";
+        const d = new Date(parsed.yy, parsed.mm - 1 + 11, 1);
+        return (
+          d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0")
+        );
+      }
+
+      function monthInPayPeriod(key, today) {
+        const parsed = parsePayMonthKey(key);
+        if (!parsed) return false;
+        if (payPeriod === "ahead") {
+          const start = String(today || "").slice(0, 7);
+          const end = aheadMonthEnd(today);
+          return (!start || parsed.key >= start) && (!end || parsed.key <= end);
+        }
+        const y = payPeriodYear(today);
+        return !y || parsed.key.startsWith(y);
+      }
+
+      function firstMonthInPeriod(today, events) {
+        const t = String(today || "");
+        const tm = t.slice(0, 7);
+        if (payPeriod === "ahead") return parsePayMonthKey(tm) ? tm : "";
+        const y = payPeriodYear(t);
+        if (y && parsePayMonthKey(tm) && tm.startsWith(y)) return tm;
+        for (const ev of events || []) {
+          const k = String(ev.pay_date || "").slice(0, 7);
+          if (y && k.startsWith(y) && parsePayMonthKey(k)) return k;
+        }
+        return y ? y + "-01" : tm;
+      }
+
+      function destroyPayMonthsChart() {
+        const canvas = document.getElementById("payMonthsChart");
+        if (typeof Chart !== "undefined" && Chart.getChart && canvas) {
+          const ex = Chart.getChart(canvas);
+          if (ex) {
+            try {
+              ex.destroy();
+            } catch (_) {}
+          }
+        }
+        if (payMonthsChart) {
+          try {
+            payMonthsChart.destroy();
+          } catch (_) {}
+        }
+        payMonthsChart = null;
+      }
+
+      function payKindLabel(kind) {
+        if (kind === "coupon") return "купон";
+        if (kind === "redemption") return "погашение";
+        return "дивиденд";
+      }
+
+      function payEvTitle(ev) {
+        const name = String((ev && ev.name) || "").trim();
+        const ticker = String((ev && ev.ticker) || "").trim();
+        if (name) {
+          if (name.length <= 28) return name;
+          const short = name.split(/[\s,/]+/).slice(0, 2).join(" ");
+          return short || name;
+        }
+        return ticker || "?";
+      }
+
+      function payStatusLabel(st) {
+        if (st === "paid") return "выплачен";
+        if (st === "announced") return "объявлен";
+        return "будет";
+      }
+
+      function payKindClass(kind) {
+        if (kind === "coupon" || kind === "redemption" || kind === "dividend") return kind;
+        return "dividend";
+      }
+
+      function payInPeriod(ev) {
+        const day = String(ev.pay_date || "").slice(0, 10);
+        if (!day) return false;
+        const today = (lastPayData && lastPayData.today) || day;
+        if (payPeriod === "ahead") return day >= today;
+        if (payPeriod === "year") return day.slice(0, 4) === today.slice(0, 4);
+        return day.slice(0, 4) === payPeriod;
+      }
+
+      function visiblePayEvents() {
+        const all = (lastPayData && lastPayData.events) || [];
+        return all.filter((ev) => {
+          const k = ev.kind || "dividend";
+          const st = payEventStatus(ev);
+          if (!payKinds[k]) return false;
+          if (!payStatuses[st]) return false;
+          return payInPeriod(ev);
+        });
+      }
+
+      function payEventStatus(ev) {
+        if (ev && ev.status) return ev.status;
+        const today = (lastPayData && lastPayData.today) || "";
+        const day = String((ev && ev.pay_date) || "");
+        if (day && today && day < today) return "paid";
+        if ((ev && ev.kind) === "dividend" || (ev && ev.amount) == null) return "announced";
+        return "upcoming";
+      }
+
+      function payKindKey(kind) {
+        if (kind === "coupon" || kind === "redemption") return kind;
+        return "dividend";
+      }
+
+      function payStatusKey(st) {
+        if (st === "paid" || st === "announced") return st;
+        return "upcoming";
+      }
+
+      function emptyPayMonth(key) {
+        return {
+          month: key,
+          amount: 0,
+          coupon: 0,
+          dividend: 0,
+          redemption: 0,
+          paid: 0,
+          announced: 0,
+          upcoming: 0,
+          coupon_paid: 0,
+          coupon_announced: 0,
+          coupon_upcoming: 0,
+          dividend_paid: 0,
+          dividend_announced: 0,
+          dividend_upcoming: 0,
+          redemption_paid: 0,
+          redemption_announced: 0,
+          redemption_upcoming: 0,
+          n: 0,
+          nAnnounced: 0,
+        };
+      }
+
+      function monthsFromEvents(events) {
+        const map = {};
+        for (const ev of events) {
+          const key = String(ev.pay_date || "").slice(0, 7);
+          if (!key) continue;
+          if (!map[key]) map[key] = emptyPayMonth(key);
+          const val = ev.amount != null ? Number(ev.amount) : 0;
+          const st = payStatusKey(payEventStatus(ev));
+          const kind = payKindKey(ev.kind);
+          map[key].amount += val;
+          map[key].n += 1;
+          if (st === "announced") map[key].nAnnounced += 1;
+          map[key][kind] += val;
+          map[key][st] += val;
+          map[key][kind + "_" + st] += val;
+        }
+        return Object.keys(map)
+          .sort()
+          .map((k) => map[k]);
+      }
+
+      function padPayMonths(months, today) {
+        const by = {};
+        for (const m of months || []) if (m && m.month) by[m.month] = m;
+        let year = "";
+        if (payPeriod === "year" && today) year = String(today).slice(0, 4);
+        else if (/^\d{4}$/.test(payPeriod)) year = payPeriod;
+        if (year) {
+          const out = [];
+          for (let i = 1; i <= 12; i += 1) {
+            const key = year + "-" + String(i).padStart(2, "0");
+            out.push(by[key] || emptyPayMonth(key));
+          }
+          return out;
+        }
+        if (payPeriod === "ahead" && today) {
+          const start = String(today).slice(0, 7);
+          const [yy, mm] = start.split("-").map(Number);
+          const out = [];
+          for (let i = 0; i < 12; i += 1) {
+            const d = new Date(yy, mm - 1 + i, 1);
+            const key =
+              d.getFullYear() +
+              "-" +
+              String(d.getMonth() + 1).padStart(2, "0");
+            out.push(by[key] || emptyPayMonth(key));
+          }
+          return out;
+        }
+        return months || [];
+      }
+
+      function fillPayPeriodOptions() {
+        const sel = document.getElementById("payPeriod");
+        if (!sel) return;
+        const years = (lastPayData && lastPayData.years) || [];
+        const want = "ahead,year," + years.join(",");
+        if (sel.dataset.years !== want) {
+          sel.dataset.years = want;
+          sel.innerHTML =
+            '<option value="ahead">На год вперёд</option>' +
+            '<option value="year">Текущий год</option>' +
+            years
+              .map((y) => '<option value="' + y + '">' + y + "</option>")
+              .join("");
+        }
+        if ([...sel.options].some((o) => o.value === payPeriod)) sel.value = payPeriod;
+        else sel.value = "year";
+        payPeriod = sel.value;
+      }
+
+      function payKindInk(kind) {
+        return { coupon: "#1d4ed8", dividend: "#047857", redemption: "#ea580c" }[kind] || "#94a3b8";
+      }
+
+      function payKindColor(kind, status) {
+        const ink = payKindInk(kind);
+        if (status === "paid") return ink;
+        const n = parseInt(ink.slice(1), 16);
+        const r = n >> 16;
+        const g = (n >> 8) & 255;
+        const b = n & 255;
+        const w = status === "announced" ? 0.42 : 0.68;
+        const m = (c) => Math.round(c + (255 - c) * w);
+        return "rgb(" + m(r) + "," + m(g) + "," + m(b) + ")";
+      }
+
+      function renderPayMonths(months) {
+        const canvas = document.getElementById("payMonthsChart");
+        if (!canvas || typeof Chart === "undefined") return;
+        destroyPayMonthsChart();
+        if (!months || !months.length) return;
+        const hide = privacyOn;
+        const series = [
+          ["coupon", "paid", "Купон · выплачен"],
+          ["coupon", "announced", "Купон · объявлен"],
+          ["coupon", "upcoming", "Купон · утверждён"],
+          ["dividend", "paid", "Див · выплачен"],
+          ["dividend", "announced", "Див · объявлен"],
+          ["dividend", "upcoming", "Див · утверждён"],
+          ["redemption", "paid", "Погашение · выплачено"],
+          ["redemption", "announced", "Погашение · объявлено"],
+          ["redemption", "upcoming", "Погашение · утверждено"],
+        ];
+        try {
+          payMonthsChart = new Chart(canvas, {
+            type: "bar",
+            data: {
+              labels: months.map((m) => payMonthLabel(m.month, false)),
+              datasets: series.map(([kind, st, label]) => ({
+                label,
+                payStatus: st,
+                data: months.map((m) => (hide ? 0 : Number(m[kind + "_" + st] || 0))),
+                backgroundColor: payKindColor(kind, st),
+                borderColor: payKindColor(kind, st),
+                borderWidth: 1,
+                borderSkipped: false,
+                stack: "pay",
+                maxBarThickness: 36,
+              })),
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              onClick: (_e, els) => {
+                if (!els || !els.length) return;
+                const m = months[els[0].index];
+                if (m) {
+                  payMonthKey = m.month;
+                  renderPayCalendar();
+                }
+              },
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  mode: "index",
+                  intersect: false,
+                  filter: (item) => item.parsed.y > 0,
+                  itemSort: (a, b) => b.parsed.y - a.parsed.y,
+                  callbacks: {
+                    label: (ctx) =>
+                      (ctx.dataset.label || "") +
+                      ": " +
+                      (hide ? "••• ₽" : moneyShow(ctx.parsed.y)),
+                    footer: (items) => {
+                      if (!items || !items.length || hide) return "";
+                      const m = months[items[0].dataIndex];
+                      if (!m) return "";
+                      return "всего " + moneyShow(m.amount || 0);
+                    },
+                  },
+                },
+              },
+              scales: {
+                x: { stacked: true, grid: { display: false }, ticks: { font: { size: 12 } } },
+                y: {
+                  stacked: true,
+                  ticks: {
+                    callback: (v) =>
+                      hide
+                        ? "•••"
+                        : Number(v).toLocaleString("ru-RU", {
+                            notation: "compact",
+                            maximumFractionDigits: 1,
+                          }),
+                    font: { size: 12 },
+                  },
+                },
+              },
+            },
+          });
+        } catch (_) {}
+      }
+
+      function payEventsByDay(monthKey) {
+        const out = {};
+        for (const ev of visiblePayEvents()) {
+          if (String(ev.pay_date || "").slice(0, 7) !== monthKey) continue;
+          const d = Number(String(ev.pay_date).slice(8, 10));
+          if (!d) continue;
+          (out[d] = out[d] || []).push(ev);
+        }
+        return out;
+      }
+
+      function renderPayCalendar() {
+        const grid = document.getElementById("payGrid");
+        const label = document.getElementById("payMonthLabel");
+        const badge = document.getElementById("payMonthTotal");
+        if (!grid || !label || !badge) return;
+
+        const parsed = parsePayMonthKey(payMonthKey);
+        if (!parsed) {
+          label.textContent = "—";
+          badge.textContent = "нет выплат";
+          grid.innerHTML = "";
+          return;
+        }
+        payMonthKey = parsed.key;
+        const yy = parsed.yy;
+        const mm = parsed.mm;
+
+        label.textContent = payMonthLabel(payMonthKey, true);
+        grid.innerHTML = "";
+        for (const wd of ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]) {
+          const cell = document.createElement("div");
+          cell.className = "pg-wd";
+          cell.textContent = wd;
+          grid.appendChild(cell);
+        }
+
+        const first = new Date(yy, mm - 1, 1);
+        const daysInMonth = new Date(yy, mm, 0).getDate();
+        if (!daysInMonth || Number.isNaN(first.getTime())) {
+          badge.textContent = "нет выплат";
+          return;
+        }
+        const shift = (first.getDay() + 6) % 7; // Monday-first
+        const byDay = payEventsByDay(payMonthKey);
+        const todayIso = (lastPayData && lastPayData.today) || "";
+
+        for (let i = 0; i < shift; i += 1) {
+          const cell = document.createElement("div");
+          cell.className = "pg-day empty";
+          grid.appendChild(cell);
+        }
+
+        let monthSum = 0;
+        for (let d = 1; d <= daysInMonth; d += 1) {
+          const cell = document.createElement("div");
+          const iso =
+            payMonthKey + "-" + String(d).padStart(2, "0");
+          cell.className = "pg-day" + (iso === todayIso ? " today" : "");
+          const evs = byDay[d] || [];
+          let daySum = 0;
+          for (const ev of evs) if (ev.amount != null) daySum += Number(ev.amount);
+          monthSum += daySum;
+
+          const top = document.createElement("div");
+          top.className = "pg-top";
+          top.innerHTML =
+            '<span class="pg-num">' +
+            d +
+            "</span>" +
+            (daySum
+              ? '<span class="pg-sum">+' + moneyShow(daySum) + "</span>"
+              : "");
+          cell.appendChild(top);
+
+          for (const ev of evs.slice(0, 3)) {
+            const box = document.createElement("div");
+            box.className =
+              "pay-ev " + payKindClass(ev.kind) + " st-" + payEventStatus(ev);
+            box.innerHTML =
+              '<i class="pe-dot"></i><div class="pe-body">' +
+              '<span class="pe-t">' +
+              payEvTitle(ev) +
+              '</span><span class="pe-v">' +
+              (ev.amount != null ? moneyShow(ev.amount) : "сумма ?") +
+              "</span></div>";
+            box.title =
+              (ev.ticker || "") +
+              " · " +
+              payKindLabel(ev.kind) +
+              " · " +
+              payStatusLabel(payEventStatus(ev)) +
+              " · " +
+              (ev.per_unit != null ? ev.per_unit + " × " + (ev.quantity ?? "?") : "");
+            cell.appendChild(box);
+          }
+          if (evs.length > 3) {
+            const more = document.createElement("div");
+            more.className = "pe-v";
+            more.style.fontSize = "0.7rem";
+            more.textContent = "+ ещё " + (evs.length - 3);
+            cell.appendChild(more);
+          }
+          grid.appendChild(cell);
+        }
+
+        const evCount = Object.values(byDay).reduce(
+          (n, arr) => n + ((arr && arr.length) || 0),
+          0
+        );
+        badge.textContent = monthSum
+          ? "+" + moneyShow(monthSum)
+          : evCount
+            ? evCount + " дат · суммы после БКС"
+            : "нет выплат";
+      }
+
+      function renderPayList() {
+        const list = document.getElementById("payList");
+        if (!list) return;
+        list.innerHTML = "";
+        const events = visiblePayEvents();
+        for (const ev of events.slice(0, 60)) {
+          const li = document.createElement("li");
+          li.innerHTML =
+            '<span class="t">' +
+            payDateHuman(ev.pay_date) +
+            '</span><span class="rub">' +
+            (ev.amount != null ? moneyShow(ev.amount) : "сумма ?") +
+            '</span><span class="pct">' +
+            (ev.name || ev.ticker || "") +
+            " · " +
+            payKindLabel(ev.kind) +
+            "</span>";
+          list.appendChild(li);
+        }
+      }
+
+      function applyPayMode() {
+        const wrap = document.getElementById("payCalWrap");
+        const list = document.getElementById("payList");
+        const bCal = document.getElementById("payModeCal");
+        const bList = document.getElementById("payModeList");
+        const isCal = payMode === "calendar";
+        if (wrap) wrap.hidden = !isCal;
+        if (list) list.hidden = isCal;
+        if (bCal) bCal.classList.toggle("on", isCal);
+        if (bList) bList.classList.toggle("on", !isCal);
+        if (isCal) renderPayCalendar();
+        else renderPayList();
+      }
+
+      function renderPayouts(data) {
+        const status = document.getElementById("payStatus");
+        const box = document.getElementById("payBox");
+        if (!status || !box) return;
+        lastPayData = data || null;
+        const rawEvents = (data && data.events) || [];
+        fillPayPeriodOptions();
+        const today = (data && data.today) || "";
+        const events = visiblePayEvents();
+        const months = padPayMonths(monthsFromEvents(events), today);
+        const known = events
+          .map((e) => (e.amount != null ? Number(e.amount) : 0))
+          .filter((n) => n);
+        const totalFromEv = known.length ? known.reduce((a, b) => a + b, 0) : null;
+        const total =
+          totalFromEv != null
+            ? totalFromEv
+            : data && data.total_amount != null && payPeriod === "year"
+              ? Number(data.total_amount)
+              : null;
+        let span = 365;
+        if (payPeriod === "ahead") {
+          span = Number((data && data.ahead_days) || 365) || 365;
+        } else if (payPeriod === "year" && today) {
+          const y = Number(today.slice(0, 4));
+          const start = new Date(y, 0, 1);
+          const end = new Date(y, 11, 31);
+          span = Math.max(1, Math.round((end - start) / 86400000) + 1);
+        } else if (payPeriod !== "ahead" && /^\d{4}$/.test(payPeriod)) {
+          span = 365;
+        }
+        let perDay = total != null ? total / span : null;
+        let perMonth = perDay != null ? perDay * 30.4 : null;
+        if (total == null && data && payPeriod === "year") {
+          if (data.per_day != null) perDay = Number(data.per_day);
+          if (data.per_month != null) perMonth = Number(data.per_month);
+        }
+
+        const totalEl = document.getElementById("paySumTotal");
+        const monthEl = document.getElementById("paySumMonth");
+        const dayEl = document.getElementById("paySumDay");
+        const sumK = document.querySelector(".pay-sum-k");
+        if (sumK) {
+          sumK.textContent =
+            payPeriod === "ahead"
+              ? "Всего вперёд"
+              : payPeriod === "year"
+                ? "Всего за год"
+                : "Всего за " + payPeriod;
+        }
+        if (totalEl)
+          totalEl.textContent =
+            total != null
+              ? moneyShow(total)
+              : events.length
+                ? events.length + " дат"
+                : "—";
+        if (monthEl) monthEl.textContent = perMonth != null ? moneyShow(perMonth) : "—";
+        if (dayEl) dayEl.textContent = perDay != null ? moneyShow(perDay) : "—";
+
+        if (data && data.pending) {
+          status.className = "chart-status";
+          status.textContent =
+            "Собираю календарь с биржи — это медленно, обнови страницу через минуту.";
+          return;
+        }
+        if (data && data.error && !rawEvents.length) {
+          status.className = "chart-status err";
+          status.textContent = dayErrLabel(data.error);
+          return;
+        }
+
+        renderPayMonths(months);
+        if (!monthInPayPeriod(payMonthKey, today)) {
+          payMonthKey = firstMonthInPeriod(today, events);
+        }
+        applyPayMode();
+
+        status.className = "chart-status";
+        if (!events.length) {
+          status.textContent = "Нет выплат в выбранных фильтрах.";
+          return;
+        }
+        status.textContent =
+          events.length +
+          " выплат" +
+          (data.missing ? " · без данных по " + data.missing + " бумагам" : "");
+      }
+
+      async function loadPayouts() {
+        try {
+          const r = await fetch("/api/calendar?days=365");
+          if (!r.ok) {
+            const status = document.getElementById("payStatus");
+            if (status) {
+              status.className = "chart-status err";
+              status.textContent =
+                "Календарь недоступен (HTTP " + r.status + ") — перезапусти serve";
+            }
+            return;
+          }
+          renderPayouts(await r.json());
+        } catch (e) {
+          const status = document.getElementById("payStatus");
+          if (status) {
+            status.className = "chart-status err";
+            status.textContent = String(e.message || e);
+          }
+        }
+      }
+
+      function payShiftMonth(delta) {
+        const parsed = parsePayMonthKey(payMonthKey);
+        if (!parsed) return;
+        const d = new Date(parsed.yy, parsed.mm - 1 + delta, 1);
+        const next =
+          d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+        const today = (lastPayData && lastPayData.today) || "";
+        if (!monthInPayPeriod(next, today)) return;
+        payMonthKey = next;
+        renderPayCalendar();
+      }
+
+      function candleDateKey(s) {
+        const t = String(s || "").trim();
+        if (!t) return "";
+        return t.slice(0, 10);
+      }
+
+      function markerDateKey(s) {
+        const t = String(s || "").trim();
+        if (!t) return "";
+        if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
+        const m = t.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+        if (m) return m[3] + "-" + m[2] + "-" + m[1];
+        return t.slice(0, 10);
+      }
+
+      function destroyPriceChart() {
+        const canvas = document.getElementById("priceChart");
+        if (typeof Chart !== "undefined" && Chart.getChart && canvas) {
+          const existing = Chart.getChart(canvas);
+          if (existing) {
+            try {
+              existing.destroy();
+            } catch (_) {}
+          }
+        }
+        if (priceChart) {
+          try {
+            priceChart.destroy();
+          } catch (_) {}
+          priceChart = null;
+        }
+      }
+
+      function setChartStatus(text, isErr) {
+        const el = document.getElementById("chartStatus");
+        if (!el) return;
+        el.textContent = text || "";
+        el.className = "chart-status" + (isErr ? " err" : "");
+      }
+
+      function fmtDateShort(iso) {
+        if (!iso) return "—";
+        const s = String(iso);
+        const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (m) {
+          const [y, mo, d] = m[1].split("-");
+          return d + "." + mo + "." + y;
+        }
+        return s.slice(0, 16);
+      }
+
+      function shortErr(msg) {
+        const s = String(msg || "").trim();
+        if (!s) return "Ошибка";
+        if (/ConnectTimeout|timed out|iss\.moex/i.test(s)) {
+          return "MOEX не ответил (таймаут) — цифры из БКС/кэша, график позже";
+        }
+        if (/last\/prev|changepct/i.test(s)) return "Нет дневных цен MOEX";
+        if (s.length > 160) return s.slice(0, 157) + "…";
+        return s;
+      }
+
+      /** Short label for KPI «За день» (narrow card). */
+      function dayErrLabel(msg) {
+        const s = String(msg || "").trim();
+        if (!s) return "день недоступен";
+        if (/ConnectTimeout|timed out|iss\.moex|не отвечает/i.test(s)) {
+          return "MOEX недоступен";
+        }
+        if (/last\/prev|changepct|нет дневных|нет котировок/i.test(s)) {
+          return "нет цен MOEX";
+        }
+        if (/HTTP|перезапусти/i.test(s)) return "ошибка API";
+        if (s.length > 32) return s.slice(0, 30) + "…";
+        return s;
+      }
+
+      function posCardFromLocal(tid) {
+        if (!lastRender || !lastRender.holdings) return null;
+        const holdings = lastRender.holdings || [];
+        const h = holdings.find(
+          (x) => String(x.ticker || x.sec_code || "").toUpperCase() === tid
+        );
+        if (!h) return null;
+        let pf = lastRender.snap && lastRender.snap.total_value;
+        if (pf == null) {
+          pf = 0;
+          let ok = false;
+          for (const x of holdings) {
+            const id = String(x.ticker || "").toUpperCase();
+            if (/^(RUB|USD|EUR|CNY|CASH)$/.test(id)) continue;
+            if (x.market_value != null) {
+              pf += Number(x.market_value);
+              ok = true;
+            }
+          }
+          if (!ok) pf = null;
+        }
+        const mv = h.market_value != null ? Number(h.market_value) : null;
+        const weight =
+          mv != null && pf != null && pf > 0 ? (mv / pf) * 100 : null;
+        const avg = h.avg_price != null ? Number(h.avg_price) : null;
+        const cur = h.market_price != null ? Number(h.market_price) : null;
+        const vs =
+          avg != null && cur != null
+            ? { diff: cur - avg, diff_pct: avg !== 0 ? ((cur - avg) / avg) * 100 : null }
+            : {};
+        return {
+          ok: true,
+          ticker: tid,
+          name: h.name || "",
+          qty: h.quantity,
+          avg_price: avg,
+          current_price: cur,
+          current_price_source: cur != null ? "bcs" : "",
+          avg_vs_price: vs,
+          market_value: mv,
+          cost_value: h.cost_value,
+          unrealized_pnl: h.pnl,
+          unrealized_pnl_pct: h.pnl_pct,
+          first_buy: null,
+          last_buy: null,
+          n_buys: 0,
+          weight_pct: weight,
+          currency: h.currency || "RUB",
+          _local: true,
+        };
+      }
+
+      function clearPosCard(msg, isErr) {
+        lastPosCard = null;
+        const title = document.getElementById("posCardTitle");
+        const empty = document.getElementById("posCardEmpty");
+        const grid = document.getElementById("posCardGrid");
+        if (title) title.textContent = "Карточка бумаги";
+        if (grid) {
+          grid.hidden = true;
+          grid.innerHTML = "";
+        }
+        if (empty) {
+          empty.hidden = false;
+          empty.textContent = msg || "Кликни тикер — avg, покупки, PnL, доля.";
+          empty.className = "pos-empty" + (isErr ? " err" : "");
+        }
+      }
+
+      function renderPosCard(data) {
+        lastPosCard = data;
+        const title = document.getElementById("posCardTitle");
+        const empty = document.getElementById("posCardEmpty");
+        const grid = document.getElementById("posCardGrid");
+        if (!grid || !empty) return;
+        if (!data || !data.ok) {
+          clearPosCard(shortErr((data && data.error) || "Нет карточки для тикера"), true);
+          if (data && data.ticker && title) {
+            title.textContent = "Карточка · " + data.ticker;
+          }
+          return;
+        }
+        const name = data.name ? " · " + data.name : "";
+        const staleBit =
+          data.stale || data._local
+            ? data._local
+              ? " · из списка (уточняем…)"
+              : " · кэш"
+            : "";
+        if (title)
+          title.textContent =
+            "Карточка · " + (data.ticker || "") + name + staleBit;
+        empty.hidden = true;
+        empty.className = "pos-empty";
+        const vs = data.avg_vs_price || {};
+        const cells = [
+          { k: "Кол-во", v: qtyShow(data.qty) },
+          { k: "Avg", v: moneyShow(data.avg_price) },
+          {
+            k: "Цена сейчас",
+            v: moneyShow(data.current_price),
+            s: data.current_price_source
+              ? "источник: " + data.current_price_source
+              : "",
+          },
+          {
+            k: "Avg vs цена",
+            v: pnlAbsShow(vs.diff),
+            s: vs.diff_pct != null ? fmtPct(vs.diff_pct) : "",
+            cls: pnlClass(vs.diff),
+          },
+          {
+            k: "Unrealized PnL",
+            v: pnlAbsShow(data.unrealized_pnl),
+            s: data.unrealized_pnl_pct != null ? fmtPct(data.unrealized_pnl_pct) : "",
+            cls: pnlClass(data.unrealized_pnl),
+          },
+          {
+            k: "Стоимость",
+            v: moneyShow(data.market_value),
+            s:
+              data.weight_pct != null
+                ? "доля " +
+                  Number(data.weight_pct).toLocaleString("ru-RU", {
+                    maximumFractionDigits: 2,
+                  }) +
+                  "%"
+                : "",
+          },
+          {
+            k: "Первая покупка",
+            v: fmtDateShort(data.first_buy),
+            s: data.n_buys ? "покупок: " + data.n_buys : "",
+          },
+          { k: "Последняя покупка", v: fmtDateShort(data.last_buy) },
+        ];
+        grid.hidden = false;
+        grid.innerHTML = cells
+          .map((c) => {
+            return (
+              "<div class='cell'><div class='k'>" +
+              esc(c.k) +
+              "</div><div class='v" +
+              (c.cls ? " " + c.cls : "") +
+              "'>" +
+              esc(c.v) +
+              "</div>" +
+              (c.s
+                ? "<div class='s" +
+                  (c.cls ? " " + c.cls : "") +
+                  "'>" +
+                  esc(c.s) +
+                  "</div>"
+                : "") +
+              "</div>"
+            );
+          })
+          .join("");
+      }
+
+      async function loadPosCard(ticker) {
+        const tid = String(ticker || "").trim().toUpperCase();
+        const seq = ++posLoadSeq;
+        if (!tid) {
+          clearPosCard();
+          return;
+        }
+        const local = posCardFromLocal(tid);
+        if (local) {
+          renderPosCard(local);
+        } else {
+          const empty = document.getElementById("posCardEmpty");
+          const grid = document.getElementById("posCardGrid");
+          const title = document.getElementById("posCardTitle");
+          if (title) title.textContent = "Карточка · " + tid;
+          if (grid) grid.hidden = true;
+          if (empty) {
+            empty.hidden = false;
+            empty.className = "pos-empty";
+            empty.textContent = "Загрузка цифр…";
+          }
+        }
+        try {
+          const r = await fetch("/api/position/" + encodeURIComponent(tid));
+          const data = await r.json();
+          if (seq !== posLoadSeq) return;
+          if (!r.ok) {
+            if (!local) clearPosCard("HTTP " + r.status, true);
+            return;
+          }
+          renderPosCard(data);
+        } catch (e) {
+          if (seq !== posLoadSeq) return;
+          if (!local) clearPosCard(shortErr(e.message || e), true);
+        }
+      }
+
+      function fillChartSelect(papers) {
+        const sel = document.getElementById("chartTicker");
+        if (!sel) return;
+        const ids = [];
+        const seen = new Set();
+        for (const h of papers || []) {
+          const id = paperId(h);
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          ids.push(id);
+        }
+        ids.sort();
+        const prev = chartTickerSel || sel.value || "";
+        sel.innerHTML =
+          '<option value="">— выбери —</option>' +
+          ids
+            .map((id) => "<option value='" + esc(id) + "'>" + esc(id) + "</option>")
+            .join("");
+        if (prev && seen.has(prev)) {
+          sel.value = prev;
+          chartTickerSel = prev;
+        } else if (ids.length) {
+          let pick = ids[0];
+          for (const id of ids) {
+            if (focusSet.has(id)) {
+              pick = id;
+              break;
+            }
+          }
+          sel.value = pick;
+          chartTickerSel = pick;
+        } else {
+          chartTickerSel = "";
+        }
+      }
+
+      function highlightChartRow(tid) {
+        document.querySelectorAll("tr.chart-row").forEach((tr) => {
+          tr.classList.toggle(
+            "chart-active",
+            tid && tr.getAttribute("data-ticker") === tid
+          );
+        });
+      }
+
+      function renderPriceChart(payload, seq) {
+        if (seq != null && seq !== chartLoadSeq) return;
+        destroyPriceChart();
+        if (seq != null && seq !== chartLoadSeq) return;
+        const canvas = document.getElementById("priceChart");
+        if (!canvas || typeof Chart === "undefined") {
+          setChartStatus("Chart.js не загрузился (CDN).", true);
+          return;
+        }
+        const candles = payload.candles || [];
+        const labels = candles.map((c) => candleDateKey(c.begin) || c.begin || "");
+        const closes = candles.map((c) => (c.close != null ? Number(c.close) : null));
+        const labelIndex = {};
+        labels.forEach((d, i) => {
+          if (d) labelIndex[d] = i;
+        });
+
+        function nearestIndex(dateKey) {
+          if (!dateKey || !labels.length) return -1;
+          if (labelIndex[dateKey] != null) return labelIndex[dateKey];
+          let best = -1;
+          for (let i = 0; i < labels.length; i++) {
+            if (labels[i] <= dateKey) best = i;
+            else break;
+          }
+          return best;
+        }
+
+        const buyPts = [];
+        const sellPts = [];
+        const otherPts = [];
+        for (const m of payload.markers || []) {
+          const dk = markerDateKey(m.executed_at);
+          const idx = nearestIndex(dk);
+          if (idx < 0) continue;
+          const y =
+            m.price != null && !Number.isNaN(Number(m.price))
+              ? Number(m.price)
+              : closes[idx];
+          if (y == null || Number.isNaN(y)) continue;
+          const pt = { x: idx, y: y };
+          const side = String(m.side || "").toLowerCase();
+          if (side === "buy") buyPts.push(pt);
+          else if (side === "sell") sellPts.push(pt);
+          else otherPts.push(pt);
+        }
+
+        // Line chart only — candlestick plugin was flaky with Chart.js 4 (empty canvas).
+        const priceDataset = {
+          type: "line",
+          label: "Цена",
+          data: closes.map((y, i) => ({ x: i, y: y })),
+          borderColor: "#2f6fed",
+          backgroundColor: "rgba(47,111,237,0.08)",
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 3,
+          tension: 0.15,
+          fill: true,
+          order: 3,
+        };
+
+        try {
+          // на всякий случай ещё раз снять чужой инстанс с canvas
+          destroyPriceChart();
+          if (seq != null && seq !== chartLoadSeq) return;
+          priceChart = new Chart(canvas.getContext("2d"), {
+          type: "line",
+          data: {
+            datasets: [
+              priceDataset,
+              {
+                type: "scatter",
+                label: "Покупка",
+                data: buyPts,
+                backgroundColor: "#0f7a5a",
+                borderColor: "#0f7a5a",
+                pointRadius: buyPts.length ? 5 : 0,
+                pointHoverRadius: 7,
+                order: 1,
+                hidden: !buyPts.length,
+              },
+              {
+                type: "scatter",
+                label: "Продажа",
+                data: sellPts,
+                backgroundColor: "#b42318",
+                borderColor: "#b42318",
+                pointRadius: sellPts.length ? 5 : 0,
+                pointHoverRadius: 7,
+                order: 1,
+                hidden: !sellPts.length,
+              },
+              {
+                type: "scatter",
+                label: "Сделка",
+                data: otherPts,
+                backgroundColor: "#6b7a8c",
+                borderColor: "#6b7a8c",
+                pointRadius: otherPts.length ? 4 : 0,
+                pointHoverRadius: 6,
+                order: 2,
+                hidden: !otherPts.length,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            parsing: false,
+            interaction: { mode: "nearest", intersect: false, axis: "x" },
+            plugins: {
+              legend: {
+                display: true,
+                labels: {
+                  boxWidth: 10,
+                  font: { size: 11 },
+                  filter: (item, chart) => {
+                    const ds = chart.data.datasets[item.datasetIndex];
+                    if (!ds) return true;
+                    if (ds.type === "scatter" && (!ds.data || !ds.data.length)) {
+                      return false;
+                    }
+                    return true;
+                  },
+                },
+                onClick: () => {},
+              },
+              tooltip: {
+                callbacks: {
+                  title: (items) => {
+                    const x =
+                      items[0] && items[0].parsed != null
+                        ? items[0].parsed.x
+                        : null;
+                    if (x == null) return "";
+                    const i = Math.round(Number(x));
+                    return labels[i] || "";
+                  },
+                },
+              },
+            },
+            scales: {
+              x: {
+                type: "linear",
+                min: 0,
+                max: Math.max(0, labels.length - 1),
+                offset: true,
+                ticks: {
+                  maxRotation: 0,
+                  autoSkip: true,
+                  maxTicksLimit: 8,
+                  font: { size: 10 },
+                  callback: (v) => {
+                    const i = Math.round(Number(v));
+                    return labels[i] || "";
+                  },
+                },
+                grid: { display: false },
+              },
+              y: {
+                ticks: { font: { size: 10 } },
+                grid: { color: "#e8ecf1" },
+              },
+            },
+          },
+        });
+        } catch (e) {
+          destroyPriceChart();
+          setChartStatus(shortErr(e.message || e), true);
+          return;
+        }
+        if (seq != null && seq !== chartLoadSeq) {
+          destroyPriceChart();
+        }
+      }
+
+      async function loadChart(ticker) {
+        const tid = String(ticker || "").trim().toUpperCase();
+        chartTickerSel = tid;
+        highlightChartRow(tid);
+        syncExamineBar(tid);
+        const sel = document.getElementById("chartTicker");
+        if (sel && sel.value !== tid) sel.value = tid || "";
+        if (!tid) {
+          destroyPriceChart();
+          setChartStatus("Выбери бумагу.");
+          clearPosCard();
+          syncExamineBar("");
+          return;
+        }
+        const seq = ++chartLoadSeq;
+        setChartStatus("Загрузка " + tid + "…");
+        loadPosCard(tid);
+        try {
+          // kind: holdings asset_class → API equity|bond|fund; else tickers DB
+          let kindHint = "";
+          if (lastRender && lastRender.holdings) {
+            const h = lastRender.holdings.find(
+              (x) => String(x.ticker || x.sec_code || "").toUpperCase() === tid
+            );
+            if (h) {
+              const ac = assetClassOf(
+                h,
+                lastRender.dbById || {},
+                lastRender.dbByIsin || {}
+              );
+              if (ac === "bond") kindHint = "bond";
+              else if (ac === "fund") kindHint = "fund";
+              else if (ac === "stock") kindHint = "equity";
+            }
+          }
+          if (!kindHint && lastRender && lastRender.dbById && lastRender.dbById[tid]) {
+            const dk = String(lastRender.dbById[tid].kind || "").toLowerCase();
+            if (dk === "bond" || dk === "equity" || dk === "fund") kindHint = dk;
+          }
+          let url = "/api/chart/" + encodeURIComponent(tid) + "?days=180";
+          if (kindHint) url += "&kind=" + encodeURIComponent(kindHint);
+          const r = await fetch(url);
+          let data = {};
+          try {
+            data = await r.json();
+          } catch (_) {
+            data = {};
+          }
+          if (seq !== chartLoadSeq) return;
+          if (!r.ok || !data.ok) {
+            destroyPriceChart();
+            let msg = data.error || "";
+            if (r.status === 404) {
+              msg =
+                "Нет /api/chart (HTTP 404) — перезапусти serve: python -m portfolio_news serve";
+            } else if (!msg) {
+              msg = "Нет графика для " + tid + " (HTTP " + r.status + ")";
+            } else {
+              msg = shortErr(msg);
+            }
+            setChartStatus(msg, true);
+            return;
+          }
+          renderPriceChart(data, seq);
+          const markN = data.n_markers || 0;
+          const nCandles = data.n_candles || 0;
+          setChartStatus(
+            tid +
+              " · " +
+              nCandles +
+              " дней" +
+              (data.board ? " · " + data.board : "") +
+              (markN
+                ? " · сделок на графике: " + markN
+                : " · сделок в этом окне нет (кэш BCS)")
+          );
+        } catch (e) {
+          if (seq !== chartLoadSeq) return;
+          destroyPriceChart();
+          setChartStatus(String(e.message || e), true);
+        }
+      }
+
+      function syncPrivacyBtn() {
+        const btn = document.getElementById("btnPrivacy");
+        if (!btn) return;
+        btn.classList.toggle("on", privacyOn);
+        btn.setAttribute(
+          "title",
+          privacyOn
+            ? "Суммы скрыты — клик показать"
+            : "Клик: скрыть суммы (останутся %)"
+        );
+        document.body.classList.toggle("privacy", privacyOn);
+      }
+
+      function isMoexWeekend(d) {
+        // MOEX calendar = Moscow (UTC+3). Sat/Sun → session closed.
+        try {
+          const wd = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Europe/Moscow",
+            weekday: "short",
+          }).format(d || new Date());
+          return wd === "Sat" || wd === "Sun";
+        } catch (_) {
+          const day = (d || new Date()).getDay();
+          return day === 0 || day === 6;
+        }
+      }
+
+      function syncDayMktNote() {
+        const note = document.getElementById("dayMktNote");
+        if (!note) return;
+        note.hidden = !isMoexWeekend();
+      }
+
+      function renderDay(day) {
+        const dayEl = document.getElementById("kpiDay");
+        const dayPctEl = document.getElementById("kpiDayPct");
+        const box = document.getElementById("dayBox");
+        const lead = document.getElementById("dayLead");
+        const list = document.getElementById("dayTop");
+        const pending = !!(dayPending || (day && day._pending));
+
+        function paintTop(top, miss, extraLead) {
+          box.hidden = false;
+          syncDayMktNote();
+          lead.textContent =
+            (extraLead || "Кто сильнее двинул портфель за день (MOEX)") +
+            (miss ? " · без котировок: " + miss : "") +
+            ".";
+          list.innerHTML = top
+            .map((r) => {
+              const tid = String(r.ticker || "").trim().toUpperCase();
+              return (
+                "<li class='day-row' role='button' tabindex='0' data-ticker='" +
+                esc(tid) +
+                "' title='Открыть разбор " +
+                esc(tid || "?") +
+                "'><span class='t'>" +
+                esc(r.ticker || "?") +
+                "</span><span class='rub " +
+                pnlClass(r.day_rub) +
+                "'>" +
+                esc(pnlAbsShow(r.day_rub)) +
+                "</span><span class='pct'>" +
+                esc(fmtPct(r.day_pct)) +
+                "</span><span class='go'>разбор →</span></li>"
+              );
+            })
+            .join("");
+        }
+
+        if (pending) {
+          box.classList.add("loading");
+          const keep =
+            day && day.ok && day.top && day.top.length
+              ? day
+              : lastDaySnap && lastDaySnap.ok && lastDaySnap.top && lastDaySnap.top.length
+                ? lastDaySnap
+                : null;
+          if (keep) {
+            dayEl.textContent = pnlAbsShow(keep.day_rub);
+            dayEl.className = "v " + pnlClass(keep.day_rub);
+            dayPctEl.textContent = fmtPct(keep.day_pct) + " · …";
+            dayPctEl.className = "s " + pnlClass(keep.day_pct);
+            paintTop(
+              keep.top,
+              keep.missing,
+              "Обновляем дневной Δ (MOEX)"
+            );
+          } else {
+            dayEl.textContent = "…";
+            dayEl.className = "v";
+            dayPctEl.textContent = "считаем MOEX…";
+            dayPctEl.className = "s";
+            box.hidden = false;
+            lead.textContent = "Считаем, кто двинул день…";
+            list.innerHTML = '<li class="day-skel">загрузка котировок…</li>';
+          }
+          return;
+        }
+
+        box.classList.remove("loading");
+
+        if (!day || !day.ok) {
+          dayEl.textContent = "—";
+          dayEl.className = "v";
+          const err =
+            day && day.error
+              ? String(day.error)
+              : day && day._http
+                ? String(day._http)
+                : "день недоступен";
+          dayPctEl.textContent = dayErrLabel(err);
+          dayPctEl.className = "s";
+          dayPctEl.title = err;
+          if (lastDaySnap && lastDaySnap.ok && lastDaySnap.top && lastDaySnap.top.length) {
+            paintTop(
+              lastDaySnap.top,
+              lastDaySnap.missing,
+              "Последний удачный расчёт (MOEX недоступен)"
+            );
+          } else {
+            box.hidden = true;
+          }
+          return;
+        }
+        if (day.day_rub == null) {
+          dayEl.textContent = "—";
+          dayEl.className = "v";
+          const err = day.error || "нет дневного Δ";
+          dayPctEl.textContent = dayErrLabel(err);
+          dayPctEl.className = "s";
+          dayPctEl.title = err;
+          box.hidden = true;
+          return;
+        }
+        dayEl.textContent = pnlAbsShow(day.day_rub);
+        dayEl.className = "v " + pnlClass(day.day_rub);
+        dayPctEl.textContent =
+          fmtPct(day.day_pct) + (day.stale ? " · кэш" : "");
+        dayPctEl.className = "s " + pnlClass(day.day_pct);
+
+        const top = day.top || [];
+        if (!top.length) {
+          box.hidden = true;
+          return;
+        }
+        try {
+          sessionStorage.setItem("pn_day_last", JSON.stringify(day));
+          lastDaySnap = day;
+        } catch (_) {}
+        paintTop(
+          top,
+          day.missing,
+          day.stale
+            ? "Кэш · обновляем в фоне (MOEX)"
+            : "Кто сильнее двинул портфель за день (MOEX)"
+        );
+      }
+
+      function paperId(h) {
+        return String(h.ticker || h.sec_code || "").trim().toUpperCase();
+      }
+
+      function isFocusHolding(h) {
+        const id = paperId(h);
+        return id && focusSet.has(id);
+      }
+
+      function syncExamineBar(_tid) {
+        /* UI «Смотрю» / к списку временно сняты — разбор через клик по тикеру */
+      }
+
+      function showPanel(name, opts) {
+        const syncHash = !!(opts && opts.syncHash);
+        const id = name === "news" || name === "ops" ? name : "home";
+        document.querySelectorAll(".panel[data-panel]").forEach((el) => {
+          el.hidden = el.getAttribute("data-panel") !== id;
+        });
+        document.querySelectorAll("#mainNav a[data-nav]").forEach((a) => {
+          a.classList.toggle("active", a.getAttribute("data-nav") === id);
+        });
+        if (syncHash) {
+          const hash = id === "home" ? "#/" : "#/" + id;
+          if ((location.hash || "#/") !== hash) {
+            try {
+              history.replaceState(null, "", hash);
+            } catch (_) {
+              location.hash = hash;
+            }
+          }
+        }
+        if (id === "home" && typeof priceChart !== "undefined" && priceChart) {
+          requestAnimationFrame(() => {
+            try {
+              priceChart.resize();
+            } catch (_) {}
+          });
+        }
+        if (id === "ops") loadOpsFiltered();
+        return id;
+      }
+
+      function panelFromHash() {
+        const raw = (location.hash || "#/").replace(/^#\/?/, "").toLowerCase();
+        if (raw === "news" || raw === "ops") return raw;
+        return "home";
+      }
+
+      function scrollToChart() {
+        showPanel("home", { syncHash: true });
+        const box = document.getElementById("chartBox");
+        if (box) {
+          requestAnimationFrame(() =>
+            box.scrollIntoView({ behavior: "smooth", block: "start" })
+          );
+        }
+      }
+
+      function scrollToList() {
+        showPanel("home", { syncHash: true });
+        const host = document.getElementById("cards");
+        if (host) {
+          requestAnimationFrame(() =>
+            host.scrollIntoView({ behavior: "smooth", block: "start" })
+          );
+        }
+      }
+
+      async function toggleFocus(ticker, wantFocus) {
+        const tid = String(ticker || "").trim().toUpperCase();
+        if (!tid) return;
+        try {
+          const r = await fetch("/api/focus/" + encodeURIComponent(tid), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tier: wantFocus ? "focus" : "hold" }),
+          });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          await r.json();
+          // KB: at most one «Смотрю»
+          if (wantFocus) focusSet = new Set([tid]);
+          else focusSet.delete(tid);
+          if (lastRender) applyDashboard(lastRender);
+          if (wantFocus) {
+            loadChart(tid);
+            syncExamineBar(tid);
+            scrollToChart();
+          } else {
+            syncExamineBar(chartTickerSel);
+            scrollToList();
+          }
+        } catch (e) {
+          console.warn("focus toggle failed", e);
+        }
+      }
+
+      function renderTierCard(tier, rows, dbById, dbByIsin, { open }) {
+        const meta = { title: "Портфель", color: "#2f6fed" };
+        const value = sumField(rows, "market_value");
+        const el = document.createElement("div");
+        el.dataset.kind = "portfolio";
+        el.className = "card" + (open ? " open" : "");
+
+        const pnl = sumField(rows, "pnl");
+        const cost = sumField(rows, "cost_value");
+        const pnlPct =
+          pnl != null && cost != null && cost !== 0 ? (pnl / cost) * 100 : null;
+        const show = rows.slice(0, 4);
+        const more = Math.max(0, rows.length - show.length);
+        let chips = show
+          .map((h, i) => {
+            return (
+              '<span class="chip-dot" style="padding:0;width:28px;height:28px;border-radius:8px;overflow:hidden;opacity:' +
+              (0.75 + i * 0.05) +
+              '">' +
+              assetAvatarHtml(h, dbById, dbByIsin, meta.color) +
+              "</span>"
+            );
+          })
+          .join("");
+        if (more) chips += '<span class="chip-more">+' + more + "</span>";
+
+        function tierRowHtml(h) {
+          const hp = h.pnl;
+          const tid = paperId(h);
+          const db = dbById[tid] || null;
+          const title = h.name || (db && db.name) || h.ticker || h.sec_code || "—";
+          const sub = h.ticker || h.sec_code || "";
+          return (
+            "<tr class='chart-row' data-ticker='" +
+            esc(tid) +
+            "'><td><div class='asset-cell'>" +
+            assetAvatarHtml(h, dbById, dbByIsin, meta.color) +
+            "<div class='asset-text'><strong>" +
+            esc(title) +
+            "</strong><div class='meta'>" +
+            esc(sub) +
+            "</div></div></div></td><td class='num'>" +
+            qtyShow(h.quantity) +
+            "</td><td class='num'>" +
+            moneyShow(h.market_value) +
+            "</td><td class='num " +
+            pnlClass(hp) +
+            "'>" +
+            pnlAbsShow(hp) +
+            "</td></tr>"
+          );
+        }
+
+        function groupCollapsedDefault(ac, n) {
+          // секции открыты: длинные режем превью 5 + «ещё»
+          return false;
+        }
+
+        function readGroupCollapsed(tierKey, ac, n) {
+          try {
+            const raw = sessionStorage.getItem("pn_ag_" + tierKey + "_" + ac);
+            if (raw === "0") return false;
+            if (raw === "1") return true;
+          } catch (_) {}
+          return groupCollapsedDefault(ac, n);
+        }
+
+        function writeGroupCollapsed(tierKey, ac, collapsed) {
+          try {
+            sessionStorage.setItem("pn_ag_" + tierKey + "_" + ac, collapsed ? "1" : "0");
+          } catch (_) {}
+        }
+
+        function readGroupPreviewExpanded(tierKey, ac) {
+          try {
+            return sessionStorage.getItem("pn_ag_prev_" + tierKey + "_" + ac) === "1";
+          } catch (_) {
+            return false;
+          }
+        }
+
+        function writeGroupPreviewExpanded(tierKey, ac, on) {
+          try {
+            sessionStorage.setItem("pn_ag_prev_" + tierKey + "_" + ac, on ? "1" : "0");
+          } catch (_) {}
+        }
+
+        let bodyBlocks = "";
+        const groups = groupHoldingsByAssetClass(rows, dbById, dbByIsin);
+        for (const g of groups) {
+          const collapsed = readGroupCollapsed(tier, g.key, g.rows.length);
+          const previewOn = g.rows.length > LIST_PREVIEW;
+          const listExpanded =
+            !previewOn || readGroupPreviewExpanded(tier, g.key);
+          const visible = listExpanded
+            ? g.rows
+            : g.rows.slice(0, LIST_PREVIEW);
+          const rest = g.rows.length - LIST_PREVIEW;
+          bodyBlocks +=
+            "<tbody class='asset-block" +
+            (collapsed ? " collapsed" : "") +
+            "' data-ac='" +
+            esc(g.key) +
+            "'>" +
+            "<tr class='asset-group' data-ac='" +
+            esc(g.key) +
+            "'><th colspan='4'>" +
+            "<span class='group-chev'>▸</span>" +
+            esc(g.title) +
+            " · " +
+            g.rows.length +
+            "</th></tr>";
+          for (const h of visible) bodyBlocks += tierRowHtml(h);
+          if (previewOn) {
+            bodyBlocks +=
+              "<tr class='asset-more'><td colspan='4'>" +
+              "<button type='button' class='asset-more-btn' data-ac='" +
+              esc(g.key) +
+              "' data-expanded='" +
+              (listExpanded ? "1" : "0") +
+              "'>" +
+              (listExpanded
+                ? "Свернуть список"
+                : "Ещё " + rest + " · " + g.title.toLowerCase() + " ▾") +
+              "</button></td></tr>";
+          }
+          bodyBlocks += "</tbody>";
+        }
+
+        el.innerHTML =
+          '<button type="button" class="card-head">' +
+          "<div><div class='title'>" +
+          esc(meta.title) +
+          "</div>" +
+          '<div class="count">' +
+          rows.length +
+          " позици" +
+          (rows.length === 1 ? "я" : rows.length < 5 ? "и" : "й") +
+          " · " +
+          esc(fmtPosBreakdown(countPapersByKind(rows, dbById, dbByIsin))) +
+          "</div></div>" +
+          '<div class="chips">' +
+          chips +
+          "</div>" +
+          '<div class="nums"><div class="pnl ' +
+          pnlClass(pnl) +
+          '">' +
+          esc(pnlLineShow(pnl, pnlPct)) +
+          '</div><div class="val">' +
+          moneyShow(value) +
+          "</div></div>" +
+          '<span class="chev">▾</span>' +
+          "</button>" +
+          '<div class="card-body"><table><thead><tr>' +
+          "<th>Бумага</th><th class='num'>Кол-во</th><th class='num'>Стоимость</th><th class='num'>PnL</th>" +
+          "</tr></thead>" +
+          bodyBlocks +
+          "</table></div>";
+
+        el.querySelector(".card-head").addEventListener("click", () => {
+          el.classList.toggle("open");
+        });
+        el.querySelectorAll("tbody.asset-block").forEach((tb) => {
+          const head = tb.querySelector("tr.asset-group th");
+          if (!head) return;
+          head.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            const ac = tb.getAttribute("data-ac") || "";
+            tb.classList.toggle("collapsed");
+            writeGroupCollapsed(tier, ac, tb.classList.contains("collapsed"));
+          });
+        });
+        el.querySelectorAll(".asset-more-btn").forEach((btn) => {
+          btn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            const ac = btn.getAttribute("data-ac") || "";
+            const was = btn.getAttribute("data-expanded") === "1";
+            writeGroupPreviewExpanded(tier, ac, !was);
+            if (lastRender) applyDashboard(lastRender);
+          });
+        });
+        el.querySelectorAll("tr.chart-row").forEach((tr) => {
+          tr.addEventListener("click", (ev) => {
+            if (ev.target.closest(".asset-more-btn")) return;
+            const tid = tr.getAttribute("data-ticker");
+            if (tid) {
+              loadChart(tid);
+              scrollToChart();
+            }
+          });
+        });
+        return el;
+      }
+
+      function applyDashboard(view) {
+        lastRender = view;
+        const { snap, dbById, dbByIsin, holdings, groups, papers, news, day } = view;
+
+        const total =
+          snap.total_value != null ? snap.total_value : sumField(holdings, "market_value");
+        const pnl = snap.pnl != null ? snap.pnl : sumField(holdings, "pnl");
+        const cost = sumField(holdings, "cost_value");
+        const pnlPct =
+          snap.pnl_pct != null
+            ? snap.pnl_pct
+            : pnl != null && cost
+              ? (pnl / cost) * 100
+              : null;
+
+        document.getElementById("kpiValue").textContent = moneyShow(total);
+        document.getElementById("kpiInvest").textContent =
+          "вложено " + moneyShow(cost);
+        renderDay(day);
+        const pnlEl = document.getElementById("kpiPnl");
+        pnlEl.textContent = pnlAbsShow(pnl);
+        pnlEl.className = "v " + pnlClass(pnl);
+        document.getElementById("kpiPnlPct").textContent = fmtPct(pnlPct);
+        document.getElementById("kpiPnlPct").className = "s " + pnlClass(pnlPct);
+        document.getElementById("kpiCount").textContent = String(papers.length);
+        document.getElementById("kpiCountKind").textContent = fmtPosBreakdown(
+          countPapersByKind(papers, dbById, dbByIsin)
+        );
+
+        const cashVal = sumField(groups.cash || [], "market_value");
+        const cashEl = document.getElementById("kpiCash");
+        if (cashEl) cashEl.textContent = moneyShow(cashVal);
+
+        const host = document.getElementById("cards");
+        host.innerHTML = "";
+        if (papers.length) {
+          host.appendChild(
+            renderTierCard("portfolio", papers, dbById, dbByIsin, { open: true })
+          );
+        }
+        if (!host.children.length) {
+          host.innerHTML = '<p class="empty">Нет позиций в ответе БКС.</p>';
+        }
+
+        fillChartSelect(papers);
+        const want = chartTickerSel;
+        if (!want) {
+          destroyPriceChart();
+          setChartStatus("Нет бумаг для графика.");
+        } else if (!priceChart) {
+          loadChart(want);
+        } else {
+          highlightChartRow(want);
+          const sel = document.getElementById("chartTicker");
+          if (sel) sel.value = want;
+        }
+
+        // Сделки грузит сама панель (со своими фильтрами) — см. loadOpsFiltered.
+
+        const feedLead = document.getElementById("feedLead");
+        const feed = document.getElementById("feed");
+        feed.innerHTML = "";
+        const newsList = news || [];
+        feedLead.textContent =
+          "Новости из базы по бумагам портфеля. Опрос: CLI once / POST /api/poll.";
+        feedLead.className = "";
+        if (!newsList.length) {
+          feed.innerHTML =
+            '<li class="empty">Лента пуста — новости появятся после опроса (CLI: once / poll).</li>';
+        } else {
+          for (const n of newsList) {
+            const li = document.createElement("li");
+            const href = String(n.url || "");
+            const safe =
+              href.startsWith("http://") || href.startsWith("https://") ? href : "";
+            li.innerHTML =
+              (safe
+                ? '<a href="' + esc(safe) + '" target="_blank" rel="noreferrer">'
+                : "<span>") +
+              esc(n.title || "(без заголовка)") +
+              (safe ? "</a>" : "</span>") +
+              '<div class="meta">' +
+              esc([n.ticker_id, n.source].filter(Boolean).join(" · ")) +
+              "</div>";
+            feed.appendChild(li);
+          }
+        }
+      }
+
       async function load() {
         const err = document.getElementById("error");
         err.hidden = true;
+        dayPending = true;
         try {
-          const [snap, tickers, news] = await Promise.all([
+          const [snap, tickers] = await Promise.all([
             fetch("/api/holdings").then((r) => r.json()),
             fetch("/api/tickers").then((r) => r.json()),
-            fetch("/api/news?limit=12").then((r) => r.json()),
           ]);
+          const news = await fetch("/api/news?limit=12")
+            .then((r) => r.json())
+            .catch(() => []);
+
           if (!snap.configured) throw new Error("Нет BCS токена в .env");
-          if (!snap.ok) throw new Error(snap.error || "БКС ошибка");
+          const holdingsLive = snap.holdings || [];
+          if (!snap.ok && !holdingsLive.length) {
+            err.hidden = false;
+            err.textContent =
+              (snap.error || "БКС не ответил") +
+              " Кэша позиций нет — календарь, сделки и капитал из базы.";
+          } else if (snap.stale || (snap.error && holdingsLive.length)) {
+            err.hidden = false;
+            err.textContent =
+              (snap.error || "БКС недоступен") +
+              " Позиции из последнего удачного ответа.";
+          }
 
           const dbById = {};
           const dbByIsin = {};
@@ -316,73 +3322,207 @@
             (groups[k] || groups.equity).push(h);
           }
 
-          const papers = holdings.filter((h) => guessKind(h, dbById, dbByIsin) !== "cash");
-          document.getElementById("subtitle").textContent =
-            "БКС · " +
-            papers.length +
-            " бумаг · демо UI (референс Snowball)";
+          const papers = holdings.filter(
+            (h) => guessKind(h, dbById, dbByIsin) !== "cash"
+          );
 
-          const total =
-            snap.total_value != null ? snap.total_value : sumField(holdings, "market_value");
-          const pnl = snap.pnl != null ? snap.pnl : sumField(holdings, "pnl");
-          const cost = sumField(holdings, "cost_value");
-          const pnlPct =
-            snap.pnl_pct != null
-              ? snap.pnl_pct
-              : pnl != null && cost
-                ? (pnl / cost) * 100
-                : null;
+          applyDashboard({
+            snap,
+            dbById,
+            dbByIsin,
+            holdings,
+            groups,
+            papers,
+            news,
+            day: lastDaySnap
+              ? Object.assign({}, lastDaySnap, { _pending: true, _local: true })
+              : { _pending: true },
+          });
 
-          document.getElementById("kpiValue").textContent = fmtMoney(total);
-          document.getElementById("kpiInvest").textContent =
-            "вложено " + fmtMoney(cost);
-          const pnlEl = document.getElementById("kpiPnl");
-          pnlEl.textContent =
-            pnl == null ? "—" : (pnl > 0 ? "+" : "") + fmtMoney(pnl);
-          pnlEl.className = "v " + pnlClass(pnl);
-          document.getElementById("kpiPnlPct").textContent = fmtPct(pnlPct);
-          document.getElementById("kpiPnlPct").className = "s " + pnlClass(pnlPct);
-          document.getElementById("kpiCount").textContent = String(papers.length);
-
-          const host = document.getElementById("cards");
-          host.innerHTML = "";
-          for (const k of ["cash", "equity", "fund", "bond"]) {
-            if (!groups[k].length) continue;
-            host.appendChild(renderCard(k, groups[k]));
+          // KA: day from SQLite (background poller fills every DAY_POLL_SEC)
+          function pullDay(quiet) {
+            return fetch("/api/day?top=8")
+              .then(async (r) => {
+                if (!r.ok) {
+                  return {
+                    ok: false,
+                    error: "",
+                    _http: "GET /api/day → HTTP " + r.status + " (перезапусти serve)",
+                  };
+                }
+                return r.json();
+              })
+              .then((day) => {
+                if (!lastRender) return;
+                if (day && day.pending && lastDaySnap && lastDaySnap.ok) {
+                  dayPending = false;
+                  applyDashboard(
+                    Object.assign({}, lastRender, {
+                      day: Object.assign({}, lastDaySnap, { stale: true }),
+                    })
+                  );
+                  return;
+                }
+                dayPending = !!(day && day.pending);
+                applyDashboard(Object.assign({}, lastRender, { day: day }));
+              })
+              .catch((e) => {
+                if (!quiet) {
+                  dayPending = false;
+                  if (!lastRender) return;
+                  applyDashboard(
+                    Object.assign({}, lastRender, {
+                      day: { ok: false, error: String(e.message || e) },
+                    })
+                  );
+                }
+              });
           }
-          if (!host.children.length) {
-            host.innerHTML = '<p class="empty">Нет позиций в ответе БКС.</p>';
-          }
-
-          const feed = document.getElementById("feed");
-          feed.innerHTML = "";
-          if (!(news || []).length) {
-            feed.innerHTML = '<li class="empty">Лента пуста — новости появятся после опроса (старый UI → Искать).</li>';
-          } else {
-            for (const n of news) {
-              const li = document.createElement("li");
-              const href = String(n.url || "");
-              const safe =
-                href.startsWith("http://") || href.startsWith("https://") ? href : "";
-              li.innerHTML =
-                (safe
-                  ? '<a href="' + esc(safe) + '" target="_blank" rel="noreferrer">'
-                  : "<span>") +
-                esc(n.title || "(без заголовка)") +
-                (safe ? "</a>" : "</span>") +
-                '<div class="meta">' +
-                esc([n.ticker_id, n.source].filter(Boolean).join(" · ")) +
-                "</div>";
-              feed.appendChild(li);
-            }
-          }
+          pullDay(false);
+          if (window._dayPullTimer) clearInterval(window._dayPullTimer);
+          window._dayPullTimer = setInterval(() => pullDay(true), 60000);
+          loadCapital();
+          loadPayouts();
         } catch (e) {
+          dayPending = false;
           err.hidden = false;
           err.textContent = String(e.message || e);
-          document.getElementById("subtitle").textContent = "Ошибка загрузки";
         }
       }
 
+      document.getElementById("btnPrivacy").addEventListener("click", () => {
+        privacyOn = !privacyOn;
+        localStorage.setItem("pn_privacy", privacyOn ? "1" : "0");
+        syncPrivacyBtn();
+        if (lastRender) applyDashboard(lastRender);
+        if (lastPosCard) renderPosCard(lastPosCard);
+        if (lastCapitalPoints) renderCapitalChart(lastCapitalPoints);
+        else loadCapital();
+        if (lastPayData) renderPayouts(lastPayData);
+        if (lastOpsSnap) renderOps(lastOpsSnap);
+      });
+
+      const payPrevBtn = document.getElementById("payPrev");
+      const payNextBtn = document.getElementById("payNext");
+      if (payPrevBtn) payPrevBtn.addEventListener("click", () => payShiftMonth(-1));
+      if (payNextBtn) payNextBtn.addEventListener("click", () => payShiftMonth(1));
+      const payCalBtn = document.getElementById("payModeCal");
+      const payListBtn = document.getElementById("payModeList");
+      if (payCalBtn)
+        payCalBtn.addEventListener("click", () => {
+          payMode = "calendar";
+          applyPayMode();
+        });
+      if (payListBtn)
+        payListBtn.addEventListener("click", () => {
+          payMode = "list";
+          applyPayMode();
+        });
+      const payPeriodSel = document.getElementById("payPeriod");
+      if (payPeriodSel) {
+        payPeriodSel.addEventListener("change", () => {
+          payPeriod = payPeriodSel.value || "year";
+          payMonthKey = "";
+          if (lastPayData) renderPayouts(lastPayData);
+        });
+      }
+      document.querySelectorAll("#payKindChips .pay-chip").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const k = btn.getAttribute("data-kind");
+          if (!k) return;
+          payKinds[k] = !payKinds[k];
+          btn.classList.toggle("on", payKinds[k]);
+          if (lastPayData) renderPayouts(lastPayData);
+        });
+      });
+      document.querySelectorAll("#payStatusChips .pay-chip").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const st = btn.getAttribute("data-status");
+          if (!st) return;
+          payStatuses[st] = !payStatuses[st];
+          btn.classList.toggle("on", payStatuses[st]);
+          if (lastPayData) renderPayouts(lastPayData);
+        });
+      });
+      const chartSel = document.getElementById("chartTicker");
+      if (chartSel) {
+        chartSel.addEventListener("change", () => {
+          loadChart(chartSel.value || "");
+        });
+      }
+      const dayBox = document.getElementById("dayBox");
+      if (dayBox) {
+        dayBox.addEventListener("click", (ev) => {
+          const row = ev.target.closest("li.day-row[data-ticker]");
+          if (!row || !dayBox.contains(row)) return;
+          const tid = String(row.dataset.ticker || "").trim().toUpperCase();
+          if (!tid) return;
+          loadChart(tid);
+          scrollToChart();
+        });
+        dayBox.addEventListener("keydown", (ev) => {
+          if (ev.key !== "Enter" && ev.key !== " ") return;
+          const row = ev.target.closest("li.day-row[data-ticker]");
+          if (!row || !dayBox.contains(row)) return;
+          ev.preventDefault();
+          const tid = String(row.dataset.ticker || "").trim().toUpperCase();
+          if (!tid) return;
+          loadChart(tid);
+          scrollToChart();
+        });
+      }
+      const mainNav = document.getElementById("mainNav");
+      if (mainNav) {
+        mainNav.addEventListener("click", (ev) => {
+          const a = ev.target.closest("a[data-nav]");
+          if (!a || !mainNav.contains(a)) return;
+          ev.preventDefault();
+          const id = a.getAttribute("data-nav") || "home";
+          showPanel(id);
+          const hash = id === "home" ? "#/" : "#/" + id;
+          try {
+            history.pushState(null, "", hash);
+          } catch (_) {
+            location.hash = hash;
+          }
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+      }
+      const opsKindChips = document.getElementById("opsKindChips");
+      if (opsKindChips) {
+        opsKindChips.addEventListener("click", (ev) => {
+          const btn = ev.target.closest("button[data-kind]");
+          if (!btn) return;
+          const k = btn.getAttribute("data-kind");
+          opsKinds[k] = !opsKinds[k];
+          btn.classList.toggle("on", opsKinds[k]);
+          loadOpsFiltered();
+        });
+      }
+      const opsYearSel = document.getElementById("opsYear");
+      if (opsYearSel) {
+        opsYearSel.addEventListener("change", () => {
+          opsYear = opsYearSel.value || "";
+          loadOpsFiltered();
+        });
+      }
+      const opsTickerInput = document.getElementById("opsTicker");
+      if (opsTickerInput) {
+        opsTickerInput.addEventListener("input", () => {
+          clearTimeout(opsSearchTimer);
+          opsSearchTimer = setTimeout(() => {
+            opsTickerQ = (opsTickerInput.value || "").trim().toUpperCase();
+            loadOpsFiltered();
+          }, 300);
+        });
+      }
+      const opsCsvBtn = document.getElementById("opsCsvBtn");
+      if (opsCsvBtn) opsCsvBtn.addEventListener("click", downloadOpsCsv);
+
+      window.addEventListener("hashchange", () => showPanel(panelFromHash()));
+      window.addEventListener("popstate", () => showPanel(panelFromHash()));
+      showPanel(panelFromHash());
+      syncPrivacyBtn();
       load();
     </script>
   </body>

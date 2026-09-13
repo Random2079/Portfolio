@@ -43,11 +43,12 @@ def cmd_once(args: argparse.Namespace) -> int:
     settings = get_settings()
     Session = make_session_factory(settings.database_url)
     notify = "off" if args.quiet else (args.notify or "digest")
+    bcs_only = not getattr(args, "all_tickers", False)
     with Session() as session:
         from sqlalchemy import select
         from portfolio_news.db import Ticker
 
-        if session.scalar(select(Ticker.id).limit(1)) is None:
+        if session.scalar(select(Ticker.id).limit(1)) is None and not bcs_only:
             upsert_tickers(session, load_tickers_from_json(settings.tickers_json))
         stats = poll_once(
             session,
@@ -56,6 +57,7 @@ def cmd_once(args: argparse.Namespace) -> int:
             ticker_id=args.ticker,
             kind=args.kind,
             category=args.category,
+            bcs_only=bcs_only,
         )
     log.info("poll done: %s", stats)
     return 0
@@ -93,9 +95,9 @@ def build_parser() -> argparse.ArgumentParser:
     imp.add_argument("path", nargs="?", default=None, help="Path to tickers.example.json or Snowball CSV")
     imp.set_defaults(func=cmd_import)
 
-    once = sub.add_parser("once", help="One poll pass")
+    once = sub.add_parser("once", help="One poll pass (K5: BCS holdings by default)")
     once.add_argument("--limit", type=int, default=None, help="Max tickers this run")
-    once.add_argument("--ticker", default=None, help="Only this ticker id")
+    once.add_argument("--ticker", default=None, help="Only this ticker id (must be in BCS if default scope)")
     once.add_argument("--kind", default=None, choices=["equity", "bond", "fund"])
     once.add_argument("--category", default=None, help="Equity sector / category")
     once.add_argument(
@@ -105,9 +107,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Toast mode (default digest)",
     )
     once.add_argument("--quiet", action="store_true", help="Same as --notify off")
+    once.add_argument(
+        "--all-tickers",
+        action="store_true",
+        help="Legacy: poll full tickers DB instead of BCS holdings",
+    )
     once.set_defaults(func=cmd_once)
 
-    watch = sub.add_parser("watch", help="Poll in a loop")
+    watch = sub.add_parser("watch", help="Poll in a loop (K5: BCS holdings by default)")
     watch.add_argument("--interval", type=int, default=None)
     watch.add_argument("--limit", type=int, default=None)
     watch.add_argument("--ticker", default=None)
@@ -115,6 +122,11 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--category", default=None)
     watch.add_argument("--notify", default="digest", choices=["off", "each", "digest"])
     watch.add_argument("--quiet", action="store_true")
+    watch.add_argument(
+        "--all-tickers",
+        action="store_true",
+        help="Legacy: poll full tickers DB instead of BCS holdings",
+    )
     watch.set_defaults(func=cmd_watch)
 
     serve = sub.add_parser("serve", help="Run FastAPI (uvicorn)")

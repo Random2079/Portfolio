@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Свеча · цвет + штрих</title>
+    <style>
+      :root {
+        --bg: #e8ecf1;
+        --card: #fff;
+        --text: #1a2330;
+        --muted: #6b7a8c;
+        --border: #d8dee8;
+        --accent: #2f6fed;
+        --coupon: #2563eb;
+        --div: #059669;
+        --redem: #ca8a04;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .wrap { max-width: 880px; margin: 0 auto; padding: 1.2rem 1rem 3rem; }
+      .top { display: flex; justify-content: space-between; gap: 0.75rem; }
+      h1 { margin: 0; font-size: 1.25rem; }
+      .sub { color: var(--muted); font-size: 0.9rem; line-height: 1.45; margin: 0.4rem 0 0; max-width: 40rem; }
+      a.back {
+        text-decoration: none; color: #fff; font-weight: 600; font-size: 0.85rem;
+        background: var(--accent); border-radius: 999px; padding: 0.4rem 0.9rem; white-space: nowrap;
+      }
+      .box {
+        margin-top: 1.1rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 1.1rem 1.2rem 1.3rem;
+      }
+      .box h2 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+      .box p { margin: 0 0 1rem; color: var(--muted); font-size: 0.85rem; line-height: 1.4; }
+      .keys {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        margin-bottom: 1.1rem;
+      }
+      .key {
+        background: #f4f7fb;
+        border-radius: 12px;
+        padding: 0.7rem 0.8rem;
+      }
+      .key b { display: block; margin-bottom: 0.45rem; font-size: 0.8rem; }
+      .swatch {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0.28rem 0;
+        font-size: 0.82rem;
+        font-weight: 700;
+      }
+      .chip {
+        width: 2.4rem;
+        height: 1.15rem;
+        border-radius: 4px;
+        flex-shrink: 0;
+      }
+      .paid-c { background: var(--coupon); }
+      .paid-d { background: var(--div); }
+      .paid-r { background: var(--redem); }
+      .ann-c {
+        background: repeating-linear-gradient(
+          -45deg,
+          #2563eb 0 5px,
+          #dbeafe 5px 9px
+        );
+      }
+      .ann-d {
+        background: repeating-linear-gradient(
+          -45deg,
+          #059669 0 5px,
+          #d1fae5 5px 9px
+        );
+      }
+      .ann-r {
+        background: repeating-linear-gradient(
+          -45deg,
+          #ca8a04 0 5px,
+          #fef3c7 5px 9px
+        );
+      }
+      .fix-c {
+        background: repeating-linear-gradient(
+          90deg,
+          #2563eb 0 3px,
+          #dbeafe 3px 7px
+        );
+      }
+      .fix-d {
+        background: repeating-linear-gradient(
+          90deg,
+          #c026d3 0 3px,
+          #fae8ff 3px 7px
+        );
+      }
+      .fix-r {
+        background: repeating-linear-gradient(
+          90deg,
+          #ca8a04 0 3px,
+          #fef3c7 3px 7px
+        );
+      }
+      .one { display: flex; gap: 1.5rem; align-items: stretch; min-height: 360px; }
+      .candle-col { width: 120px; display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
+      .candle {
+        flex: 1;
+        width: 92px;
+        display: flex;
+        flex-direction: column-reverse;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .slice {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 0.68rem;
+        text-align: center;
+        padding: 0.2rem;
+      }
+      .slice.on-dark { color: #fff; }
+      .slice.on-light { color: #1a2330; }
+      .month { margin-top: 0.5rem; font-weight: 800; }
+      table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+      th, td { text-align: right; padding: 0.32rem 0.4rem; border-bottom: 1px solid var(--border); }
+      th:first-child, td:first-child { text-align: left; }
+      th { color: var(--muted); font-size: 0.74rem; }
+      tfoot td { font-weight: 800; border-bottom: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div>
+          <h1>Цвет = что за выплата. Штрих = статус</h1>
+          <p class="sub">
+            Без рамки вокруг свечи. Заливка сама говорит:
+            сплошная — уже выплатили, косая — объявили, вертикальный «штрихкод» — утвердили.
+          </p>
+        </div>
+        <a class="back" href="/">← календарь</a>
+      </div>
+
+      <section class="box">
+        <div class="keys">
+          <div class="key">
+            <b>Цвет — тип</b>
+            <div class="swatch"><i class="chip paid-c"></i>купон</div>
+            <div class="swatch"><i class="chip paid-d"></i>дивиденд</div>
+            <div class="swatch"><i class="chip paid-r"></i>погашение</div>
+          </div>
+          <div class="key">
+            <b>Штрих — статус (на любом цвете)</b>
+            <div class="swatch"><i class="chip paid-c"></i>сплошной = выплачено</div>
+            <div class="swatch"><i class="chip ann-c"></i>косой = объявлено</div>
+            <div class="swatch"><i class="chip fix-c"></i>штрихкод = утверждено</div>
+          </div>
+        </div>
+
+        <h2>Одна свеча · 1000 ₽</h2>
+        <p>Те же учебные цифры. Смотри не «где низ/верх», а сплошное / косое / вертикальное.</p>
+        <div class="one">
+          <div class="candle-col">
+            <div class="candle">
+              <div class="slice on-dark paid-c" style="flex:200">200</div>
+              <div class="slice on-dark paid-d" style="flex:100">100</div>
+              <div class="slice on-light paid-r" style="flex:100">100</div>
+              <div class="slice on-dark ann-c" style="flex:150">150</div>
+              <div class="slice on-dark ann-d" style="flex:150">150</div>
+              <div class="slice on-light ann-r" style="flex:50">50</div>
+              <div class="slice on-dark fix-c" style="flex:100">100</div>
+              <div class="slice on-dark fix-d" style="flex:50">50</div>
+              <div class="slice on-light fix-r" style="flex:100">100</div>
+            </div>
+            <div class="month">сент.</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Статус \ тип</th>
+                <th>Купон</th>
+                <th>Див</th>
+                <th>Погаш.</th>
+                <th>Итого</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Выплачено (сплошное)</td>
+                <td>200</td><td>100</td><td>100</td><td>400</td>
+              </tr>
+              <tr>
+                <td>Объявлено (косое)</td>
+                <td>150</td><td>150</td><td>50</td><td>350</td>
+              </tr>
+              <tr>
+                <td>Утверждено (штрихкод)</td>
+                <td>100</td><td>50</td><td>100</td><td>250</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td>Свеча</td>
+                <td>450</td><td>300</td><td>250</td><td>1000 ₽</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

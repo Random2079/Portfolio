@@ -4,20 +4,26 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import threading
+import time
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from portfolio_news.bcs_client import get_bcs_client, match_holding
+from portfolio_news.bcs_client import classify_asset_class, get_bcs_client, match_holding
 from portfolio_news.config import Settings, get_settings
 from portfolio_news.db import NewsItem, Ticker, make_session_factory
+from portfolio_news.focus import list_focus_tickers, replace_focus, set_focus
 from portfolio_news.import_tickers import load_tickers_from_json, upsert_tickers
 from portfolio_news.metrics_moex import (
+    candle_to_dict,
     effective_moex_limit,
+    fetch_candles,
     fetch_coupons_for,
     fetch_dividends_for,
     fetch_metrics_for,
@@ -108,6 +114,19 @@ class CouponOut(BaseModel):
     error: str = ""
 
 
+class FocusOut(BaseModel):
+    tickers: list[str]
+    n: int = 0
+
+
+class FocusPut(BaseModel):
+    tickers: list[str] = Field(default_factory=list)
+
+
+class FocusTierIn(BaseModel):
+    tier: str  # focus | hold
+
+
 def _scoped_tickers(
     db: Session,
     *,
@@ -155,6 +174,22 @@ def _parse_ids(ids: Optional[str]) -> Optional[list[str]]:
     return parts or None
 
 
+def _moex_id_list(
+    db: Session,
+    *,
+    ticker_id: Optional[str],
+    ids: Optional[str],
+) -> Optional[list[str]]:
+    """K5: when no ticker/ids, default MOEX scope to BCS holdings."""
+    id_list = _parse_ids(ids)
+    if ticker_id or id_list is not None:
+        return id_list
+    from portfolio_news.bcs_scope import resolve_bcs_scope
+
+    scope_ids, _err = resolve_bcs_scope(db)
+    return scope_ids or []
+
+
 @app.on_event("startup")
 def _ensure_tickers():
     settings = get_settings()
@@ -164,49 +199,224 @@ def _ensure_tickers():
             upsert_tickers(db, load_tickers_from_json(settings.tickers_json))
     finally:
         db.close()
+    try:
+        from portfolio_news.day_poller import start_day_poller
+
+        start_day_poller(_SessionLocal, interval_sec=settings.day_poll_sec)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@app.get("/api/day")
+def day_attribution(
+    force: bool = Query(
+        False,
+        description="Sync MOEX refresh (rare; UI uses SQLite + background poller)",
+    ),
+    top: int = Query(8, ge=1, le=30),
+    db: Session = Depends(get_db),
+):
+    """KA: day Δ from SQLite snapshot (updated every DAY_POLL_SEC in background)."""
+    import time as _time
+
+    from portfolio_news.day_cache import load_day_snapshot
+    from portfolio_news.day_poller import day_poll_status, refresh_day_snapshot
+
+    if force:
+        refresh_day_snapshot(_SessionLocal, force_moex=True)
+
+    loaded = load_day_snapshot(db)
+    poll = day_poll_status()
+    if loaded is None:
+        # kick first fill if poller hasn't written yet
+        if not poll.get("running"):
+            threading.Thread(
+                target=refresh_day_snapshot,
+                args=(_SessionLocal,),
+                kwargs={"force_moex": True},
+                daemon=True,
+            ).start()
+        return {
+            "ok": False,
+            "error": "",
+            "configured": True,
+            "pending": True,
+            "day_rub": None,
+            "day_pct": None,
+            "top": [],
+            "missing": 0,
+            "poll": poll,
+        }
+
+    attr, updated_at = loaded
+    age = _time.time() - updated_at
+    data = attr.to_dict()
+    data["configured"] = True
+    data["updated_at"] = updated_at
+    data["age_sec"] = round(age, 1)
+    data["stale"] = age > 90
+    data["source"] = "sqlite"
+    data["poll"] = poll
+    data["poll_interval_sec"] = get_settings().day_poll_sec
+    # top_n already baked into snapshot; ignore top param for cache hits
+    _ = top
+    return data
+
+
+@app.get("/api/capital")
+def capital_curve(
+    days: int = Query(1100, ge=7, le=1200),
+    force: bool = Query(False, description="Rebuild weekly points from deals + MOEX"),
+    db: Session = Depends(get_db),
+):
+    """K6: portfolio totals for capital line (weekly history + today)."""
+    from portfolio_news.capital_cache import list_capital_days, today_local
+
+    if force:
+        from portfolio_news.capital_replay import rebuild_weekly_capital
+
+        rebuild_weekly_capital(db)
+    points = list_capital_days(db, days=days)
+    return {
+        "ok": True,
+        "days": days,
+        "today": today_local(),
+        "n": len(points),
+        "points": points,
+        "grain": "week",
+    }
+
+
+def _holdings_qty_map() -> dict[str, float]:
+    """ticker → quantity from BCS cache (skip cash). Empty if broker down."""
+    cfg = get_cfg()
+    client = get_bcs_client(
+        refresh_token=cfg.bcs_trade_refresh_token,
+        client_id=cfg.bcs_trade_client_id or "trade-api-read",
+    )
+    snap = client.fetch_holdings(force=False)
+    if not snap.holdings:
+        return {}
+    out: dict[str, float] = {}
+    for h in snap.holdings:
+        ac = (h.asset_class or "").strip().lower()
+        if ac == "cash":
+            continue
+        tid = (h.ticker or h.sec_code or "").strip().upper()
+        if not tid or not h.quantity:
+            continue
+        out[tid] = float(h.quantity)
+    return out
+
+
+def _snowball_qty_map() -> dict[str, float]:
+    """ticker → qty from last Snowball journal (when BCS holdings are empty)."""
+    from datetime import date
+
+    from portfolio_news.snowball_ledger import book_as_of, find_snowball_csv, load_events
+
+    path = find_snowball_csv()
+    if path is None:
+        return {}
+    try:
+        return book_as_of(load_events(path), date.today()).papers()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+@app.get("/api/calendar")
+def payout_calendar(
+    days: int = Query(365, ge=7, le=730),
+    force: bool = Query(False, description="Rebuild from MOEX now (slow)"),
+    db: Session = Depends(get_db),
+):
+    """K7: upcoming dividends/coupons for own papers, from SQLite cache."""
+    import time as _time
+
+    from portfolio_news.calendar_own import (
+        apply_quantities,
+        calendar_running,
+        load_calendar,
+        refresh_calendar,
+    )
+
+    if force:
+        refresh_calendar(_SessionLocal, ahead_days=days)
+
+    loaded = load_calendar(db)
+    if loaded is None:
+        if not calendar_running():
+            threading.Thread(
+                target=refresh_calendar,
+                args=(_SessionLocal,),
+                kwargs={"ahead_days": days},
+                daemon=True,
+            ).start()
+        return {
+            "ok": False,
+            "pending": True,
+            "error": "",
+            "events": [],
+            "total_amount": None,
+            "ahead_days": days,
+        }
+
+    data, updated_at = loaded
+    # Cached rebuilds sometimes store per_unit without BCS qty → UI shows "N дат".
+    # Live BCS first; if broker is down — Snowball journal qty.
+    try:
+        qty_by = _holdings_qty_map()
+    except Exception:  # noqa: BLE001
+        qty_by = {}
+    if not qty_by:
+        qty_by = _snowball_qty_map()
+    if qty_by:
+        data = apply_quantities(data, qty_by, only_own=True)
+
+    age = _time.time() - updated_at
+    data["updated_at"] = updated_at
+    data["age_sec"] = round(age, 1)
+    data["pending"] = False
+    data["running"] = calendar_running()
+    # rebuild once a day in background; UI keeps showing the old list meanwhile
+    if age > 24 * 3600 and not calendar_running():
+        threading.Thread(
+            target=refresh_calendar,
+            args=(_SessionLocal,),
+            kwargs={"ahead_days": days},
+            daemon=True,
+        ).start()
+        data["running"] = True
+    return data
+
+
+def _html(path: Path):
+    return FileResponse(
+        path,
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @app.get("/")
 def ui_index():
-    path = _STATIC / "index.html"
-    return FileResponse(
-        path,
-        media_type="text/html; charset=utf-8",
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-        },
-    )
+    """Main UI = Snowball-like dashboard (approved 2026-09-10)."""
+    return _html(_STATIC / "dashboard-demo.html")
 
 
 @app.get("/demo")
 def ui_demo():
-    """Snowball-like portfolio demo (does not replace main index)."""
-    path = _STATIC / "dashboard-demo.html"
-    return FileResponse(
-        path,
-        media_type="text/html; charset=utf-8",
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-        },
-    )
+    """Alias of main dashboard."""
+    return _html(_STATIC / "dashboard-demo.html")
 
 
-@app.get("/legacy")
-def ui_legacy():
-    """Rollback snapshot of index.html from before Snowball demo."""
-    path = _STATIC / "backups" / "index.backup-2026-09-10-before-snowball-demo.html"
-    if not path.is_file():
-        path = _STATIC / "index.html"
-    return FileResponse(
-        path,
-        media_type="text/html; charset=utf-8",
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-        },
-    )
+@app.get("/pay-demo")
+def ui_pay_chart_demo():
+    """K7 chart design sandbox — not the live calendar."""
+    return _html(_STATIC / "pay-chart-demo.html")
 
 
 @app.get("/api/health")
@@ -223,9 +433,13 @@ def list_tickers(db: Session = Depends(get_db)):
 @app.get("/api/news", response_model=list[NewsOut])
 def list_news(
     ticker: Optional[str] = Query(None),
+    focus: bool = Query(False, description="KB: only Focus tickers when set is non-empty"),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
+    """K5: default feed = news for BCS holdings only (not full tickers DB)."""
+    from portfolio_news.bcs_scope import resolve_bcs_scope
+
     q = select(NewsItem).order_by(desc(NewsItem.created_at)).limit(limit)
     if ticker:
         q = (
@@ -234,8 +448,49 @@ def list_news(
             .order_by(desc(NewsItem.created_at))
             .limit(limit)
         )
+    elif focus:
+        focus_ids = list_focus_tickers(db)
+        if focus_ids:
+            q = (
+                select(NewsItem)
+                .where(NewsItem.ticker_id.in_(focus_ids))
+                .order_by(desc(NewsItem.created_at))
+                .limit(limit)
+            )
+    else:
+        scope_ids, _err = resolve_bcs_scope(db)
+        if scope_ids:
+            q = (
+                select(NewsItem)
+                .where(NewsItem.ticker_id.in_(scope_ids))
+                .order_by(desc(NewsItem.created_at))
+                .limit(limit)
+            )
     return list(db.scalars(q).all())
 
+
+@app.get("/api/focus", response_model=FocusOut)
+def get_focus(db: Session = Depends(get_db)):
+    """KB: list of Focus tickers (остальные = Hold)."""
+    tickers = list_focus_tickers(db)
+    return FocusOut(tickers=tickers, n=len(tickers))
+
+
+@app.put("/api/focus", response_model=FocusOut)
+def put_focus(body: FocusPut, db: Session = Depends(get_db)):
+    """KB: replace entire Focus set."""
+    tickers = replace_focus(db, body.tickers)
+    return FocusOut(tickers=tickers, n=len(tickers))
+
+
+@app.put("/api/focus/{ticker_id}")
+def put_focus_ticker(ticker_id: str, body: FocusTierIn, db: Session = Depends(get_db)):
+    """KB: set one ticker to focus|hold."""
+    tier = (body.tier or "").strip().lower()
+    if tier not in ("focus", "hold"):
+        raise HTTPException(status_code=422, detail="tier must be focus|hold")
+    result = set_focus(db, ticker_id, focus=(tier == "focus"))
+    return {"ticker": ticker_id.strip().upper(), "tier": result}
 
 @app.post("/api/poll")
 def run_poll(
@@ -243,9 +498,13 @@ def run_poll(
     kind: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     notify: str = Query("digest"),
+    all_tickers: bool = Query(
+        False,
+        description="Legacy: poll full tickers DB (default false = K5 BCS holdings only)",
+    ),
     cfg: Settings = Depends(get_cfg),
 ):
-    """Start background poll scoped to filter. Returns immediately."""
+    """Start background poll. K5: default scope = BCS holdings only."""
     raw = (notify or "digest").strip().lower()
     if raw in ("true", "1", "each", "yes"):
         mode = "each"
@@ -265,6 +524,7 @@ def run_poll(
         category=category or None,
         limit=cfg.poll_limit,
         notify=mode,
+        bcs_only=not all_tickers,
     )
     if not started.get("ok"):
         raise HTTPException(status_code=409, detail=started)
@@ -291,7 +551,7 @@ def list_metrics(
     limit: int = Query(0, ge=0, le=200),
     db: Session = Depends(get_db),
 ):
-    id_list = _parse_ids(ids)
+    id_list = _moex_id_list(db, ticker_id=ticker_id, ids=ids)
     eff = effective_moex_limit(ticker_id=ticker_id, limit=limit)
     rows = _scoped_tickers(
         db,
@@ -329,7 +589,7 @@ def list_dividends(
     limit: int = Query(0, ge=0, le=200),
     db: Session = Depends(get_db),
 ):
-    id_list = _parse_ids(ids)
+    id_list = _moex_id_list(db, ticker_id=ticker_id, ids=ids)
     eff = effective_moex_limit(ticker_id=ticker_id, limit=limit)
     rows = _scoped_tickers(
         db,
@@ -379,7 +639,7 @@ def list_coupons(
     limit: int = Query(0, ge=0, le=200),
     db: Session = Depends(get_db),
 ):
-    id_list = _parse_ids(ids)
+    id_list = _moex_id_list(db, ticker_id=ticker_id, ids=ids)
     eff = effective_moex_limit(ticker_id=ticker_id, limit=limit)
     rows = _scoped_tickers(
         db,
@@ -431,6 +691,33 @@ def _bcs():
     )
 
 
+def _enrich_holdings_payload(holdings: list[dict], db: Session) -> None:
+    """Fill asset_class (+ empty name) from tickers DB without mutating BCS cache."""
+    if not holdings:
+        return
+    by_id: dict[str, Ticker] = {}
+    by_isin: dict[str, Ticker] = {}
+    for t in db.scalars(select(Ticker)).all():
+        by_id[str(t.id).upper()] = t
+        if t.isin:
+            by_isin[str(t.isin).upper()] = t
+    for h in holdings:
+        tid = str(h.get("ticker") or h.get("sec_code") or "").strip().upper()
+        isin = str(h.get("isin") or "").strip().upper()
+        row = by_id.get(tid) or (by_isin.get(isin) if isin else None)
+        if row and not (h.get("name") or "").strip() and row.name:
+            h["name"] = row.name
+        db_kind = (row.kind if row else "") or ""
+        h["asset_class"] = classify_asset_class(
+            ticker=str(h.get("ticker") or ""),
+            sec_code=str(h.get("sec_code") or ""),
+            isin=str(h.get("isin") or ""),
+            class_code=str(h.get("class_code") or ""),
+            name=str(h.get("name") or ""),
+            db_kind=db_kind,
+        )
+
+
 @app.get("/api/holdings")
 def list_holdings(
     force: bool = Query(False),
@@ -446,6 +733,18 @@ def list_holdings(
         hit = match_holding(snap.holdings, ticker_id=ticker_id, isin=isin)
         data["match"] = asdict(hit) if hit else None
         data["holdings"] = [asdict(hit)] if hit else []
+    if snap.ok and data.get("holdings"):
+        _enrich_holdings_payload(data["holdings"], db)
+    if snap.ok and snap.total_value is not None:
+        from portfolio_news.capital_cache import maybe_record_from_holdings
+
+        maybe_record_from_holdings(
+            db,
+            total_value=snap.total_value,
+            cash=snap.cash,
+            currency=snap.currency or "RUB",
+            ok=True,
+        )
     return data
 
 
@@ -456,3 +755,285 @@ def holdings_status():
         "configured": bool(cfg.bcs_trade_refresh_token.strip()),
         "client_id": cfg.bcs_trade_client_id or "trade-api-read",
     }
+
+
+def _ops_window(
+    year: Optional[str], date_from: Optional[str], date_to: Optional[str]
+) -> tuple[str, str]:
+    """`year=2024` is shorthand for the whole calendar year."""
+    y = (year or "").strip()
+    if y and y.isdigit() and len(y) == 4:
+        return f"{y}-01-01", f"{y}-12-31"
+    return (date_from or "").strip(), (date_to or "").strip()
+
+
+def _ops_kinds(kind: Optional[str]) -> list[str]:
+    raw = (kind or "").strip().lower()
+    if not raw or raw == "all":
+        return []
+    return [k for k in (p.strip() for p in raw.split(",")) if k in ("equity", "bond", "fund")]
+
+
+def _refresh_bcs_ops(db: Session, *, force: bool) -> str:
+    """Top up the BCS cache; history itself comes from the journal."""
+    from portfolio_news.ops_cache import cache_count, merge_live_into_cache
+
+    client = _bcs()
+    if not force and cache_count(db) > 0:
+        return ""
+    snap = client.fetch_operations(force=force, ticker="", limit=500)
+    if snap.ok and snap.operations:
+        merge_live_into_cache(db, snap)
+        return ""
+    return snap.error or ""
+
+
+@app.get("/api/operations")
+def list_operations(
+    force: bool = Query(False),
+    ticker: Optional[str] = Query(None),
+    kind: Optional[str] = Query(None, description="equity|bond|fund (comma-separated)"),
+    year: Optional[str] = Query(None, description="YYYY shorthand for a full year"),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    limit: int = Query(100, ge=0, le=5000, description="0 = no limit"),
+    journal: bool = Query(True, description="Include Snowball journal history"),
+    db: Session = Depends(get_db),
+):
+    """K8: deal history = BCS cache + Snowball journal, filtered by kind/period."""
+    from portfolio_news.ops_history import build_history
+
+    err = _refresh_bcs_ops(db, force=force)
+    lo, hi = _ops_window(year, date_from, date_to)
+    data = build_history(
+        db,
+        kinds=_ops_kinds(kind),
+        date_from=lo,
+        date_to=hi,
+        ticker=ticker or "",
+        limit=limit,
+        include_journal=journal,
+    )
+    has_rows = bool(data["operations"]) or data["all_total"] > 0
+    data.update(
+        {
+            "configured": _bcs().configured or data["journal_rows"] > 0,
+            "ok": has_rows or not err,
+            "error": "" if has_rows else err,
+            "fetched_at": time.time(),
+            "raw_keys": ["sqlite_cache", "snowball_journal"],
+            "source": "+".join(data["sources"]) or "empty",
+            "date_from": lo,
+            "date_to": hi,
+        }
+    )
+    return data
+
+
+@app.get("/api/operations.csv")
+def operations_csv(
+    ticker: Optional[str] = Query(None),
+    kind: Optional[str] = Query(None),
+    year: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    journal: bool = Query(True),
+    db: Session = Depends(get_db),
+):
+    """K8: same filters as /api/operations, dumped as ';'-separated CSV."""
+    from portfolio_news.ops_history import build_history, to_csv
+
+    lo, hi = _ops_window(year, date_from, date_to)
+    data = build_history(
+        db,
+        kinds=_ops_kinds(kind),
+        date_from=lo,
+        date_to=hi,
+        ticker=ticker or "",
+        limit=0,
+        include_journal=journal,
+    )
+    body = to_csv(data["operations"])
+    stamp = datetime.now().strftime("%Y%m%d")
+    name = f"deals_{stamp}.csv"
+    return Response(
+        # BOM so Excel opens Cyrillic correctly
+        content="\ufeff" + body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@app.get("/api/position/{ticker}")
+def position_card(
+    ticker: str,
+    force: bool = Query(False),
+    moex: bool = Query(
+        False,
+        description="Optional MOEX last price if BCS market_price missing (slow; off by default)",
+    ),
+    db: Session = Depends(get_db),
+):
+    """K4: position facts — avg, buy dates, unrealized PnL, weight (no advice).
+
+    Uses BCS holdings cache + SQLite ops. Does **not** wait on MOEX by default
+    (offline / slow net still get a card from broker facts).
+    """
+    from portfolio_news.ops_cache import list_cached_operations
+    from portfolio_news.position_card import build_position_card
+
+    tid = (ticker or "").strip().upper()
+    if not tid:
+        raise HTTPException(status_code=400, detail="ticker required")
+
+    client = _bcs()
+    snap = client.fetch_holdings(force=force)
+    if not snap.configured:
+        return {
+            "ok": False,
+            "ticker": tid,
+            "error": snap.error or "BCS_TRADE_REFRESH_TOKEN не задан в .env",
+            "configured": False,
+        }
+    if not snap.ok and not snap.holdings:
+        return {
+            "ok": False,
+            "ticker": tid,
+            "error": snap.error or "BCS holdings недоступны",
+            "configured": True,
+            "stale": snap.stale,
+        }
+
+    row = db.get(Ticker, tid) or db.get(Ticker, tid.lower())
+    if row is None:
+        for t in db.scalars(select(Ticker)).all():
+            if str(t.id).upper() == tid:
+                row = t
+                break
+    isin = (row.isin if row else "") or ""
+    hit = match_holding(snap.holdings, ticker_id=tid, isin=isin)
+
+    ops = list_cached_operations(db, ticker=tid, limit=500)
+
+    moex_last = None
+    moex_note = ""
+    # MOEX только по флагу и только если у БКС нет цены — иначе карточка
+    # висит на ConnectTimeout iss.moex.com при плохом инете.
+    if (
+        moex
+        and hit is not None
+        and hit.market_price is None
+    ):
+        kind = (row.kind if row else "equity") or "equity"
+        if kind not in ("equity", "bond", "fund"):
+            kind = "equity"
+        try:
+            from portfolio_news.metrics_moex import fetch_metric
+
+            m = fetch_metric(tid, kind, (hit.name or tid), isin=isin or hit.isin or "")
+            if m.last is not None:
+                moex_last = float(m.last)
+            elif getattr(m, "error", None):
+                moex_note = str(m.error)[:200]
+        except Exception as exc:  # noqa: BLE001
+            moex_note = str(exc)[:200]
+
+    card = build_position_card(
+        ticker=tid,
+        holding=hit,
+        operations=ops,
+        holdings=list(snap.holdings),
+        total_value=snap.total_value,
+        moex_last=moex_last,
+        configured=True,
+    )
+    data = card.to_dict()
+    if snap.stale:
+        data["stale"] = True
+    if snap.error and card.ok:
+        data["holdings_note"] = snap.error
+    if moex_note and card.ok:
+        data["moex_note"] = moex_note
+    return data
+
+
+@app.get("/api/chart/{ticker}")
+def chart_ticker(
+    ticker: str,
+    days: int = Query(180, ge=14, le=900),
+    interval: int = Query(24, description="MOEX candle interval; 24=day"),
+    kind: Optional[str] = Query(None, description="equity|bond|fund; default from tickers DB"),
+    db: Session = Depends(get_db),
+):
+    """K3: MOEX close series + BCS trade markers for one ticker."""
+    from datetime import date, timedelta
+
+    from portfolio_news.ops_cache import list_cached_operations
+
+    tid = (ticker or "").strip().upper()
+    if not tid:
+        raise HTTPException(status_code=400, detail="ticker required")
+
+    resolved_kind = (kind or "").strip().lower()
+    row = db.get(Ticker, tid) or db.get(Ticker, tid.lower())
+    if row is None:
+        for t in db.scalars(select(Ticker)).all():
+            if str(t.id).upper() == tid:
+                row = t
+                break
+    if resolved_kind not in ("equity", "bond", "fund"):
+        resolved_kind = (row.kind if row else "equity") or "equity"
+        if resolved_kind not in ("equity", "bond", "fund"):
+            resolved_kind = "equity"
+    isin = ((row.isin if row else "") or "").strip()
+
+    from_date = (date.today() - timedelta(days=int(days))).isoformat()
+    points, secid, board, err = fetch_candles(
+        tid,
+        resolved_kind,
+        interval=int(interval) or 24,
+        from_date=from_date,
+        limit=800,
+        isin=isin,
+    )
+
+    ops = list_cached_operations(db, ticker=tid, limit=500)
+    markers: list[dict] = []
+    for op in ops:
+        side = (op.side or "").strip().lower()
+        if side not in ("buy", "sell"):
+            # keep unknown sides too (broker quirks) but tag them
+            if not side:
+                side = "other"
+        markers.append(
+            {
+                "deal_id": op.deal_id,
+                "executed_at": op.executed_at or "",
+                "side": side,
+                "price": op.price,
+                "quantity": op.quantity,
+                "volume": op.volume,
+            }
+        )
+    # chronological for chart overlay
+    markers.sort(key=lambda m: m.get("executed_at") or "")
+
+    ok = bool(points)
+    return {
+        "ok": ok,
+        "error": "" if ok else (err or "Нет свечей MOEX для тикера"),
+        "ticker": tid,
+        "kind": resolved_kind,
+        "secid": secid,
+        "board": board,
+        "interval": int(interval) or 24,
+        "from": from_date,
+        "candles": [candle_to_dict(p) for p in points],
+        "markers": markers,
+        "n_candles": len(points),
+        "n_markers": len(markers),
+    }
+
+
+# Local assets (e.g. offline logos under static/logos/)
+app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")

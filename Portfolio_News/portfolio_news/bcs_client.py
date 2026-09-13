@@ -6,15 +6,19 @@ Docs: https://trade-api.bcs.ru
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Optional
 
 import requests
 
 log = logging.getLogger(__name__)
+
+_HOLDINGS_LAST_GOOD = Path(__file__).resolve().parent.parent / "data" / "holdings_last_good.json"
 
 AUTH_URL = (
     "https://be.broker.ru/trade-api-keycloak/realms/tradeapi"
@@ -22,6 +26,11 @@ AUTH_URL = (
 )
 PORTFOLIO_URL = "https://be.broker.ru/trade-api-bff-portfolio/api/v1/portfolio"
 LIMITS_URL = "https://be.broker.ru/trade-api-bff-limit/api/v1/limits"
+# Docs path is POST /api/v1/trades/search, but the live host is trade-details
+# (bff-operations returns Angie HTML 404 for the same path — see bcs-mcp AGENTS.md).
+TRADES_SEARCH_URL = (
+    "https://be.broker.ru/trade-api-bff-trade-details/api/v1/trades/search"
+)
 
 CLIENT_ID_READ = "trade-api-read"
 # Soft cache so UI tab switches don't hammer BCS
@@ -46,11 +55,88 @@ def friendly_bcs_error(exc: BaseException) -> str:
         )
     if "connection" in low and ("refused" in low or "reset" in low or "aborted" in low):
         return "Связь с be.broker.ru оборвалась. Попробуй позже или другой сеть/VPN."
+    if "bcs http 404" in low or "http 404" in low:
+        return (
+            "БКС не отдаёт историю сделок (HTTP 404). "
+            "Нужен сервис trade-api-bff-trade-details (не bff-operations). "
+            "Позиции могут работать, сделки — нет."
+        )
     if "refresh token" in low or "invalid/expired" in low:
         return text
     if len(text) > 220:
         return text[:200] + "…"
     return text
+
+
+# UI /api grouping: stock | fund | bond | cash | other
+_CASH_IDS = frozenset({"RUB", "USD", "EUR", "CNY", "HKD", "GBP", "CHF", "CASH"})
+_BOND_BOARDS = frozenset({"TQCB", "TQOB", "TQIR", "EQOB", "TQRD", "TQOY", "TQIU"})
+_FUND_BOARDS = frozenset({"TQTF", "TQIF", "TQTD", "TQTE"})  # ETF / БПИФ boards
+
+
+def classify_asset_class(
+    *,
+    ticker: str = "",
+    sec_code: str = "",
+    isin: str = "",
+    class_code: str = "",
+    name: str = "",
+    db_kind: str = "",
+) -> str:
+    """Classify a position for Hold/Focus grouping.
+
+    Returns: cash | stock | fund | bond | other.
+    Boards / ISIN / name first; optional tickers-DB kind as fallback
+    (needed for БПИФ on TQBR like BCSR/GOLD when BCS omits type).
+    """
+    tid = (ticker or sec_code or "").strip().upper()
+    isin_u = (isin or "").strip().upper()
+    if not isin_u and tid.startswith("RU000"):
+        isin_u = tid
+    cc = (class_code or "").strip().upper()
+    nm = (name or "").strip()
+    nm_l = nm.lower()
+    hay = f"{cc} {nm}"
+
+    if tid in _CASH_IDS or "денеж" in nm_l:
+        return "cash"
+    if cc in _BOND_BOARDS:
+        return "bond"
+    if cc in _FUND_BOARDS:
+        return "fund"
+    if isin_u.startswith("RU000A") or isin_u.startswith("SU"):
+        return "bond"
+    if tid.startswith("RU000A") or tid.startswith("SU"):
+        return "bond"
+    if any(
+        x in nm_l
+        for x in ("облиг", "офз", "серия", "бо-п", "бо-0", "бо 0", "купон")
+    ):
+        return "bond"
+    if any(
+        x in hay.upper()
+        for x in ("ETF", "BPIF", "БПИФ")
+    ) or "пиф" in nm_l or "etf" in nm_l or "бпиф" in nm_l:
+        return "fund"
+    # БПИФ на TQBR часто без слова «фонд» в short name (BCSR «Индекс Мосбиржи»)
+    if tid in {"BCSR", "GOLD", "TMOS", "SBMX", "SBSP", "FXGD", "FXUS", "FXRU"}:
+        return "fund"
+    if "фонд" in nm_l or ("индекс" in nm_l and ("мосбирж" in nm_l or "мос биржа" in nm_l)):
+        return "fund"
+
+    kind = (db_kind or "").strip().lower()
+    if kind in ("bond", "fund"):
+        return kind
+    if kind in ("equity", "stock", "share", "shares"):
+        return "stock"
+    if kind == "cash":
+        return "cash"
+
+    if cc in ("TQBR", "TQPI", "SMAL", "EQBR"):
+        return "stock"
+    if tid and not tid.startswith("RU000"):
+        return "stock"
+    return "other"
 
 
 @dataclass
@@ -68,6 +154,39 @@ class Holding:
     pnl: Optional[float] = None
     pnl_pct: Optional[float] = None
     currency: str = "RUB"
+    asset_class: str = ""  # stock | fund | bond | cash | other
+
+
+@dataclass
+class Operation:
+    """One executed BCS deal (K1)."""
+
+    deal_id: str = ""
+    ticker: str = ""
+    class_code: str = ""
+    side: str = ""  # buy / sell / …
+    quantity: Optional[float] = None
+    price: Optional[float] = None
+    volume: Optional[float] = None
+    commission: Optional[float] = None
+    currency: str = "RUB"
+    executed_at: str = ""  # ISO or broker raw datetime string
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class OperationsSnapshot:
+    configured: bool
+    ok: bool
+    error: str = ""
+    fetched_at: float = 0.0
+    operations: list[Operation] = field(default_factory=list)
+    raw_keys: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -90,6 +209,58 @@ class HoldingsSnapshot:
         return d
 
 
+def holdings_snapshot_from_dict(data: dict[str, Any]) -> HoldingsSnapshot:
+    allowed = set(Holding.__dataclass_fields__)
+    rows: list[Holding] = []
+    for raw in data.get("holdings") or []:
+        if not isinstance(raw, dict):
+            continue
+        rows.append(Holding(**{k: raw[k] for k in allowed if k in raw}))
+    return HoldingsSnapshot(
+        configured=bool(data.get("configured", True)),
+        ok=True,
+        error=str(data.get("error") or ""),
+        fetched_at=float(data.get("fetched_at") or 0.0),
+        total_value=data.get("total_value"),
+        cash=data.get("cash"),
+        pnl=data.get("pnl"),
+        pnl_pct=data.get("pnl_pct"),
+        currency=str(data.get("currency") or "RUB"),
+        holdings=rows,
+        raw_keys=list(data.get("raw_keys") or []),
+        stale=True,
+    )
+
+
+def write_holdings_last_good(snap: HoldingsSnapshot) -> None:
+    if not snap.ok or not snap.holdings:
+        return
+    try:
+        _HOLDINGS_LAST_GOOD.parent.mkdir(parents=True, exist_ok=True)
+        payload = snap.to_dict()
+        payload["stale"] = False
+        _HOLDINGS_LAST_GOOD.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+    except OSError as exc:
+        log.warning("holdings last-good write failed: %s", exc)
+
+
+def load_holdings_last_good() -> Optional[HoldingsSnapshot]:
+    if not _HOLDINGS_LAST_GOOD.is_file():
+        return None
+    try:
+        data = json.loads(_HOLDINGS_LAST_GOOD.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or not data.get("holdings"):
+        return None
+    snap = holdings_snapshot_from_dict(data)
+    if not snap.holdings:
+        return None
+    return snap
+
+
 class BcsClient:
     def __init__(self, refresh_token: str, client_id: str = CLIENT_ID_READ) -> None:
         self._refresh_token = (refresh_token or "").strip()
@@ -98,6 +269,7 @@ class BcsClient:
         self._access_expires_at = 0.0
         self._lock = threading.Lock()
         self._cache: Optional[HoldingsSnapshot] = None
+        self._ops_cache: Optional[OperationsSnapshot] = None
         self._session = requests.Session()
         self._session.headers.update(
             {"User-Agent": "PortfolioNews/0.3 (+local; BCS read-only)"}
@@ -170,6 +342,35 @@ class BcsClient:
             raise RuntimeError(f"BCS HTTP {resp.status_code}: {resp.text[:400]}")
         return resp.json()
 
+    def _post_json(
+        self,
+        url: str,
+        body: dict[str, Any],
+        *,
+        params: Optional[dict[str, Any]] = None,
+    ) -> Any:
+        resp = self._session.post(
+            url,
+            headers=self._auth_headers(),
+            json=body,
+            params=params,
+            timeout=_TIMEOUT,
+        )
+        if resp.status_code == 401:
+            self._access_expires_at = 0
+            resp = self._session.post(
+                url,
+                headers=self._auth_headers(),
+                json=body,
+                params=params,
+                timeout=_TIMEOUT,
+            )
+        if resp.status_code == 429:
+            raise RuntimeError("BCS rate limit (429) — подожди и обнови снова")
+        if resp.status_code != 200:
+            raise RuntimeError(f"BCS HTTP {resp.status_code}: {resp.text[:400]}")
+        return resp.json()
+
     def fetch_holdings(self, *, force: bool = False) -> HoldingsSnapshot:
         if not self.configured:
             return HoldingsSnapshot(
@@ -211,6 +412,12 @@ class BcsClient:
                     )
                     self._cache = stale
                     return stale
+                disk = load_holdings_last_good()
+                if disk and disk.holdings:
+                    disk.error = msg
+                    disk.stale = True
+                    self._cache = disk
+                    return disk
                 snap = HoldingsSnapshot(
                     configured=True,
                     ok=False,
@@ -218,8 +425,121 @@ class BcsClient:
                     fetched_at=time.time(),
                     stale=False,
                 )
+            else:
+                write_holdings_last_good(snap)
             self._cache = snap
             return snap
+
+    def fetch_operations(
+        self,
+        *,
+        force: bool = False,
+        ticker: str = "",
+        limit: int = 100,
+    ) -> OperationsSnapshot:
+        """Executed deals from BCS (K1). Soft-cached like holdings."""
+        if not self.configured:
+            return OperationsSnapshot(
+                configured=False,
+                ok=False,
+                error="BCS_TRADE_REFRESH_TOKEN не задан в .env",
+            )
+        with self._lock:
+            if (
+                not force
+                and self._ops_cache
+                and self._ops_cache.ok
+                and time.time() - self._ops_cache.fetched_at < _CACHE_TTL_SEC
+            ):
+                return self._filter_ops(self._ops_cache, ticker=ticker, limit=limit)
+            try:
+                snap = self._fetch_ops_uncached()
+            except Exception as exc:  # noqa: BLE001
+                msg = friendly_bcs_error(exc)
+                log.warning("BCS deals failed: %s", exc)
+                if self._ops_cache and self._ops_cache.ok and self._ops_cache.operations:
+                    stale = OperationsSnapshot(
+                        configured=True,
+                        ok=True,
+                        error=msg,
+                        fetched_at=self._ops_cache.fetched_at,
+                        operations=list(self._ops_cache.operations),
+                        raw_keys=list(self._ops_cache.raw_keys),
+                    )
+                    self._ops_cache = stale
+                    return self._filter_ops(stale, ticker=ticker, limit=limit)
+                snap = OperationsSnapshot(
+                    configured=True,
+                    ok=False,
+                    error=msg,
+                    fetched_at=time.time(),
+                )
+            self._ops_cache = snap
+            return self._filter_ops(snap, ticker=ticker, limit=limit)
+
+    def _fetch_ops_uncached(self) -> OperationsSnapshot:
+        # Live: POST …/trade-api-bff-trade-details/api/v1/trades/search
+        # page/size = query; body filters use startDateTime/endDateTime
+        # (format yyyy-MM-dd'T'HH:mm:ss.SSSX — Z or +0300, not +03:00).
+        # Data only since 2026-01-26 per BCS docs.
+        date_from = "2026-01-26T00:00:00.000Z"
+        date_to = time.strftime("%Y-%m-%dT23:59:59.999Z", time.gmtime())
+        body: dict[str, Any] = {
+            "startDateTime": date_from,
+            "endDateTime": date_to,
+        }
+        page_size = 100  # API max
+        all_ops: list[Operation] = []
+        raw_keys: list[str] = []
+        page = 0
+        total_pages = 1
+        while page < total_pages and page < 50:  # hard cap
+            raw = self._post_json(
+                TRADES_SEARCH_URL,
+                body,
+                params={"page": page, "size": page_size},
+            )
+            if isinstance(raw, dict):
+                if not raw_keys:
+                    raw_keys = sorted(raw.keys())
+                try:
+                    total_pages = max(1, int(raw.get("totalPages") or 1))
+                except (TypeError, ValueError):
+                    total_pages = 1
+            batch = _parse_deals(raw)
+            all_ops.extend(batch)
+            if not batch:
+                break
+            page += 1
+        # newest first (parser already sorts per page)
+        all_ops.sort(key=lambda o: o.executed_at or "", reverse=True)
+        return OperationsSnapshot(
+            configured=True,
+            ok=True,
+            error="",
+            fetched_at=time.time(),
+            operations=all_ops,
+            raw_keys=raw_keys,
+        )
+
+    @staticmethod
+    def _filter_ops(
+        snap: OperationsSnapshot, *, ticker: str = "", limit: int = 100
+    ) -> OperationsSnapshot:
+        rows = list(snap.operations)
+        tid = (ticker or "").strip().upper()
+        if tid:
+            rows = [o for o in rows if (o.ticker or "").upper() == tid]
+        if limit and limit > 0:
+            rows = rows[:limit]
+        return OperationsSnapshot(
+            configured=snap.configured,
+            ok=snap.ok,
+            error=snap.error,
+            fetched_at=snap.fetched_at,
+            operations=rows,
+            raw_keys=list(snap.raw_keys),
+        )
 
     def _fetch_uncached(self) -> HoldingsSnapshot:
         raw = self._get_json(PORTFOLIO_URL)
@@ -322,12 +642,42 @@ def _row_to_holding(row: dict) -> Holding:
         return None
 
     qty = _f(pick("quantity", "qty", "balance", "currentBalance", "current_balance", "lots"))
-    avg = _f(pick("openPrice", "open_price", "avgPrice", "averagePrice", "average_price", "price"))
-    mkt = _f(pick("marketPrice", "market_price", "last", "currentPrice"))
-    mv = _f(pick("marketValue", "market_value", "value", "amount"))
-    cost = _f(pick("costValue", "cost_value", "invested", "balanceValue"))
-    pnl = _f(pick("profitLoss", "profit_loss", "pnl", "unrealizedPnl"))
-    pnl_pct = _f(pick("profitLossPct", "profit_loss_pct", "pnlPct", "pnl_pct"))
+    avg = _f(
+        pick(
+            "openPrice",
+            "open_price",
+            "avgPrice",
+            "averagePrice",
+            "average_price",
+            "balancePrice",
+            "price",
+        )
+    )
+    mkt = _f(pick("marketPrice", "market_price", "currentPrice", "last", "current_price"))
+    mv = _f(
+        pick(
+            "marketValue",
+            "market_value",
+            "currentValue",
+            "currentValueRub",
+            "current_value",
+            "value",
+            "amount",
+        )
+    )
+    cost = _f(
+        pick(
+            "costValue",
+            "cost_value",
+            "balanceValue",
+            "balanceValueRub",
+            "invested",
+        )
+    )
+    pnl = _f(pick("profitLoss", "profit_loss", "pnl", "unrealizedPnl", "unrealizedPL"))
+    pnl_pct = _f(
+        pick("profitLossPct", "profit_loss_pct", "pnlPct", "pnl_pct", "unrealizedPercentPL")
+    )
     if cost is None and qty is not None and avg is not None:
         cost = qty * avg
     if mv is None and qty is not None and mkt is not None:
@@ -337,12 +687,27 @@ def _row_to_holding(row: dict) -> Holding:
     if pnl_pct is None and pnl is not None and cost not in (None, 0):
         pnl_pct = (pnl / cost) * 100.0
 
+    ticker = _s(pick("ticker", "secCode", "sec_code", "symbol", "baseAssetTicker"))
+    isin = _s(pick("isin", "ISIN"))
+    if not isin and ticker.upper().startswith("RU000"):
+        isin = ticker
+
+    sec_code = _s(pick("secCode", "sec_code"))
+    class_code = _s(pick("classCode", "class_code", "board"))
+    name = _s(pick("name", "displayName", "shortName", "short_name", "secName"))
+    asset_class = classify_asset_class(
+        ticker=ticker,
+        sec_code=sec_code,
+        isin=isin,
+        class_code=class_code,
+        name=name,
+    )
     return Holding(
-        ticker=_s(pick("ticker", "secCode", "sec_code", "symbol")),
-        isin=_s(pick("isin", "ISIN")),
-        sec_code=_s(pick("secCode", "sec_code")),
-        class_code=_s(pick("classCode", "class_code", "board")),
-        name=_s(pick("name", "shortName", "short_name", "secName")),
+        ticker=ticker,
+        isin=isin,
+        sec_code=sec_code,
+        class_code=class_code,
+        name=name,
         quantity=qty,
         avg_price=avg,
         market_price=mkt,
@@ -351,7 +716,24 @@ def _row_to_holding(row: dict) -> Holding:
         pnl=pnl,
         pnl_pct=pnl_pct,
         currency=_s(pick("currency", "currencyId", "faceUnit")) or "RUB",
+        asset_class=asset_class,
     )
+
+
+def _dedupe_holdings(holdings: list[Holding]) -> list[Holding]:
+    """BCS portfolio list often repeats the same row 4× (same account)."""
+    seen: dict[tuple[str, str, str], Holding] = {}
+    order: list[tuple[str, str, str]] = []
+    for h in holdings:
+        key = (
+            (h.ticker or h.sec_code or h.isin).upper(),
+            (h.class_code or "").upper(),
+            (h.currency or "RUB").upper(),
+        )
+        if key not in seen:
+            seen[key] = h
+            order.append(key)
+    return [seen[k] for k in order]
 
 
 def _parse_portfolio(raw: Any) -> list[Holding]:
@@ -361,7 +743,7 @@ def _parse_portfolio(raw: Any) -> list[Holding]:
         h = _row_to_holding(row)
         if h.ticker or h.isin or h.sec_code:
             out.append(h)
-    return out
+    return _dedupe_holdings(out)
 
 
 def _parse_summary(raw: Any) -> dict[str, Any]:
@@ -382,6 +764,170 @@ def _parse_summary(raw: Any) -> dict[str, Any]:
         "pnl_pct": _f(lower.get("profitlosspct") or lower.get("pnl_pct")),
         "currency": _s(lower.get("currency")) or "RUB",
     }
+
+
+def _walk_deals(node: Any) -> list[dict]:
+    """Find list-of-dicts that look like executed deals."""
+    if isinstance(node, list):
+        if node and isinstance(node[0], dict):
+            sample = node[0]
+            keys = {k.lower() for k in sample}
+            if keys & {
+                "dealid",
+                "deal_id",
+                "tradeid",
+                "trade_id",
+                "tradenum",
+                "trade_num",
+                "executedat",
+                "executed_at",
+                "tradedatetime",
+                "trade_date_time",
+                "side",
+                "volume",
+                "commission",
+                "tradequantity",
+            } or (
+                ("ticker" in keys or "seccode" in keys or "sec_code" in keys)
+                and (
+                    "price" in keys
+                    or "quantity" in keys
+                    or "qty" in keys
+                    or "tradequantity" in keys
+                )
+            ):
+                return [x for x in node if isinstance(x, dict)]
+        found: list[dict] = []
+        for item in node:
+            found.extend(_walk_deals(item))
+        return found
+    if isinstance(node, dict):
+        for key in (
+            "deals",
+            "Deals",
+            "trades",
+            "Trades",
+            "records",
+            "operations",
+            "items",
+            "data",
+            "content",
+        ):
+            if key in node:
+                found = _walk_deals(node[key])
+                if found:
+                    return found
+        for v in node.values():
+            if isinstance(v, (dict, list)):
+                found = _walk_deals(v)
+                if found:
+                    return found
+    return []
+
+
+def _side_norm(val: Any) -> str:
+    s = _s(val).lower()
+    if s in ("b", "buy", "покупка", "1"):
+        return "buy"
+    if s in ("s", "sell", "продажа", "2"):
+        return "sell"
+    return s
+
+
+def _dt_str(val: Any) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, (int, float)):
+        # ms vs sec epoch heuristic
+        ts = float(val)
+        if ts > 1e12:
+            ts /= 1000.0
+        try:
+            return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ts))
+        except (OverflowError, OSError, ValueError):
+            return str(val)
+    return _s(val)
+
+
+def _row_to_operation(row: dict) -> Operation:
+    lower = {str(k).lower(): v for k, v in row.items()}
+
+    def pick(*names: str) -> Any:
+        for n in names:
+            if n.lower() in lower:
+                return lower[n.lower()]
+        return None
+
+    qty = _f(
+        pick(
+            "tradeQuantity",
+            "trade_quantity",
+            "quantity",
+            "qty",
+            "lots",
+            "tradeQuantityLots",
+            "amount",
+        )
+    )
+    price = _f(pick("price", "dealPrice", "deal_price", "avgPrice"))
+    volume = _f(pick("volume", "sum", "value", "amountRub", "amount_rub"))
+    if volume is None and qty is not None and price is not None:
+        volume = qty * price
+
+    return Operation(
+        deal_id=_s(
+            pick(
+                "tradeNum",
+                "trade_num",
+                "dealId",
+                "deal_id",
+                "id",
+                "tradeId",
+                "trade_id",
+            )
+        ),
+        ticker=_s(pick("ticker", "secCode", "sec_code", "symbol")),
+        class_code=_s(pick("classCode", "class_code", "board")),
+        side=_side_norm(pick("side", "direction", "buySell", "buy_sell")),
+        quantity=qty,
+        price=price,
+        volume=volume,
+        commission=_f(pick("commission", "fee", "brokerFee")),
+        currency=_s(
+            pick(
+                "settlementCurrency",
+                "priceCurrency",
+                "currency",
+                "currencyId",
+                "faceUnit",
+            )
+        )
+        or "RUB",
+        executed_at=_dt_str(
+            pick(
+                "tradeDateTime",
+                "trade_date_time",
+                "executedAt",
+                "executed_at",
+                "dateTime",
+                "datetime",
+                "date",
+                "time",
+            )
+        ),
+    )
+
+
+def _parse_deals(raw: Any) -> list[Operation]:
+    rows = _walk_deals(raw)
+    out: list[Operation] = []
+    for row in rows:
+        op = _row_to_operation(row)
+        if op.ticker or op.deal_id or op.executed_at:
+            out.append(op)
+    # newest first when ISO-ish timestamps present
+    out.sort(key=lambda o: o.executed_at or "", reverse=True)
+    return out
 
 
 def _merge_limits(holdings: list[Holding], limits: Any) -> list[Holding]:

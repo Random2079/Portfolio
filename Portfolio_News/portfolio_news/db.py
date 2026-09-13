@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 
@@ -38,6 +38,77 @@ class NewsItem(Base):
     notified: Mapped[int] = mapped_column(Integer, default=0)  # 0/1
 
     ticker: Mapped[Ticker] = relationship(back_populates="news")
+
+
+class BcsOperation(Base):
+    """Cached BCS deal (K2). Primary key = broker deal_id or fingerprint."""
+
+    __tablename__ = "bcs_operations"
+
+    deal_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(64), default="", index=True)
+    class_code: Mapped[str] = mapped_column(String(32), default="")
+    side: Mapped[str] = mapped_column(String(16), default="")
+    quantity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    commission: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    currency: Mapped[str] = mapped_column(String(16), default="RUB")
+    executed_at: Mapped[str] = mapped_column(String(64), default="", index=True)
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class TickerFocus(Base):
+    """KB: tickers marked Focus (остальные = Hold по умолчанию)."""
+
+    __tablename__ = "ticker_focus"
+
+    ticker_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+
+class DaySnapshot(Base):
+    """KA: last computed day attribution (UI reads this; MOEX updates in background)."""
+
+    __tablename__ = "day_snapshot"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # singleton = 1
+    payload_json: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
+    ok: Mapped[int] = mapped_column(Integer, default=0)  # 0/1
+
+
+class CalendarCache(Base):
+    """K7: last built payout calendar (UI reads this; MOEX only in background)."""
+
+    __tablename__ = "calendar_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # singleton = 1
+    payload_json: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
+    ok: Mapped[int] = mapped_column(Integer, default=0)  # 0/1
+
+
+class CapitalDay(Base):
+    """K6: one portfolio total per local calendar day (Asia/Yekaterinburg)."""
+
+    __tablename__ = "capital_days"
+
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)  # YYYY-MM-DD
+    total_value: Mapped[float] = mapped_column(Float, default=0.0)
+    cash: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    currency: Mapped[str] = mapped_column(String(16), default="RUB")
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class MoexClose(Base):
+    """K6: cached MOEX close per (ticker, day). Survives ISS timeouts across rebuilds."""
+
+    __tablename__ = "moex_closes"
+
+    ticker: Mapped[str] = mapped_column(String(64), primary_key=True)
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)  # candle date
+    close: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
 
 
 def make_engine(database_url: str):

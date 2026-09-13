@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KPI · варианты шрифта подписи</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Manrope:wght@500;600;700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #e8ecf1;
+      --card: #ffffff;
+      --text: #1a2330;
+      --muted: #6b7a8c;
+      --border: #d8dee8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 1.25rem 1rem 2.5rem;
+    }
+    h1 { font-size: 1.15rem; margin: 0 0 0.35rem; }
+    .hint { color: var(--muted); font-size: 0.88rem; margin: 0 0 1.25rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+      gap: 0.85rem;
+      max-width: 920px;
+    }
+    .opt {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 0.75rem 0.85rem 0.9rem;
+    }
+    .opt .tag {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #2f6fed;
+      margin-bottom: 0.55rem;
+    }
+    .kpi-demo {
+      background: #f7f9fc;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0.75rem 0.85rem;
+    }
+    .k { color: var(--muted); font-size: 0.75rem; font-weight: 600; }
+    .v {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-top: 0.25rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .s { margin-top: 0.35rem; color: var(--muted); }
+    /* A — как сейчас */
+    .a .s { font-size: 0.8rem; font-family: "Segoe UI", system-ui, sans-serif; }
+    /* B — мельче + letter-spacing */
+    .b .s {
+      font-size: 0.72rem;
+      letter-spacing: 0.02em;
+      font-weight: 500;
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+    /* C — tabular mono counts vibe via JetBrains */
+    .c .s {
+      font-size: 0.72rem;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+    }
+    /* D — Manrope */
+    .d .s {
+      font-size: 0.78rem;
+      font-family: Manrope, system-ui, sans-serif;
+      font-weight: 600;
+    }
+    /* E — IBM Plex */
+    .e .s {
+      font-size: 0.78rem;
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      font-weight: 500;
+    }
+    /* F — Source Sans 3 uppercase tiny */
+    .f .s {
+      font-size: 0.65rem;
+      font-family: "Source Sans 3", system-ui, sans-serif;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    /* G — muted stronger contrast */
+    .g .s {
+      font-size: 0.8rem;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: #3d4a5c;
+      font-weight: 600;
+    }
+    /* H — very soft */
+    .h .s {
+      font-size: 0.75rem;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-weight: 400;
+      opacity: 0.85;
+    }
+  </style>
+</head>
+<body>
+  <h1>Подпись под «Позиций» — шрифт глазами</h1>
+  <p class="hint">Один и тот же текст. Выбери букву A–H и скажи какую ставить в дашборд.</p>
+  <div class="grid">
+    <div class="opt a">
+      <div class="tag">A · сейчас</div>
+      <div class="kpi-demo">
+        <div class="k">Позиций</div>
+        <div class="v">48</div>
+        <div class="s">акц 12 · облиг 30 · фонд 6</div>
+      </div>
+    </div>
+    <div class="opt b">
+      <div class="tag">B · мельче / трекинг</div>
+      <div class="kpi-demo">
+        <div class="k">Позиций</div>
+        <div class="v">48</div>
+        <div class="s">акц 12 · облиг 30 · фонд 6</div>
+      </div>
+    </div>
+    <div class="opt c">
+      <div class="tag">C · mono</div>
+      <div class="kpi-demo">
+        <div class="k">Позиций</div>
+        <div class="v">48</div>
+        <div class="s">акц 12 · облиг 30 · фонд 6</div>
+      </div>
+    </div>
+    <div class="opt d">
+      <div class="tag">D · Manrope</div>
+      <div class="kpi-demo">
+        <div class="k">Позиций</div>
+        <div class="v">48</div>
+        <div class="s">акц 12 · облиг 30 · фонд 6</div>
+      </div>
+    </div>
+    <div class="opt e">
+      <div class="tag">E · IBM Plex</div>
+      <div class="kpi-demo">
+        <div class="k">Позиций</div>
+        <div class="v">48</div>
+        <div class="s">акц 12 · облиг 30 · фонд 6</div>
+      </div>
+    </div>
+    <div class="opt f">
+      <div class="tag">F · caps мелкий</div>
+      <div class="kpi-demo">
+        <div class="k">Позиций</div>
+        <div class="v">48</div>
+        <div class="s">акц 12 · облиг 30 · фонд 6</div>
+      </div>
+    </div>
+    <div class="opt g">
+      <div class="tag">G · жирнее / темнее</div>
+      <div class="kpi-demo">
+        <div class="k">Позиций</div>
+        <div class="v">48</div>
+        <div class="s">акц 12 · облиг 30 · фонд 6</div>
+      </div>
+    </div>
+    <div class="opt h">
+      <div class="tag">H · мягче</div>
+      <div class="kpi-demo">
+        <div class="k">Позиций</div>
+        <div class="v">48</div>
+        <div class="s">акц 12 · облиг 30 · фонд 6</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

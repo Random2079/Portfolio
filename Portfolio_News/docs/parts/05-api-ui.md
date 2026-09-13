@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Код** | [`api.py`](../../portfolio_news/api.py) · [`static/index.html`](../../portfolio_news/static/index.html) |
+| **Код** | [`api.py`](../../portfolio_news/api.py) · [`static/dashboard-demo.html`](../../portfolio_news/static/dashboard-demo.html) |
 | **Слой** | A–D ✅ · E ⬜ |
 | **Статус** | 🟡 (polish UI) |
 | **Навигация** | [INDEX](INDEX.md) · [TZ](../TZ.md) |
@@ -13,9 +13,11 @@
 - `POST /api/poll` + `GET /api/poll/status`
 - `GET /api/metrics`, `/api/dividends`, `/api/coupons`
 - `GET /api/holdings`, `/api/holdings/status`
+- `GET /api/day` (KA), `GET|PUT /api/focus` (KB)
+- `GET /api/chart/{ticker}` (K3), `GET /api/position/{ticker}` (K4)
 
-UI вкладки: Лента / Котировки / Дивы / Купоны / Позиции БКС.  
-«Искать новости» шлёт **текущий** фильтр/тикер.
+UI: Snowball-дашборд на `/` (карточки позиций, сделки, лента новостей).  
+Poll новостей — через CLI (`once` / `poll`) или `POST /api/poll`.
 
 ## Ещё не сделано (слой E)
 

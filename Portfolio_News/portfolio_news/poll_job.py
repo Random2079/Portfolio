@@ -99,6 +99,7 @@ def start_poll_job(
     limit: int = 0,
     notify: str = "digest",
     force: bool = False,
+    bcs_only: bool = True,
 ) -> dict[str, Any]:
     """Start background poll; returns immediately. Rejects if already running unless force."""
     global _thread, _cancel_requested
@@ -147,13 +148,19 @@ def start_poll_job(
                     category=category,
                     on_progress=_on_progress,
                     should_cancel=_should_cancel,
+                    bcs_only=bcs_only,
                 )
             cancelled = bool(result.get("cancelled"))
+            scope_err = (result.get("scope_error") or "").strip()
             _set_status(
                 running=False,
                 done=True,
                 result=result,
-                error="cancelled" if cancelled else "",
+                error=(
+                    "cancelled"
+                    if cancelled
+                    else (scope_err if scope_err and not result.get("tickers") else "")
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             _set_status(running=False, done=True, error=str(exc), result=None)
