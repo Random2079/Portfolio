@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Crypto DOM — Chart Sandbox</title>
+  <style>
+    :root {
+      --bg: #0b0e11;
+      --panel: #12161c;
+      --text: #e8eaed;
+      --muted: #8b949e;
+      --bid: #26a69a;
+      --ask: #ef5350;
+      --accent: #f0b90b;
+      --border: #222831;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+    h1 { font-size: 1rem; margin: 0; }
+    a { color: var(--accent); }
+    label { font-size: 0.85rem; color: var(--muted); display: flex; gap: 0.35rem; align-items: center; }
+    input, select, button {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.35rem 0.55rem;
+      border-radius: 4px;
+    }
+    button {
+      background: var(--accent);
+      color: #111;
+      border: none;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #meta { margin-left: auto; font-size: 0.85rem; color: var(--muted); }
+    #meta.err { color: var(--ask); }
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 220px 1fr;
+      gap: 0;
+      min-height: 0;
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0.75rem;
+    }
+    .col h2 {
+      margin: 0 0 0.5rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .col.asks h2 { color: var(--ask); text-align: right; }
+    .col.bids h2 { color: var(--bid); }
+    .mid {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      border-left: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      padding: 0.5rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .mid .px { font-size: 1.25rem; font-weight: 700; color: var(--accent); }
+    .mid .sp { font-size: 0.8rem; color: var(--muted); }
+    .book {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.82rem;
+    }
+    .book li {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.25rem;
+      padding: 0.12rem 0.25rem;
+      position: relative;
+    }
+    .asks .book li { direction: rtl; }
+    .asks .book li > * { direction: ltr; text-align: right; }
+    .bar {
+      position: absolute;
+      inset: 0;
+      opacity: 0.18;
+      pointer-events: none;
+    }
+    .asks .bar { background: var(--ask); right: 0; left: auto; }
+    .bids .bar { background: var(--bid); left: 0; right: auto; }
+    .note {
+      padding: 0.5rem 1rem 1rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Crypto DOM</h1>
+    <a href="/">← MOEX chart</a>
+    <label>Symbol
+      <input id="symbol" type="text" value="BTCUSDT" maxlength="20" />
+    </label>
+    <label>Depth
+      <select id="limit">
+        <option value="20">20</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <label><input id="live" type="checkbox" checked /> Live poll</label>
+    <button id="refresh" type="button">Refresh</button>
+    <span id="meta">…</span>
+  </header>
+  <main>
+    <div class="col asks">
+      <h2>Asks (sell) — ликва сверху</h2>
+      <ul class="book" id="asks"></ul>
+    </div>
+    <div class="mid">
+      <div class="px" id="mid">—</div>
+      <div class="sp" id="spread">spread —</div>
+      <div class="sp" id="venue">binance_usdm</div>
+    </div>
+    <div class="col bids">
+      <h2>Bids (buy) — ликва снизу</h2>
+      <ul class="book" id="bids"></ul>
+    </div>
+  </main>
+  <p class="note">
+    Публичный стакан Binance USDT-M futures (L2 depth). Это <strong>лимитные</strong> заявки в книге —
+    не карта чужих стоп-лоссов. Обновление ~1 с при Live. Для фьючей, не для SBER/MOEX.
+  </p>
+  <script>
+    const meta = document.getElementById("meta");
+    const asksEl = document.getElementById("asks");
+    const bidsEl = document.getElementById("bids");
+    let timer = null;
+
+    function rowHtml(side, lv, maxCum) {
+      const w = maxCum > 0 ? Math.min(100, (lv.cum / maxCum) * 100) : 0;
+      return `<li>
+        <span class="bar" style="width:${w}%"></span>
+        <span>${lv.price}</span>
+        <span>${lv.qty}</span>
+        <span>${lv.cum.toFixed(4)}</span>
+      </li>`;
+    }
+
+    async function loadBook() {
+      const symbol = document.getElementById("symbol").value.trim().toUpperCase() || "BTCUSDT";
+      const limit = document.getElementById("limit").value;
+      meta.textContent = "загрузка…";
+      meta.className = "";
+      try {
+        const r = await fetch(`/api/crypto/orderbook/${encodeURIComponent(symbol)}?limit=${limit}`);
+        const d = await r.json();
+        if (!d.ok) {
+          meta.textContent = d.error || "error";
+          meta.className = "err";
+          return;
+        }
+        const asks = (d.asks || []).slice().reverse(); // far → near visually top
+        const bids = d.bids || [];
+        const maxCum = Math.max(
+          0,
+          ...asks.map((x) => x.cum || 0),
+          ...bids.map((x) => x.cum || 0)
+        );
+        asksEl.innerHTML = asks.map((lv) => rowHtml("ask", lv, maxCum)).join("");
+        bidsEl.innerHTML = bids.map((lv) => rowHtml("bid", lv, maxCum)).join("");
+        document.getElementById("mid").textContent =
+          d.mid != null ? Number(d.mid).toFixed(2) : "—";
+        document.getElementById("spread").textContent =
+          d.spread != null ? `spread ${Number(d.spread).toFixed(2)}` : "spread —";
+        document.getElementById("venue").textContent = `${d.venue} · ${d.symbol}`;
+        meta.textContent = `ok · updateId ${d.lastUpdateId || "—"} · ${new Date().toLocaleTimeString()}`;
+      } catch (e) {
+        meta.textContent = String(e);
+        meta.className = "err";
+      }
+    }
+
+    function syncLive() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+      if (document.getElementById("live").checked) {
+        timer = setInterval(loadBook, 1000);
+      }
+    }
+
+    document.getElementById("refresh").addEventListener("click", loadBook);
+    document.getElementById("live").addEventListener("change", syncLive);
+    document.getElementById("symbol").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") loadBook();
+    });
+    loadBook();
+    syncLive();
+  </script>
+</body>
+</html>

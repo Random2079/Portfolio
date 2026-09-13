@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chart Sandbox</title>
+  <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    :root {
+      --bg: #0b0e11;
+      --panel: #12161c;
+      --text: #e8eaed;
+      --muted: #8b949e;
+      --accent: #2962ff;
+      --border: #222831;
+      --auto-on: #26a69a;
+      --auto-off: #3d4450;
+      --replay: #f57c00;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      flex: 0 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0 0.5rem 0 0;
+      letter-spacing: 0.02em;
+    }
+    label { font-size: 0.85rem; color: var(--muted); display: flex; align-items: center; gap: 0.35rem; }
+    input[type="text"], input[type="number"], select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.35rem 0.5rem;
+      border-radius: 4px;
+      width: 6.5rem;
+    }
+    select { width: auto; }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 0.4rem 0.9rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    button.ghost { background: var(--auto-off); }
+    #autoBtn.on { background: var(--auto-on); }
+    #autoBtn.off { background: var(--auto-off); }
+    #liqBtn.on { background: #7e57c2; }
+    #status { font-size: 0.85rem; color: var(--muted); margin-left: auto; }
+    #status.err { color: #ef5350; }
+    #status.stale { color: #ffb74d; }
+    #charts {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      position: relative;
+    }
+    /* TV-like vertical playhead (cutoff / «где останавливается время») */
+    #playheadLine {
+      display: none;
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 0;
+      z-index: 5;
+      pointer-events: none;
+      border-left: 2px solid #2962ff;
+      box-shadow: 0 0 0 1px rgba(41, 98, 255, 0.25);
+    }
+    #playheadLine::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: -5px;
+      width: 10px;
+      height: 10px;
+      background: #2962ff;
+      border-radius: 2px;
+      transform: rotate(45deg);
+    }
+    #playheadLine .playhead-label {
+      position: absolute;
+      top: 14px;
+      left: 8px;
+      padding: 2px 6px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #fff;
+      background: #2962ff;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+    #chart {
+      flex: 7 1 0;
+      min-height: 200px;
+      width: 100%;
+    }
+    #rsiWrap {
+      flex: 3 1 0;
+      min-height: 160px;
+      width: 100%;
+      border-top: 1px solid var(--border);
+      position: relative;
+    }
+    #rsiLabel {
+      position: absolute;
+      top: 6px;
+      left: 10px;
+      z-index: 2;
+      font-size: 0.75rem;
+      color: var(--muted);
+      pointer-events: none;
+    }
+    #rsi {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+    /* TV-like replay control bar */
+    #replayBar {
+      display: none;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      padding: 0.55rem 1rem;
+      background: #161b22;
+      border-top: 1px solid var(--border);
+    }
+    #replayBar.open { display: flex; }
+    #replayBar .hint { color: var(--muted); font-size: 0.8rem; }
+    #replayBar .date { font-variant-numeric: tabular-nums; min-width: 6.5rem; }
+    #replayScrub {
+      flex: 1 1 160px;
+      min-width: 120px;
+      accent-color: var(--replay);
+    }
+    #replayBar button.icon {
+      min-width: 2.2rem;
+      padding: 0.35rem 0.55rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Chart Sandbox</h1>
+    <label>Тикер <input id="ticker" type="text" value="SBER" maxlength="12" /></label>
+    <label>Дней <input id="days" type="number" value="365" min="1" max="5000" /></label>
+    <label><input id="force" type="checkbox" /> Force refresh</label>
+    <button id="load" type="button">Load</button>
+    <button id="autoBtn" type="button" class="on" title="Вписать бары в экран + авто-шкала цены. Выключается при ручном сдвиге шкалы.">Auto: ON</button>
+    <button id="replayBtn" type="button" class="ghost" title="Bar Replay как у TradingView: скрыть будущее, Play/шаг">Replay</button>
+    <button id="liqBtn" type="button" class="ghost" title="Оценка зон ликвидности/стопов по свингам (не стакан)">Liq</button>
+    <a href="/crypto" style="color:#f0b90b;font-size:0.85rem;font-weight:600;">Crypto DOM</a>
+    <span id="status">готово</span>
+  </header>
+  <div id="charts">
+    <div id="chart"></div>
+    <div id="rsiWrap">
+      <div id="rsiLabel">RSI(14) · SMA(14)</div>
+      <div id="rsi"></div>
+    </div>
+    <div id="playheadLine" aria-hidden="true"><span class="playhead-label" id="playheadLabel"></span></div>
+  </div>
+  <div id="replayBar" aria-label="Bar Replay">
+    <span class="hint" id="replayHint">клик по свече = старт</span>
+    <button id="replayBack" class="icon ghost" type="button" title="Шаг назад">◀</button>
+    <button id="replayPlay" class="icon" type="button" title="Play / Pause (Shift+↓)">▶</button>
+    <button id="replayFwd" class="icon ghost" type="button" title="Шаг вперёд (Shift+→)">▶|</button>
+    <label>Скорость
+      <select id="replaySpeed">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+      </select>
+    </label>
+    <input id="replayScrub" type="range" min="0" max="0" value="0" />
+    <span class="date" id="replayDate">—</span>
+    <button id="replayExit" class="ghost" type="button" title="К полным данным (как Jump to real-time)">Exit</button>
+  </div>
+  <script>
+    const el = document.getElementById("chart");
+    const rsiEl = document.getElementById("rsi");
+    const statusEl = document.getElementById("status");
+    const autoBtn = document.getElementById("autoBtn");
+    const replayBtn = document.getElementById("replayBtn");
+    const replayBar = document.getElementById("replayBar");
+    const replayPlay = document.getElementById("replayPlay");
+    const replayScrub = document.getElementById("replayScrub");
+    const replayDate = document.getElementById("replayDate");
+    const replayHint = document.getElementById("replayHint");
+    const replaySpeed = document.getElementById("replaySpeed");
+    const liqBtn = document.getElementById("liqBtn");
+    const playheadLine = document.getElementById("playheadLine");
+    const playheadLabel = document.getElementById("playheadLabel");
+
+    let autoFit = true;
+    let needsInitialFit = false;
+    let syncingRange = false;
+    const DASHED = (LightweightCharts.LineStyle && LightweightCharts.LineStyle.Dashed) || 2;
+
+    /** Full series in memory; chart shows slice when Replay active (TV Bar Replay). */
+    let allCandles = [];
+    let allMarkers = [];
+    let liqOn = false;
+    /** @type {any[]} */
+    let liqPriceLines = [];
+    const replay = {
+      active: false,
+      playing: false,
+      index: 0,
+      timer: null,
+      baseMs: 450,
+    };
+
+    const chart = LightweightCharts.createChart(el, {
+      layout: {
+        background: { color: "#0b0e11" },
+        textColor: "#c8cdd3",
+      },
+      grid: {
+        vertLines: { color: "#1a1f27" },
+        horzLines: { color: "#1a1f27" },
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: {
+        borderColor: "#2a313c",
+        autoScale: true,
+        scaleMargins: { top: 0.1, bottom: 0.08 },
+      },
+      timeScale: { borderColor: "#2a313c", timeVisible: false },
+    });
+
+    const series = chart.addCandlestickSeries({
+      priceScaleId: "right",
+      upColor: "#26a69a",
+      downColor: "#ef5350",
+      borderVisible: false,
+      wickUpColor: "#26a69a",
+      wickDownColor: "#ef5350",
+    });
+
+    const rsiChart = LightweightCharts.createChart(rsiEl, {
+      layout: {
+        background: { color: "#0b0e11" },
+        textColor: "#c8cdd3",
+      },
+      grid: {
+        vertLines: { color: "#1a1f27" },
+        horzLines: { color: "#1a1f27" },
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: {
+        borderColor: "#2a313c",
+        autoScale: true,
+        scaleMargins: { top: 0.12, bottom: 0.12 },
+      },
+      handleScroll: false,
+      handleScale: false,
+      timeScale: { borderColor: "#2a313c", timeVisible: true },
+    });
+
+    const rsiSeries = rsiChart.addLineSeries({
+      color: "#ab47bc",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true,
+      autoscaleInfoProvider: () => ({
+        priceRange: { minValue: 0, maxValue: 100 },
+      }),
+    });
+    const rsiMaSeries = rsiChart.addLineSeries({
+      color: "#ffee58",
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true,
+      autoscaleInfoProvider: () => ({
+        priceRange: { minValue: 0, maxValue: 100 },
+      }),
+    });
+
+    [
+      { price: 70, color: "rgba(140,150,170,0.85)" },
+      { price: 50, color: "rgba(140,150,170,0.4)" },
+      { price: 30, color: "rgba(140,150,170,0.85)" },
+    ].forEach((lvl) => {
+      rsiSeries.createPriceLine({
+        price: lvl.price,
+        color: lvl.color,
+        lineWidth: 1,
+        lineStyle: DASHED,
+        axisLabelVisible: true,
+        title: "",
+      });
+    });
+
+    function setAutoFit(on) {
+      autoFit = !!on;
+      autoBtn.textContent = autoFit ? "Auto: ON" : "Auto: OFF";
+      autoBtn.classList.toggle("on", autoFit);
+      autoBtn.classList.toggle("off", !autoFit);
+      if (autoFit) series.priceScale().applyOptions({ autoScale: true });
+    }
+
+    function lockRsiScale() {
+      try {
+        rsiChart.priceScale("right").applyOptions({ autoScale: true });
+      } catch (_) { /* empty */ }
+    }
+
+    function fitToScreen() {
+      series.priceScale().applyOptions({ autoScale: true });
+      syncingRange = true;
+      try {
+        chart.timeScale().fitContent();
+        const tr = chart.timeScale().getVisibleRange();
+        if (tr) {
+          try {
+            rsiChart.timeScale().setVisibleRange(tr);
+          } catch (_) {
+            rsiChart.timeScale().fitContent();
+          }
+        } else {
+          rsiChart.timeScale().fitContent();
+        }
+      } finally {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            syncingRange = false;
+          });
+        });
+      }
+      lockRsiScale();
+    }
+
+    function resizeAll() {
+      const cw = el.clientWidth;
+      const ch = el.clientHeight;
+      if (cw > 0 && ch > 0) chart.applyOptions({ width: cw, height: ch });
+      const rw = rsiEl.clientWidth;
+      const rh = rsiEl.clientHeight;
+      if (rw > 0 && rh > 0) rsiChart.applyOptions({ width: rw, height: rh });
+    }
+
+    function rangeKey(r) {
+      if (!r || r.from == null || r.to == null) return "";
+      return `${r.from}|${r.to}`;
+    }
+
+    function syncPriceToRsi() {
+      if (syncingRange) return;
+      const range = chart.timeScale().getVisibleRange();
+      if (!range || range.from == null || range.to == null) return;
+      if (rangeKey(range) === rangeKey(rsiChart.timeScale().getVisibleRange())) return;
+      syncingRange = true;
+      try {
+        rsiChart.timeScale().setVisibleRange(range);
+      } catch (_) { /* out of data */ }
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          syncingRange = false;
+        });
+      });
+    }
+
+    chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+      syncPriceToRsi();
+      updatePlayheadLine();
+    });
+
+    function maybePriceScaleGesture(clientX) {
+      if (!autoFit) return;
+      const rect = el.getBoundingClientRect();
+      if (clientX >= rect.right - 72) setAutoFit(false);
+    }
+    el.addEventListener("wheel", (e) => maybePriceScaleGesture(e.clientX), { passive: true });
+    el.addEventListener("pointerdown", (e) => maybePriceScaleGesture(e.clientX));
+
+    new ResizeObserver(() => {
+      resizeAll();
+      if (needsInitialFit && autoFit && el.clientWidth > 0 && el.clientHeight > 0) {
+        needsInitialFit = false;
+        fitToScreen();
+      }
+      updatePlayheadLine();
+    }).observe(document.getElementById("charts"));
+    window.addEventListener("resize", resizeAll);
+    resizeAll();
+
+    autoBtn.addEventListener("click", () => {
+      setAutoFit(!autoFit);
+      if (autoFit) fitToScreen();
+    });
+    setAutoFit(true);
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = cls || "";
+    }
+
+    function calcRsi(candles, period = 14) {
+      const byTime = new Map();
+      if (candles.length < period + 1) return byTime;
+      let avgGain = 0;
+      let avgLoss = 0;
+      for (let i = 1; i <= period; i++) {
+        const d = candles[i].close - candles[i - 1].close;
+        if (d >= 0) avgGain += d;
+        else avgLoss -= d;
+      }
+      avgGain /= period;
+      avgLoss /= period;
+      const rsiAt = (g, l) => (l === 0 ? 100 : 100 - 100 / (1 + g / l));
+      byTime.set(candles[period].time, rsiAt(avgGain, avgLoss));
+      for (let i = period + 1; i < candles.length; i++) {
+        const d = candles[i].close - candles[i - 1].close;
+        const gain = d > 0 ? d : 0;
+        const loss = d < 0 ? -d : 0;
+        avgGain = (avgGain * (period - 1) + gain) / period;
+        avgLoss = (avgLoss * (period - 1) + loss) / period;
+        byTime.set(candles[i].time, rsiAt(avgGain, avgLoss));
+      }
+      return byTime;
+    }
+
+    function setRsiData(candles) {
+      const period = 14;
+      const rsiMap = calcRsi(candles, period);
+      const times = candles.map((c) => c.time);
+      const rsiLine = [];
+      for (const t of times) {
+        if (rsiMap.has(t)) rsiLine.push({ time: t, value: rsiMap.get(t) });
+      }
+      const maLine = [];
+      const buf = [];
+      for (const p of rsiLine) {
+        buf.push(p.value);
+        if (buf.length > period) buf.shift();
+        if (buf.length === period) {
+          const sum = buf.reduce((a, b) => a + b, 0);
+          maLine.push({ time: p.time, value: sum / period });
+        }
+      }
+      rsiSeries.setData(rsiLine);
+      rsiMaSeries.setData(maLine);
+      resizeAll();
+      lockRsiScale();
+    }
+
+    /** OHLC swing liquidity estimate (same idea as app/liquidity.py). Not order book. */
+    function detectSwings(candles, left = 3, right = 3) {
+      const n = candles.length;
+      const out = [];
+      if (n < left + right + 1) return out;
+      for (let i = left; i < n - right; i++) {
+        const hi = candles[i].high;
+        const lo = candles[i].low;
+        let isHigh = true;
+        let isLow = true;
+        for (let j = i - left; j <= i + right; j++) {
+          if (j === i) continue;
+          if (candles[j].high >= hi) isHigh = false;
+          if (candles[j].low <= lo) isLow = false;
+        }
+        if (isHigh) out.push({ time: candles[i].time, price: hi, kind: "high", index: i });
+        if (isLow) out.push({ time: candles[i].time, price: lo, kind: "low", index: i });
+      }
+      return out;
+    }
+
+    function clusterLevels(swings, kind, tolPct = 0.003) {
+      const pts = swings.filter((s) => s.kind === kind).sort((a, b) => a.price - b.price);
+      const pools = [];
+      if (!pts.length) return pools;
+      let cur = [pts[0]];
+      const flush = () => {
+        if (cur.length < 2) return;
+        const avg = cur.reduce((s, x) => s + x.price, 0) / cur.length;
+        pools.push({
+          kind: kind === "high" ? "equal_high" : "equal_low",
+          price: avg,
+          count: cur.length,
+          side: kind === "high" ? "stops_above" : "stops_below",
+        });
+      };
+      for (let i = 1; i < pts.length; i++) {
+        const base = cur[0].price;
+        if (Math.abs(pts[i].price - base) / base <= tolPct) cur.push(pts[i]);
+        else {
+          flush();
+          cur = [pts[i]];
+        }
+      }
+      flush();
+      return pools;
+    }
+
+    function buildLiquidityMap(candles) {
+      const swings = detectSwings(candles);
+      const pools = clusterLevels(swings, "high").concat(clusterLevels(swings, "low"));
+      const zones = swings.map((s) => ({
+        time: s.time,
+        price: s.price,
+        side: s.kind === "high" ? "stops_above" : "stops_below",
+        label: s.kind === "high" ? "liq↑" : "liq↓",
+      }));
+      return { swings, pools, zones };
+    }
+
+    function clearLiqLines() {
+      for (const pl of liqPriceLines) {
+        try {
+          series.removePriceLine(pl);
+        } catch (_) { /* gone */ }
+      }
+      liqPriceLines = [];
+    }
+
+    function applyLiquidityOverlay(candles) {
+      clearLiqLines();
+      if (!liqOn || !candles.length) return [];
+      const map = buildLiquidityMap(candles);
+      // pooled levels as horizontal lines (TV-ish liquidity shelves)
+      for (const p of map.pools) {
+        const color = p.side === "stops_above" ? "rgba(239,83,80,0.85)" : "rgba(38,166,154,0.85)";
+        const pl = series.createPriceLine({
+          price: p.price,
+          color,
+          lineWidth: 1,
+          lineStyle: DASHED,
+          axisLabelVisible: true,
+          title: p.side === "stops_above" ? `eqH×${p.count}` : `eqL×${p.count}`,
+        });
+        liqPriceLines.push(pl);
+      }
+      // swing markers
+      return map.zones.map((z) => ({
+        time: z.time,
+        position: z.side === "stops_above" ? "aboveBar" : "belowBar",
+        color: z.side === "stops_above" ? "#ef5350" : "#26a69a",
+        shape: z.side === "stops_above" ? "arrowDown" : "arrowUp",
+        text: z.label,
+      }));
+    }
+
+    function setLiq(on) {
+      liqOn = !!on;
+      liqBtn.classList.toggle("on", liqOn);
+      liqBtn.textContent = liqOn ? "Liq: ON" : "Liq";
+      applyVisibleSlice({ fit: false });
+      if (liqOn) {
+        setStatus("Liq = оценка свингов/equal H-L, не стакан стопов");
+      }
+    }
+
+    liqBtn.addEventListener("click", () => setLiq(!liqOn));
+
+    function visibleCandles() {
+      if (!replay.active || !allCandles.length) return allCandles;
+      const i = Math.max(0, Math.min(replay.index, allCandles.length - 1));
+      return allCandles.slice(0, i + 1);
+    }
+
+    function stopReplayTimer() {
+      if (replay.timer) {
+        clearInterval(replay.timer);
+        replay.timer = null;
+      }
+      replay.playing = false;
+      replayPlay.textContent = "▶";
+    }
+
+    function updatePlayheadLine() {
+      if (!replay.active || !allCandles.length) {
+        playheadLine.style.display = "none";
+        return;
+      }
+      const t = allCandles[Math.max(0, Math.min(replay.index, allCandles.length - 1))].time;
+      const x = chart.timeScale().timeToCoordinate(t);
+      if (x == null || Number.isNaN(x)) {
+        playheadLine.style.display = "none";
+        return;
+      }
+      // line sits over both panes; x is relative to price chart canvas
+      playheadLine.style.display = "block";
+      playheadLine.style.left = `${Math.round(x)}px`;
+      playheadLabel.textContent = String(t);
+    }
+
+    function updateReplayChrome() {
+      const n = allCandles.length;
+      const i = Math.max(0, Math.min(replay.index, Math.max(0, n - 1)));
+      replayScrub.max = String(Math.max(0, n - 1));
+      replayScrub.value = String(i);
+      const dateStr = n ? allCandles[i].time : "—";
+      replayDate.textContent = dateStr;
+      replayHint.textContent = replay.active
+        ? `Replay ${i + 1}/${n} · синяя линия = cutoff`
+        : "клик по свече = старт";
+      replayBtn.classList.toggle("on", replay.active);
+      replayBtn.textContent = replay.active ? "Replay: ON" : "Replay";
+      replayBar.classList.toggle("open", replay.active);
+      if (replay.active && n) {
+        setStatus(`Replay · cutoff ${dateStr} · ${i + 1}/${n}`);
+      }
+      updatePlayheadLine();
+    }
+
+    function applyVisibleSlice(opts = {}) {
+      const slice = visibleCandles();
+      series.setData(slice);
+      setRsiData(slice);
+      const lastT = slice.length ? slice[slice.length - 1].time : null;
+      const userMarkers = lastT
+        ? allMarkers.filter((m) => String(m.time) <= String(lastT))
+        : [];
+      const liqMarkers = applyLiquidityOverlay(slice);
+      series.setMarkers(userMarkers.concat(liqMarkers));
+      updateReplayChrome();
+      if (opts.fit && autoFit) {
+        fitToScreen();
+      } else {
+        syncPriceToRsi();
+        if (autoFit) series.priceScale().applyOptions({ autoScale: true });
+      }
+      requestAnimationFrame(() => updatePlayheadLine());
+    }
+
+    function setPlayhead(index, opts = {}) {
+      if (!allCandles.length) return;
+      replay.index = Math.max(0, Math.min(index, allCandles.length - 1));
+      applyVisibleSlice(opts);
+    }
+
+    function stepReplay(delta) {
+      if (!replay.active || !allCandles.length) return;
+      setPlayhead(replay.index + delta, { fit: false });
+      if (replay.index >= allCandles.length - 1) stopReplayTimer();
+    }
+
+    function startReplayTimer() {
+      stopReplayTimer();
+      if (!replay.active) return;
+      replay.playing = true;
+      replayPlay.textContent = "❚❚";
+      const speed = Number(replaySpeed.value) || 1;
+      const ms = Math.max(60, replay.baseMs / speed);
+      replay.timer = setInterval(() => {
+        if (replay.index >= allCandles.length - 1) {
+          stopReplayTimer();
+          updateReplayChrome();
+          return;
+        }
+        setPlayhead(replay.index + 1, { fit: false });
+      }, ms);
+    }
+
+    function togglePlay() {
+      if (!replay.active) return;
+      if (replay.playing) stopReplayTimer();
+      else startReplayTimer();
+      updateReplayChrome();
+    }
+
+    function enterReplay() {
+      if (!allCandles.length) {
+        setStatus("нет свечей для Replay", "err");
+        return;
+      }
+      stopReplayTimer();
+      replay.active = true;
+      // TV: start somewhere in history, not at the end
+      replay.index = Math.max(14, Math.floor(allCandles.length * 0.35));
+      applyVisibleSlice({ fit: true });
+      setStatus(`Replay · клик по свече или Play · ${allCandles[replay.index].time}`);
+    }
+
+    function exitReplay() {
+      stopReplayTimer();
+      replay.active = false;
+      applyVisibleSlice({ fit: true });
+      updatePlayheadLine();
+      setStatus(`полный ряд · ${allCandles.length} bars`);
+    }
+
+    function toggleReplayMode() {
+      if (replay.active) exitReplay();
+      else enterReplay();
+    }
+
+    replayBtn.addEventListener("click", toggleReplayMode);
+    document.getElementById("replayBack").addEventListener("click", () => stepReplay(-1));
+    document.getElementById("replayFwd").addEventListener("click", () => stepReplay(1));
+    replayPlay.addEventListener("click", togglePlay);
+    document.getElementById("replayExit").addEventListener("click", exitReplay);
+    replaySpeed.addEventListener("change", () => {
+      if (replay.playing) startReplayTimer();
+    });
+    replayScrub.addEventListener("input", () => {
+      if (!replay.active) return;
+      stopReplayTimer();
+      setPlayhead(Number(replayScrub.value) || 0, { fit: false });
+    });
+
+    // TV: click chart to pick starting / playhead bar
+    chart.subscribeClick((param) => {
+      if (!replay.active || !param || param.time == null) return;
+      const t = param.time;
+      const idx = allCandles.findIndex((c) => c.time === t);
+      if (idx < 0) return;
+      stopReplayTimer();
+      setPlayhead(idx, { fit: false });
+    });
+
+    // TV shortcuts: Shift+↓ play/pause, Shift+→ step
+    window.addEventListener("keydown", (e) => {
+      if (!replay.active) return;
+      if (e.shiftKey && e.key === "ArrowDown") {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.shiftKey && e.key === "ArrowRight") {
+        e.preventDefault();
+        stepReplay(1);
+      } else if (e.shiftKey && e.key === "ArrowLeft") {
+        e.preventDefault();
+        stepReplay(-1);
+      }
+    });
+
+    async function loadChart() {
+      const ticker = document.getElementById("ticker").value.trim().toUpperCase() || "SBER";
+      const days = Number(document.getElementById("days").value) || 365;
+      const force = document.getElementById("force").checked ? 1 : 0;
+      const btn = document.getElementById("load");
+      btn.disabled = true;
+      setStatus("загрузка…");
+      stopReplayTimer();
+      replay.active = false;
+      updateReplayChrome();
+
+      try {
+        const cRes = await fetch(`/api/candles/${encodeURIComponent(ticker)}?days=${days}&force=${force}`);
+        const cData = await cRes.json();
+        allCandles = cData.candles || [];
+        if (!allCandles.length) {
+          series.setData([]);
+          series.setMarkers([]);
+          rsiSeries.setData([]);
+          rsiMaSeries.setData([]);
+          allMarkers = [];
+          needsInitialFit = false;
+          setStatus(cData.error || "нет свечей", "err");
+          return;
+        }
+
+        allMarkers = [];
+        try {
+          const mRes = await fetch(`/api/markers/${encodeURIComponent(ticker)}`);
+          const mData = await mRes.json();
+          allMarkers = mData.markers || [];
+        } catch (_) { /* ignore */ }
+
+        applyVisibleSlice({ fit: false });
+        resizeAll();
+        if (autoFit) {
+          fitToScreen();
+          needsInitialFit = true;
+        } else {
+          needsInitialFit = false;
+          syncPriceToRsi();
+          lockRsiScale();
+        }
+
+        const rsiPoints = calcRsi(allCandles, 14).size;
+        const bits = [
+          ticker,
+          cData.board || "?",
+          `${allCandles.length} bars`,
+          `RSI ${rsiPoints}`,
+          cData.source || "",
+          autoFit ? "Auto" : "Manual",
+        ];
+        if (cData.stale) {
+          setStatus(bits.join(" · ") + " · STALE " + (cData.error || ""), "stale");
+        } else {
+          setStatus(bits.join(" · "));
+        }
+        updateReplayChrome();
+      } catch (e) {
+        console.error(e);
+        setStatus(String(e), "err");
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById("load").addEventListener("click", loadChart);
+    document.getElementById("ticker").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") loadChart();
+    });
+    requestAnimationFrame(() => {
+      resizeAll();
+      loadChart();
+    });
+  </script>
+</body>
+</html>
