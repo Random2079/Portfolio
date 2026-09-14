@@ -14,10 +14,11 @@ import os
 import random
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractNativeEventFilter, QByteArray, QEvent, QSize, QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import QByteArray, QEvent, QSize, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -246,32 +247,6 @@ QSlider#softSlider::sub-page:horizontal {
     background: #475569;
     border-radius: 2px;
 }
-QSlider#opacitySlider::groove:horizontal {
-    height: 3px;
-    background: #1e2533;
-    border-radius: 2px;
-}
-QSlider#opacitySlider::sub-page:horizontal {
-    background: #64748b;
-    border-radius: 2px;
-}
-QSlider#opacitySlider::handle:horizontal {
-    width: 12px;
-    height: 12px;
-    margin: -5px 0;
-    background: #e2e8f0;
-    border: none;
-    border-radius: 6px;
-}
-QSlider#opacitySlider:disabled::groove:horizontal {
-    background: #151a24;
-}
-QSlider#opacitySlider:disabled::sub-page:horizontal {
-    background: #1e2533;
-}
-QSlider#opacitySlider:disabled::handle:horizontal {
-    background: #475569;
-}
 """
 
 
@@ -307,26 +282,11 @@ WS_EX_LAYERED = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_TOPMOST = 0x00000008
 WM_HOTKEY = 0x0312
-WH_KEYBOARD_LL = 13
-WM_KEYDOWN = 0x0100
-WM_KEYUP = 0x0101
-WM_SYSKEYDOWN = 0x0104
-WM_SYSKEYUP = 0x0105
-VK_SHIFT = 0x10
-VK_CONTROL = 0x11
-VK_MENU = 0x12  # Alt
-VK_LSHIFT = 0xA0
-VK_RSHIFT = 0xA1
-VK_LCONTROL = 0xA2
-VK_RCONTROL = 0xA3
-VK_LMENU = 0xA4
-VK_RMENU = 0xA5
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
 MOD_SHIFT = 0x0004
 MOD_WIN = 0x0008
 MOD_NOREPEAT = 0x4000
-LLKHF_UP = 0x0080
 
 _HOTKEY_CLICK = 0x0221
 _HOTKEY_HIDE = 0x0222
@@ -340,7 +300,6 @@ _HOTKEY_SEEK_BACK = 0x0229
 _HOTKEY_SEEK_FWD = 0x022A
 _HOTKEY_VOL_UP = 0x022B
 _HOTKEY_VOL_DOWN = 0x022C
-VK_ESCAPE = 0x1B
 _SEEK_MS = 5000
 _VOLUME_STEP = 5
 _OPACITY_STEP = 5
@@ -348,24 +307,6 @@ _OPACITY_MIN = 5
 _OPACITY_MAX = 100
 # Метка «сейчас играет» в QListWidgetItem
 _ROLE_PLAYING = int(Qt.ItemDataRole.UserRole) + 1
-
-
-class _KBDLLHOOKSTRUCT(ctypes.Structure):
-    _fields_ = [
-        ("vkCode", ctypes.wintypes.DWORD),
-        ("scanCode", ctypes.wintypes.DWORD),
-        ("flags", ctypes.wintypes.DWORD),
-        ("time", ctypes.wintypes.DWORD),
-        ("dwExtraInfo", ctypes.c_size_t),
-    ]
-
-
-_LowLevelKeyboardProc = ctypes.WINFUNCTYPE(
-    ctypes.c_ssize_t,
-    ctypes.c_int,
-    ctypes.wintypes.WPARAM,
-    ctypes.wintypes.LPARAM,
-)
 
 # Стрелки только с Ctrl — иначе глобальный хук ломает набор текста везде.
 _DEFAULT_HOTKEYS = {
@@ -411,36 +352,6 @@ def _clean_media_title(stem: str) -> str:
     return re.sub(r"\s{2,}", " ", t).strip() or stem
 
 
-# #region agent log
-_DBG_LOG_PATH = Path(__file__).resolve().parent / "debug-ec7f7f.log"
-
-
-def _dbg_log(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict | None = None,
-    *,
-    run_id: str = "pre-fix",
-) -> None:
-    # Отключено: запись в OneDrive на каждый хоткей/CT подвешивала UI.
-    return
-    try:
-        payload = {
-            "sessionId": "ec7f7f",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(_DBG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
 def _win_long_fns():
     user32 = ctypes.windll.user32
     if ctypes.sizeof(ctypes.c_void_p) == 8:
@@ -454,41 +365,6 @@ def _win_long_fns():
         get_long = user32.GetWindowLongW
         set_long = user32.SetWindowLongW
     return get_long, set_long
-
-
-def _dbg_exstyle(hwnd: int) -> int:
-    get_long, _ = _win_long_fns()
-    return int(get_long(hwnd, GWL_EXSTYLE))
-
-
-def _dbg_count_transparent_children(root_hwnd: int) -> dict:
-    """Сколько child HWND с WS_EX_TRANSPARENT / LAYERED / visible."""
-    user32 = ctypes.windll.user32
-    from ctypes import wintypes
-
-    stats = {"children": 0, "transparent": 0, "layered": 0, "visible": 0}
-    EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-
-    @EnumProc
-    def _enum(h, _lp):  # type: ignore[misc]
-        try:
-            stats["children"] += 1
-            st = _dbg_exstyle(int(h))
-            if st & WS_EX_TRANSPARENT:
-                stats["transparent"] += 1
-            if st & WS_EX_LAYERED:
-                stats["layered"] += 1
-            if user32.IsWindowVisible(h):
-                stats["visible"] += 1
-        except Exception:
-            pass
-        return True
-
-    user32.EnumChildWindows(root_hwnd, _enum, 0)
-    return stats
-
-
-# #endregion
 
 
 def _prefs_path() -> Path:
@@ -756,26 +632,6 @@ class PulseVisual(QWidget):
             painter.drawRoundedRect(int(x), int(y), int(bar_w), int(bh), 3, 3)
 
 
-class _HotkeyFilter(QAbstractNativeEventFilter):
-    def __init__(self, callback) -> None:
-        super().__init__()
-        self._callback = callback
-
-    def nativeEventFilter(self, eventType, message):  # noqa: N802
-        et = bytes(eventType) if isinstance(eventType, (bytes, bytearray)) else str(eventType).encode()
-        if et not in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
-            return False
-        try:
-            addr = int(message)
-            msg = ctypes.wintypes.MSG.from_address(addr)
-        except Exception:
-            return False
-        if msg.message == WM_HOTKEY:
-            self._callback(int(msg.wParam))
-            return True
-        return False
-
-
 class OverlaySettingsDialog(QDialog):
     def __init__(self, prefs: dict, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -850,6 +706,7 @@ class OverlayPlayerWindow(QWidget):
 
     closed = Signal()
     hidden_keep = Signal()  # устарело: Ctrl+Shift+O больше не поднимает Translator
+    hotkey_pressed = Signal(int)
 
     def __init__(self, start_dir: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -875,21 +732,17 @@ class OverlayPlayerWindow(QWidget):
         self._normal_geometry = None
         self._splitter_sizes: list[int] | None = None
         self._last_play_path: str | None = None
-        self._hotkey_filter: _HotkeyFilter | None = None
         self._hotkeys_registered: set[int] = set()
         self._base_exstyle: int | None = None
-        self._ll_hook = None
-        self._ll_proc = None
-        self._priority_binds: list[tuple[int, int, int]] = []  # mods, vk, hk_id
-        self._ll_ctrl = False
-        self._ll_shift = False
-        self._ll_alt = False
         self._app_filter_installed = False
-        self._hotkey_hwnd: int | None = None
+        self._hotkey_thread: threading.Thread | None = None
+        self._hotkey_stop: threading.Event | None = None
+        self._hotkey_thread_id: int | None = None
         self._last_hk_id: int | None = None
         self._last_hk_t: float = 0.0
         self._player: QMediaPlayer | None = None
         self._audio: QAudioOutput | None = None
+        self.hotkey_pressed.connect(self._on_global_hotkey)
         if _HAS_MULTIMEDIA:
             self._player = QMediaPlayer(self)
             self._audio = QAudioOutput(self)
@@ -1035,19 +888,24 @@ class OverlayPlayerWindow(QWidget):
         dens.setSpacing(8)
         self.opacity_caption = QLabel("Плотность")
         self.opacity_caption.setObjectName("opacityCaption")
-        self.opacity_caption.setToolTip(
-            "Только при Ctrl+O (сквозь): насколько видно видео. Без сквозь — всегда 100%."
+        _dens_tip = (
+            "В сквозь (Ctrl+O): прозрачность окна. "
+            "Без сквозь всегда 100% — иначе клики не доходят до YouTube/Cursor. "
+            "Слайдер задаёт значение заранее; Ctrl+[ / ] в сквозь."
         )
+        self.opacity_caption.setToolTip(_dens_tip)
         dens.addWidget(self.opacity_caption)
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setObjectName("opacitySlider")
+        # Тот же softSlider, что seek/volume — один стиль ручки
+        self.opacity_slider.setObjectName("softSlider")
         self.opacity_slider.setRange(_OPACITY_MIN, _OPACITY_MAX)
         self.opacity_slider.setValue(
             max(_OPACITY_MIN, min(_OPACITY_MAX, int(self._prefs.get("stage_opacity", 85))))
         )
         self.opacity_slider.setFixedWidth(140)
-        self.opacity_slider.setToolTip("5–100%. Работает только в режиме сквозь (Ctrl+O).")
+        self.opacity_slider.setToolTip(_dens_tip)
         self.opacity_slider.valueChanged.connect(self._on_opacity)
+        self.opacity_slider.sliderReleased.connect(self._flush_opacity_prefs)
         dens.addWidget(self.opacity_slider)
         self.opacity_value = QLabel(f"{self.opacity_slider.value()}%")
         self.opacity_value.setObjectName("opacityValue")
@@ -1075,7 +933,7 @@ class OverlayPlayerWindow(QWidget):
         self.hide_btn.setObjectName("ghostBtn")
         self.hide_btn.setIcon(_svg_icon("hide", 14))
         self.hide_btn.setIconSize(QSize(14, 14))
-        self.hide_btn.setToolTip("Спрятать окно. Показать: Ctrl+Shift+O")
+        self.hide_btn.setToolTip("Спрятать окно. Вернуть — кнопкой «Фон» в основном окне.")
         self.hide_btn.clicked.connect(self._hide_keep_music)
         self.hide_btn.hide()  # в каталоге не нужен — только fullscreen / хоткей
         ctrl2.addWidget(self.hide_btn)
@@ -1150,6 +1008,12 @@ class OverlayPlayerWindow(QWidget):
             (hk.get("seek_fwd", "Right"), "seek_fwd", lambda: self._seek_by(_SEEK_MS)),
             (hk.get("vol_up", "Up"), "vol_up", lambda: self._nudge_volume(_VOLUME_STEP)),
             (hk.get("vol_down", "Down"), "vol_down", lambda: self._nudge_volume(-_VOLUME_STEP)),
+            (
+                hk.get("click_through", "Ctrl+O"),
+                "click_through",
+                lambda: self._toggle_click_through() if self._stage_mode else None,
+            ),
+            (hk.get("hide_show", "Ctrl+Shift+O"), "hide_show", self._toggle_hide_or_show),
             (hk.get("next_track", "Ctrl+Shift+1"), "next_track", self._play_next),
             (hk.get("prev_track", "Ctrl+Shift+2"), "prev_track", self._play_prev),
             (hk.get("stop_track", "Ctrl+Shift+F1"), "stop_track", self._toggle_play),
@@ -1440,6 +1304,7 @@ class OverlayPlayerWindow(QWidget):
         self.opacity_slider.setValue(
             max(_OPACITY_MIN, min(_OPACITY_MAX, self.opacity_slider.value() + delta))
         )
+        self._flush_opacity_prefs()
 
     def _enter_stage(self) -> None:
         """Полное окно: каталог спрятан, видео/пульс на весь экран, управление снизу."""
@@ -1465,34 +1330,12 @@ class OverlayPlayerWindow(QWidget):
         self._refresh_hint()
         self._register_hotkeys()
         if not self._click_through:
-            self.setWindowOpacity(1.0)
             self._repair_video_surface()
-        if self._playing:
-            self._apply_stage_opacity()
+        self._apply_stage_opacity()
         if not self._click_through:
             self.status.setText(
-                "Полное окно · Ctrl+O — сквозь (UI спрячется) · Ctrl+Shift+O — скрыть"
+                "Полное окно · плотность снизу · Ctrl+O — сквозь · Ctrl+Shift+O — скрыть"
             )
-        # #region agent log
-        try:
-            hwnd = int(self.winId()) if self.winId() else 0
-            _dbg_log(
-                "H4-H5",
-                "overlay_player.py:_enter_stage",
-                "entered stage",
-                {
-                    "ct": self._click_through,
-                    "opacity": float(self.windowOpacity()),
-                    "slider": int(self.opacity_slider.value()),
-                    "fullscreen": self.isFullScreen(),
-                    "root_has_transparent": bool((_dbg_exstyle(hwnd) if hwnd else 0) & WS_EX_TRANSPARENT),
-                    "children": _dbg_count_transparent_children(hwnd) if hwnd else None,
-                },
-                run_id="post-fix",
-            )
-        except Exception as e:
-            _dbg_log("H4-H5", "overlay_player.py:_enter_stage", "stage log fail", {"err": str(e)}, run_id="post-fix")
-        # #endregion
 
     def _enter_catalog(self) -> None:
         """Вернуть каталог; воспроизведение не стопаем."""
@@ -1599,7 +1442,8 @@ class OverlayPlayerWindow(QWidget):
         self._player.setPosition(pos)
 
     def _nudge_volume(self, delta: int) -> None:
-        self.volume_slider.setValue(max(0, min(100, self.volume_slider.value() + delta)))
+        before = self.volume_slider.value()
+        self.volume_slider.setValue(max(0, min(100, before + delta)))
 
     def _on_playback_state(self, state) -> None:
         if not _HAS_MULTIMEDIA:
@@ -1655,7 +1499,7 @@ class OverlayPlayerWindow(QWidget):
                 self._audio.setVolume(0.0)
 
     def _on_opacity(self, value: int) -> None:
-        save_overlay_prefs(stage_opacity=int(value))
+        """Живой preview; prefs на диск — debounce / отпускание (иначе лаг на каждом тике)."""
         self._prefs["stage_opacity"] = int(value)
         if hasattr(self, "opacity_value"):
             self.opacity_value.setText(f"{int(value)}%")
@@ -1664,19 +1508,33 @@ class OverlayPlayerWindow(QWidget):
         else:
             # Каталог всегда плотный — слайдер только запоминает значение для fullscreen
             self._apply_catalog_opacity()
+        self._schedule_opacity_save()
+
+    def _schedule_opacity_save(self) -> None:
+        if not hasattr(self, "_opacity_save_timer"):
+            self._opacity_save_timer = QTimer(self)
+            self._opacity_save_timer.setSingleShot(True)
+            self._opacity_save_timer.timeout.connect(self._flush_opacity_prefs)
+        self._opacity_save_timer.start(400)
+
+    def _flush_opacity_prefs(self) -> None:
+        if not hasattr(self, "opacity_slider"):
+            return
+        val = int(self.opacity_slider.value())
+        self._prefs["stage_opacity"] = val
+        save_overlay_prefs(stage_opacity=val)
 
     def _apply_catalog_opacity(self) -> None:
         self.setWindowOpacity(1.0)
         self._write_root_exstyle()
 
     def _apply_stage_opacity(self) -> None:
-        """Без сквозь — плотное видео. Со сквозь — слайдер плотности (фон)."""
+        """Плотность <100% только со сквозь. Без сквозь всегда 100% — иначе стекло жрёт клики YouTube/Cursor."""
         if not self._click_through:
             self.setWindowOpacity(1.0)
         else:
             val = self.opacity_slider.value()
             self.setWindowOpacity(max(_OPACITY_MIN / 100.0, min(1.0, val / 100.0)))
-        self._write_root_exstyle()
         self._sync_density_enabled()
 
     def _chrome_is_detached(self) -> bool:
@@ -1762,18 +1620,23 @@ class OverlayPlayerWindow(QWidget):
         self._sync_density_enabled()
 
     def _sync_density_enabled(self) -> None:
-        """Слайдер плотности живой только в сквозь — иначе визуально врёт."""
+        """Слайдер всегда крутится (запоминает %). Живое стекло — только в сквозь."""
         if not hasattr(self, "opacity_slider"):
             return
-        on = bool(self._click_through and self._stage_mode)
-        self.opacity_slider.setEnabled(on)
-        if on:
-            self.opacity_caption.setText("Плотность")
-            self.opacity_value.setText(f"{self.opacity_slider.value()}%")
-        else:
-            self.opacity_caption.setText("Плотность")
+        self.opacity_slider.setEnabled(bool(self._stage_mode))
+        self.opacity_caption.setText("Плотность")
+        if not self._stage_mode:
             self.opacity_value.setText("100%")
-            self.opacity_value.setToolTip("Без сквозь всегда 100%. Ctrl+O — стеклянный фон.")
+            self.opacity_value.setToolTip("В каталоге всегда 100%.")
+            return
+        if self._click_through:
+            self.opacity_value.setText(f"{self.opacity_slider.value()}%")
+            self.opacity_value.setToolTip("Сейчас применено (сквозь).")
+        else:
+            self.opacity_value.setText(f"{self.opacity_slider.value()}%→")
+            self.opacity_value.setToolTip(
+                "Без сквозь окно 100%. Это значение включится по Ctrl+O."
+            )
 
     def _update_chrome_visibility(self) -> None:
         """Каталог / сцена: одна панель в том же окне (без второго HWND)."""
@@ -1826,7 +1689,21 @@ class OverlayPlayerWindow(QWidget):
         self._update_ct_label()
         self._update_chrome_visibility()
         if enabled:
-            # Без бэкапа: в сквозь сразу рабочая плотность + только видео
+            # Fail-safe: без WS_EX_TRANSPARENT получится невидимый щит кликов
+            try:
+                hwnd = int(self.winId())
+                get_long, _set_long = _win_long_fns()
+                st = int(get_long(hwnd, GWL_EXSTYLE))
+                if not (st & WS_EX_TRANSPARENT):
+                    self._click_through = False
+                    self._apply_exstyle()
+                    self._update_ct_label()
+                    self._update_chrome_visibility()
+                    self.hide()
+                    self.status.setText("Сквозь не применился — окно скрыто (защита кликов)")
+                    return
+            except Exception:
+                pass
             if self._stage_mode:
                 if self.opacity_slider.value() > 55:
                     self.opacity_slider.blockSignals(True)
@@ -1842,7 +1719,7 @@ class OverlayPlayerWindow(QWidget):
         else:
             if self._stage_mode:
                 self._apply_stage_opacity()
-                self.status.setText("Сквозь выкл · живое видео · Ctrl+O — фон/сквозь")
+                self.status.setText("Сквозь выкл · плотность после Ctrl+O · Ctrl+Shift+O — скрыть")
             else:
                 self._apply_catalog_opacity()
                 self.status.setText("Сквозь выкл")
@@ -1865,11 +1742,33 @@ class OverlayPlayerWindow(QWidget):
         self._set_click_through(not self._click_through)
 
     def _hide_keep_music(self) -> None:
-        """Спрятать Фон, музыка играет. Translator не трогаем — фокус остаётся где был."""
-        if self._click_through:
-            self._set_click_through(False)
+        """Спрятать Фон, музыка играет. Сначала hide — не снимать сквозь на видимом окне (чёрная дыра кликов)."""
+        was_ct = bool(self._click_through)
+        self._click_through = False
         self.hide()
+        # Пока скрыты — почистить TRANSPARENT / EnableWindow, без activate/show
+        QTimer.singleShot(0, lambda: self._sanitize_after_hide(was_ct))
         # Не emit hidden_keep: иначе Translator вылезает поверх Cursor.
+
+    def _sanitize_after_hide(self, was_ct: bool) -> None:
+        """Убрать залипший click-through со скрытого окна — иначе клики/клава в других приложениях мертвы."""
+        if sys.platform != "win32":
+            return
+        try:
+            self._update_ct_label()
+            self._write_root_exstyle()
+            self._set_video_input_enabled(True)
+            for w in (self.media_stack, self.video, self.pulse, self.video_column):
+                try:
+                    w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+                except Exception:
+                    pass
+            if was_ct:
+                hwnd = int(self.winId()) if self.winId() else 0
+                if hwnd:
+                    self._clear_child_transparent_styles(hwnd)
+        except Exception:
+            pass
 
     def present_visible(self) -> None:
         """Кнопка «Фон» / повторный show: каталог на экране, не невидимый leftover."""
@@ -1884,27 +1783,6 @@ class OverlayPlayerWindow(QWidget):
             self.resize(1100, 640)
         self.raise_()
         self.activateWindow()
-        # #region agent log
-        try:
-            g = self.geometry()
-            hwnd = int(self.winId()) if self.winId() else 0
-            _dbg_log(
-                "W1-W2",
-                "overlay_player.py:present_visible",
-                "presented catalog",
-                {
-                    "visible": self.isVisible(),
-                    "geom": [g.x(), g.y(), g.width(), g.height()],
-                    "opacity": float(self.windowOpacity()),
-                    "root_ex": _dbg_exstyle(hwnd) if hwnd else None,
-                    "ct": self._click_through,
-                    "stage": self._stage_mode,
-                },
-                run_id="post-fix",
-            )
-        except Exception as e:
-            _dbg_log("W1-W2", "overlay_player.py:present_visible", "present fail", {"err": str(e)}, run_id="post-fix")
-        # #endregion
 
     def _toggle_hide_or_show(self) -> None:
         if self.isVisible() and not self.isMinimized():
@@ -2118,11 +1996,10 @@ class OverlayPlayerWindow(QWidget):
         QTimer.singleShot(0, self._install_shortcuts)
 
     def hideEvent(self, event) -> None:  # noqa: N802
-        # P8: не стопаем музыку; хоткеи оставляем если play_when_hidden
+        # Не стопаем музыку. В скрытом режиме оставляем только AIMP-style
+        # транспорт/громкость + show/hide, без Ctrl+O/плотности/перемотки.
         super().hideEvent(event)
-        if not self._prefs.get("play_when_hidden", True):
-            self._unregister_hotkeys()
-        # иначе RegisterHotKey остаётся — можно вернуть окно / сквозь
+        self._register_hotkeys(hidden_only=True)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -2142,154 +2019,102 @@ class OverlayPlayerWindow(QWidget):
         self.closed.emit()
         super().closeEvent(event)
 
-    def _register_hotkeys(self) -> None:
+    def _register_hotkeys(self, *, hidden_only: bool = False) -> None:
         if sys.platform != "win32":
             return
-        # Только обновляем бинды; LL-хук не сносим (иначе дыры в реакции).
-        self._unregister_hotkeys(full=False)
+        # Важно: не используем WH_KEYBOARD_LL. Он ломал Ctrl/Backspace/клики в других окнах.
+        self._unregister_hotkeys()
         hk = self._prefs.get("hotkeys") or _DEFAULT_HOTKEYS
-        # Глобальные комбо с модификаторами — через LL (мгновенно, без QTimer/двойного RHK).
-        # Space/стрелки — только QShortcut, когда окно Фон в фокусе.
+        # AIMP-style: глобально регистрируем только конкретные команды плеера.
+        # Не используем Ctrl+O/плотность/seek глобально: они конфликтуют с работой в YouTube/Cursor.
         priority = [
             (_HOTKEY_HIDE, hk.get("hide_show", "Ctrl+Shift+O")),
             (_HOTKEY_NEXT, hk.get("next_track", "Ctrl+Shift+1")),
             (_HOTKEY_PREV, hk.get("prev_track", "Ctrl+Shift+2")),
             (_HOTKEY_STOP, hk.get("stop_track", "Ctrl+Shift+F1")),
-            (_HOTKEY_SEEK_BACK, hk.get("seek_back", "Ctrl+Left")),
-            (_HOTKEY_SEEK_FWD, hk.get("seek_fwd", "Ctrl+Right")),
             (_HOTKEY_VOL_UP, hk.get("vol_up", "Ctrl+Up")),
             (_HOTKEY_VOL_DOWN, hk.get("vol_down", "Ctrl+Down")),
-            (_HOTKEY_ESC, hk.get("back_esc", "Esc")),
         ]
-        if self._stage_mode:
-            priority.extend(
-                [
-                    (_HOTKEY_CLICK, hk.get("click_through", "Ctrl+O")),
-                    (_HOTKEY_OPACITY_UP, hk.get("opacity_up", "Ctrl+]")),
-                    (_HOTKEY_OPACITY_DOWN, hk.get("opacity_down", "Ctrl+[")),
-                ]
-            )
-        self._priority_binds = []
+        if not hidden_only:
+            # Click-through / density / seek stay local to the overlay window.
+            if self._stage_mode:
+                # Ctrl+O нужен как глобальный выход из click-through, где окно уже не получает фокус.
+                priority.append((_HOTKEY_CLICK, hk.get("click_through", "Ctrl+O")))
+        attempts = []
         for hk_id, spec in priority:
             parsed = _parse_hotkey(spec)
             if not parsed:
+                attempts.append({"id": hk_id, "spec": spec, "parsed": False})
                 continue
             mods, vk = parsed
-            # Esc без модов — особый случай в LL; остальное только с модами
-            if hk_id != _HOTKEY_ESC and (mods & ~MOD_NOREPEAT) == 0:
+            # Не регистрируем одиночные клавиши глобально: Backspace/Esc/стрелки не должны красться у системы.
+            if (mods & ~MOD_NOREPEAT) == 0:
+                attempts.append({"id": hk_id, "spec": spec, "parsed": True, "skipped": "no_mods"})
                 continue
-            self._priority_binds.append((mods & ~MOD_NOREPEAT, vk, hk_id))
-        if self._priority_binds:
-            self._install_ll_hook()
-
-    def _install_ll_hook(self) -> None:
-        if self._ll_hook is not None:
-            return
-        user32 = ctypes.windll.user32
-        self._ll_ctrl = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
-        self._ll_shift = bool(user32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
-        self._ll_alt = bool(user32.GetAsyncKeyState(VK_MENU) & 0x8000)
-
-        def _proc(n_code, w_param, l_param):
-            if n_code >= 0:
-                wp = int(w_param)
-                try:
-                    kb = ctypes.cast(l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
-                except (TypeError, ValueError):
-                    return user32.CallNextHookEx(self._ll_hook, n_code, w_param, l_param)
-                vk = int(kb.vkCode)
-                is_up = wp in (WM_KEYUP, WM_SYSKEYUP) or bool(int(kb.flags) & LLKHF_UP)
-                if vk in (VK_CONTROL, VK_LCONTROL, VK_RCONTROL):
-                    self._ll_ctrl = not is_up
-                elif vk in (VK_SHIFT, VK_LSHIFT, VK_RSHIFT):
-                    self._ll_shift = not is_up
-                elif vk in (VK_MENU, VK_LMENU, VK_RMENU):
-                    self._ll_alt = not is_up
-                elif not is_up and wp in (WM_KEYDOWN, WM_SYSKEYDOWN):
-                    if (
-                        vk == VK_ESCAPE
-                        and not self._ll_ctrl
-                        and not self._ll_shift
-                        and not self._ll_alt
-                        and self.isVisible()
-                        and (self._click_through or self._stage_mode)
-                    ):
-                        try:
-                            self._on_global_hotkey(_HOTKEY_ESC)
-                        except Exception:
-                            pass
-                        return 1
-                    for mods, want_vk, hk_id in self._priority_binds:
-                        if vk != want_vk or hk_id == _HOTKEY_ESC:
-                            continue
-                        if not self._ll_mods_match(mods):
-                            continue
-                        try:
-                            self._on_global_hotkey(hk_id)
-                        except Exception:
-                            pass
-                        return 1
-            return user32.CallNextHookEx(self._ll_hook, n_code, w_param, l_param)
-
-        self._ll_proc = _LowLevelKeyboardProc(_proc)
-        self._ll_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._ll_proc, None, 0)
-        if not self._ll_hook:
-            self._ll_proc = None
-            self._priority_binds = []
-
-    def _release_stuck_modifiers(self) -> None:
-        """После Ctrl+O: хук съел O — отпустить залипший Ctrl/Shift."""
-        if sys.platform != "win32":
-            return
-        user32 = ctypes.windll.user32
-        KEYEVENTF_KEYUP = 0x0002
-        for vk in (
-            VK_CONTROL,
-            VK_LCONTROL,
-            VK_RCONTROL,
-            VK_SHIFT,
-            VK_LSHIFT,
-            VK_RSHIFT,
-            VK_MENU,
-            VK_LMENU,
-            VK_RMENU,
-        ):
-            if user32.GetAsyncKeyState(vk) & 0x8000:
-                user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-        self._ll_ctrl = False
-        self._ll_shift = False
-        self._ll_alt = False
-
-    def _ll_mods_match(self, mods: int) -> bool:
-        need_c = bool(mods & MOD_CONTROL)
-        need_s = bool(mods & MOD_SHIFT)
-        need_a = bool(mods & MOD_ALT)
-        return (
-            self._ll_ctrl == need_c
-            and self._ll_shift == need_s
-            and self._ll_alt == need_a
-        )
+            attempts.append({"id": hk_id, "spec": spec, "mods": int(mods), "vk": int(vk), "queued": True})
+        entries = [
+            (int(a["id"]), str(a["spec"]), int(a["mods"]), int(a["vk"]))
+            for a in attempts
+            if a.get("queued")
+        ]
+        if entries:
+            self._start_hotkey_thread(entries, hidden_only=hidden_only)
 
     def _unregister_hotkeys(self, *, full: bool = True) -> None:
-        if self._hotkeys_registered:
-            for hk_id in list(self._hotkeys_registered):
-                try:
-                    ctypes.windll.user32.UnregisterHotKey(None, hk_id)
-                except Exception:
-                    pass
-            self._hotkeys_registered.clear()
-        self._hotkey_hwnd = None
+        self._stop_hotkey_thread()
+        self._hotkeys_registered.clear()
         if not full:
             return
-        if self._ll_hook is not None:
-            ctypes.windll.user32.UnhookWindowsHookEx(self._ll_hook)
-            self._ll_hook = None
-            self._ll_proc = None
-            self._priority_binds = []
-        app = QApplication.instance()
-        if app is not None and self._hotkey_filter is not None:
-            app.removeNativeEventFilter(self._hotkey_filter)
-            self._hotkey_filter = None
+
+    def _start_hotkey_thread(self, entries: list[tuple[int, str, int, int]], *, hidden_only: bool) -> None:
+        stop = threading.Event()
+        self._hotkey_stop = stop
+
+        def _worker() -> None:
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            tid = int(kernel32.GetCurrentThreadId())
+            self._hotkey_thread_id = tid
+            msg = ctypes.wintypes.MSG()
+            user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
+            registered: list[int] = []
+            for hk_id, spec, mods, vk in entries:
+                ok = bool(user32.RegisterHotKey(None, hk_id, mods, vk))
+                if ok:
+                    registered.append(hk_id)
+            self._hotkeys_registered = set(registered)
+            while not stop.is_set():
+                res = int(user32.GetMessageW(ctypes.byref(msg), None, 0, 0))
+                if res <= 0 or stop.is_set():
+                    break
+                if int(msg.message) == WM_HOTKEY:
+                    hotkey_id = int(msg.wParam)
+                    self.hotkey_pressed.emit(hotkey_id)
+            for hk_id in registered:
+                try:
+                    user32.UnregisterHotKey(None, hk_id)
+                except Exception:
+                    pass
+
+        self._hotkey_thread = threading.Thread(target=_worker, name="overlay-hotkeys", daemon=True)
+        self._hotkey_thread.start()
+
+    def _stop_hotkey_thread(self) -> None:
+        stop = self._hotkey_stop
+        thread = self._hotkey_thread
+        tid = self._hotkey_thread_id
+        if stop is not None:
+            stop.set()
+        if tid:
+            try:
+                ctypes.windll.user32.PostThreadMessageW(int(tid), 0x0012, 0, 0)
+            except Exception:
+                pass
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=0.25)
+        self._hotkey_thread = None
+        self._hotkey_stop = None
+        self._hotkey_thread_id = None
 
     def _on_global_hotkey(self, hotkey_id: int) -> None:
         now = time.monotonic()
@@ -2299,6 +2124,8 @@ class OverlayPlayerWindow(QWidget):
             _HOTKEY_SEEK_FWD,
             _HOTKEY_VOL_UP,
             _HOTKEY_VOL_DOWN,
+            _HOTKEY_OPACITY_UP,
+            _HOTKEY_OPACITY_DOWN,
         ) else 0.08
         if self._last_hk_id == hotkey_id and (now - self._last_hk_t) < gap:
             return
@@ -2316,7 +2143,6 @@ class OverlayPlayerWindow(QWidget):
                     self.showFullScreen()
                 self.raise_()
             self._toggle_click_through()
-            self._release_stuck_modifiers()
             return
         if hotkey_id == _HOTKEY_NEXT:
             self._play_next()
@@ -2340,11 +2166,11 @@ class OverlayPlayerWindow(QWidget):
             self._nudge_volume(-_VOLUME_STEP)
             return
         if hotkey_id == _HOTKEY_OPACITY_UP:
-            if self._stage_mode and self._click_through:
+            if self._stage_mode:
                 self._nudge_opacity(_OPACITY_STEP)
             return
         if hotkey_id == _HOTKEY_OPACITY_DOWN:
-            if self._stage_mode and self._click_through:
+            if self._stage_mode:
                 self._nudge_opacity(-_OPACITY_STEP)
             return
         if hotkey_id == _HOTKEY_ESC:
