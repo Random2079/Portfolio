@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from portfolio_news.bcs_client import classify_asset_class, get_bcs_client, match_holding
 from portfolio_news.config import Settings, get_settings
-from portfolio_news.db import NewsItem, Ticker, make_session_factory
+from portfolio_news.db import NewsAiCache, NewsItem, Ticker, make_session_factory
 from portfolio_news.focus import list_focus_tickers, replace_focus, set_focus
 from portfolio_news.import_tickers import load_tickers_from_json, upsert_tickers
 from portfolio_news.metrics_moex import (
@@ -87,6 +87,33 @@ class NewsOut(BaseModel):
     published_at: Optional[datetime]
     created_at: datetime
     notified: int
+    # F-A (null if not classified yet)
+    ai_label: Optional[str] = None
+    ai_urgency: Optional[str] = None
+    ai_reason: Optional[str] = None
+    ai_model: Optional[str] = None
+    ai_as_of: Optional[datetime] = None
+
+
+class NewsAiClassifyIn(BaseModel):
+    ids: Optional[list[int]] = None
+    today_only: bool = True
+    limit: int = Field(30, ge=1, le=40)
+
+
+class NewsAiClassifyOut(BaseModel):
+    ok: bool = True
+    classified: int = 0
+    skipped: int = 0
+    ids: list[int] = Field(default_factory=list)
+    error: str = ""
+
+
+class NewsAiStatusOut(BaseModel):
+    enabled: bool
+    has_key: bool
+    ready: bool
+    hint: str = ""
 
 
 class DividendOut(BaseModel):
@@ -437,6 +464,7 @@ def list_news(
     ticker: Optional[str] = Query(None),
     focus: bool = Query(False, description="KB: only Focus tickers when set is non-empty"),
     limit: int = Query(50, ge=1, le=200),
+    ai: Optional[str] = Query(None, description="hide_noise = drop label=noise"),
     db: Session = Depends(get_db),
 ):
     """K5: default feed = news for BCS holdings only (not full tickers DB)."""
@@ -468,7 +496,145 @@ def list_news(
                 .order_by(desc(NewsItem.created_at))
                 .limit(limit)
             )
-    return list(db.scalars(q).all())
+    rows = list(db.scalars(q).all())
+    ai_map = _news_ai_map(db, [r.id for r in rows])
+    hide_noise = (ai or "").strip().lower() == "hide_noise"
+    out: list[NewsOut] = []
+    for r in rows:
+        cache = ai_map.get(r.id)
+        if hide_noise and cache is not None and cache.label == "noise":
+            continue
+        out.append(_news_to_out(r, cache))
+    return out
+
+
+def _news_ai_map(db: Session, ids: list[int]) -> dict[int, NewsAiCache]:
+    if not ids:
+        return {}
+    rows = db.scalars(select(NewsAiCache).where(NewsAiCache.news_id.in_(ids))).all()
+    return {r.news_id: r for r in rows}
+
+
+def _news_to_out(row: NewsItem, cache: Optional[NewsAiCache] = None) -> NewsOut:
+    return NewsOut(
+        id=row.id,
+        ticker_id=row.ticker_id,
+        title=row.title,
+        url=row.url,
+        source=row.source or "",
+        published_at=row.published_at,
+        created_at=row.created_at,
+        notified=row.notified,
+        ai_label=(cache.label if cache and cache.label else None),
+        ai_urgency=(cache.urgency if cache else None),
+        ai_reason=(cache.reason if cache and cache.reason else None),
+        ai_model=(cache.model if cache and cache.model else None),
+        ai_as_of=(cache.as_of if cache else None),
+    )
+
+
+@app.get("/api/news/ai-status", response_model=NewsAiStatusOut)
+def news_ai_status(cfg: Settings = Depends(get_cfg)):
+    """F-A: whether button classify is ready (flag + key)."""
+    has_key = bool((cfg.deepseek_api_key or "").strip())
+    enabled = bool(cfg.ai_noise_enabled)
+    ready = enabled and has_key
+    if not enabled:
+        hint = "в .env: AI_NOISE_ENABLED=true"
+    elif not has_key:
+        hint = "задай DEEPSEEK_API_KEY в Portfolio_News/.env"
+    else:
+        hint = ""
+    return NewsAiStatusOut(enabled=enabled, has_key=has_key, ready=ready, hint=hint)
+
+
+@app.post("/api/news/ai-classify", response_model=NewsAiClassifyOut)
+def news_ai_classify(
+    body: NewsAiClassifyIn,
+    db: Session = Depends(get_db),
+    cfg: Settings = Depends(get_cfg),
+):
+    """F-A: button-driven DeepSeek classify for today's BCS-scope news (sync batch)."""
+    from portfolio_news.ai_noise import classify_news_batch
+    from portfolio_news.bcs_scope import resolve_bcs_scope
+    from portfolio_news.poller import news_is_today_for_toast
+
+    if not cfg.ai_noise_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="ai_noise_enabled=false — поставь AI_NOISE_ENABLED=true в .env",
+        )
+    api_key = (cfg.deepseek_api_key or "").strip()
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="DEEPSEEK_API_KEY не задан в Portfolio_News/.env",
+        )
+
+    limit = int(body.limit or 30)
+    if body.ids:
+        q = select(NewsItem).where(NewsItem.id.in_(body.ids)).order_by(desc(NewsItem.created_at))
+        candidates = list(db.scalars(q).all())
+    else:
+        scope_ids, _err = resolve_bcs_scope(db)
+        q = select(NewsItem).order_by(desc(NewsItem.created_at)).limit(200)
+        if scope_ids:
+            q = (
+                select(NewsItem)
+                .where(NewsItem.ticker_id.in_(scope_ids))
+                .order_by(desc(NewsItem.created_at))
+                .limit(200)
+            )
+        candidates = list(db.scalars(q).all())
+        if body.today_only:
+            filtered = []
+            for n in candidates:
+                ts = n.published_at or n.created_at
+                if news_is_today_for_toast(ts):
+                    filtered.append(n)
+            candidates = filtered
+
+    batch = candidates[:limit]
+    if not batch:
+        return NewsAiClassifyOut(ok=True, classified=0, skipped=0, ids=[])
+
+    payload = [
+        {
+            "id": n.id,
+            "ticker": n.ticker_id,
+            "title": n.title,
+            "source": n.source or "",
+        }
+        for n in batch
+    ]
+    try:
+        results = classify_news_batch(api_key, payload)
+    except Exception as exc:  # noqa: BLE001 — surface to UI
+        log.exception("ai-classify failed")
+        raise HTTPException(status_code=502, detail=str(exc)[:300]) from exc
+
+    done_ids: list[int] = []
+    for row in results:
+        nid = int(row["id"])
+        cache = db.get(NewsAiCache, nid)
+        if cache is None:
+            cache = NewsAiCache(news_id=nid)
+            db.add(cache)
+        cache.label = str(row["label"])
+        cache.urgency = row.get("urgency")
+        cache.reason = str(row.get("reason") or "")
+        cache.model = str(row.get("model") or "deepseek-chat")
+        as_of = row.get("as_of")
+        cache.as_of = as_of if isinstance(as_of, datetime) else datetime.utcnow()
+        done_ids.append(nid)
+    db.commit()
+    skipped = len(batch) - len(done_ids)
+    return NewsAiClassifyOut(
+        ok=True,
+        classified=len(done_ids),
+        skipped=max(0, skipped),
+        ids=done_ids,
+    )
 
 
 @app.get("/api/focus", response_model=FocusOut)

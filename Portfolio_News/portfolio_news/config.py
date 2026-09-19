@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     bcs_trade_refresh_token: str = ""
     bcs_trade_client_id: str = "trade-api-read"
 
+    # F-A: DeepSeek noise filter (key only in .env, never commit)
+    deepseek_api_key: str = ""
+    ai_noise_enabled: bool = False
+
 
 def get_settings() -> Settings:
     DATA_DIR.mkdir(parents=True, exist_ok=True)

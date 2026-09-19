@@ -41,6 +41,6 @@ CLI без UI: `python -m portfolio_news once --ticker SBER --notify digest` · 
 | A–D | ✅ | Новости, poll/scope, MOEX, БКС позиции (каркас) |
 | **K0–K2** | ✅ | Список БКС + история сделок + кэш |
 | **KA–KB · K3–K9** | ✅ | День · Focus · график · карточка · scope БКС · капитал · календарь · сделки + CSV · toast-антиспам |
-| E–J / F / KV | ⬜ | Новостной хвост / ИИ-шум / визуал (позже) |
+| E / F / G–H / J / KV | ⬜ | Хвост: polish / ИИ / watch / телефон / Docker / визуал — очередь в MAP |
 
 Полный канон статуса/очереди: [MAP.md](MAP.md). Техника: [docs/TZ.md](docs/TZ.md).

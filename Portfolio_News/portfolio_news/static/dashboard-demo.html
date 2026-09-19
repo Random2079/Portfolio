@@ -80,6 +80,28 @@
         min-height: 1.1em;
       }
       .feed-toolbar .poll-status.err { color: var(--down); }
+      .feed-toolbar .ai-btn {
+        font: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--border); background: #fff; color: var(--text);
+        border-radius: 8px; padding: 0.32rem 0.85rem;
+      }
+      .feed-toolbar .ai-btn:disabled { opacity: 0.55; cursor: default; }
+      .feed-toolbar .ai-hide {
+        display: flex; align-items: center; gap: 0.35rem;
+        font-size: 0.8rem; color: var(--muted); font-weight: 600; cursor: pointer;
+      }
+      .feed-toolbar .ai-hint {
+        font-size: 0.72rem; color: var(--muted); width: 100%;
+      }
+      .ai-badge {
+        display: inline-block; font-size: 0.68rem; font-weight: 700;
+        border-radius: 6px; padding: 0.1rem 0.4rem; margin-left: 0.35rem;
+        vertical-align: middle; letter-spacing: 0.02em;
+      }
+      .ai-badge.noise { background: #f0f0f0; color: #666; }
+      .ai-badge.relevant { background: #e8f5e9; color: #1b5e20; }
+      .ai-badge.dup { background: #fff3e0; color: #e65100; }
+      .ai-urg { font-size: 0.68rem; color: var(--muted); margin-left: 0.25rem; }
       .banner {
         font-size: 0.8rem; color: var(--muted); background: #fff8e6;
         border: 1px solid #f0d78c; border-radius: 10px; padding: 0.65rem 0.85rem;
@@ -946,7 +968,13 @@
           </label>
           <button type="button" class="poll-btn" id="btnPoll">Искать новости</button>
           <button type="button" class="poll-cancel" id="btnPollCancel" hidden>Отмена</button>
+          <button type="button" class="ai-btn" id="btnAiClassify" disabled>Прогнать ИИ</button>
+          <label class="ai-hide">
+            <input type="checkbox" id="aiHideNoise" />
+            <span>Скрыть шум</span>
+          </label>
           <span class="poll-status" id="pollStatus" aria-live="polite"></span>
+          <span class="ai-hint" id="aiHint" hidden></span>
         </div>
         <ul id="feed"></ul>
       </section>
@@ -4254,31 +4282,86 @@
             "Лента по бумагам портфеля. Toast — только сегодняшние (Екб), по умолчанию digest.";
           feedLead.className = "lead";
         }
-        if (!newsList.length) {
-          feed.innerHTML =
-            '<li class="empty">Лента пуста — нажми «Искать новости» или CLI: once.</li>';
-        } else {
-          for (const n of newsList) {
-            const li = document.createElement("li");
-            const href = String(n.url || "");
-            const safe =
-              href.startsWith("http://") || href.startsWith("https://") ? href : "";
-            li.innerHTML =
-              (safe
-                ? '<a href="' + esc(safe) + '" target="_blank" rel="noreferrer">'
-                : "<span>") +
-              esc(n.title || "(без заголовка)") +
-              (safe ? "</a>" : "</span>") +
-              '<div class="meta">' +
-              esc([n.ticker_id, n.source].filter(Boolean).join(" · ")) +
-              "</div>";
-            feed.appendChild(li);
-          }
-        }
+        renderNewsList(feed, newsList);
       }
 
       let pollTimer = null;
       let pollBusy = false;
+      let aiBusy = false;
+
+      const AI_HIDE_KEY = "pn_ai_hide_noise";
+
+      function aiHideNoiseOn() {
+        try {
+          return localStorage.getItem(AI_HIDE_KEY) === "1";
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function setAiHideNoise(on) {
+        try {
+          localStorage.setItem(AI_HIDE_KEY, on ? "1" : "0");
+        } catch (_) {}
+      }
+
+      function aiBadgeHtml(n) {
+        const label = String(n.ai_label || "").toLowerCase();
+        if (!label) return "";
+        const map = { noise: "шум", relevant: "ок", dup: "дубль" };
+        const text = map[label] || label;
+        let urg = "";
+        if (label === "relevant" && n.ai_urgency) {
+          urg =
+            '<span class="ai-urg" title="' +
+            esc(n.ai_reason || "") +
+            '">' +
+            esc(String(n.ai_urgency)) +
+            "</span>";
+        }
+        const tip = n.ai_reason ? ' title="' + esc(n.ai_reason) + '"' : "";
+        return (
+          '<span class="ai-badge ' +
+          esc(label) +
+          '"' +
+          tip +
+          ">" +
+          esc(text) +
+          "</span>" +
+          urg
+        );
+      }
+
+      function renderNewsList(feed, newsList) {
+        if (!feed) return;
+        feed.innerHTML = "";
+        let list = newsList || [];
+        if (aiHideNoiseOn()) {
+          list = list.filter((n) => String(n.ai_label || "").toLowerCase() !== "noise");
+        }
+        if (!list.length) {
+          feed.innerHTML =
+            '<li class="empty">Лента пуста — нажми «Искать новости» или CLI: once.</li>';
+          return;
+        }
+        for (const n of list) {
+          const li = document.createElement("li");
+          const href = String(n.url || "");
+          const safe =
+            href.startsWith("http://") || href.startsWith("https://") ? href : "";
+          li.innerHTML =
+            (safe
+              ? '<a href="' + esc(safe) + '" target="_blank" rel="noreferrer">'
+              : "<span>") +
+            esc(n.title || "(без заголовка)") +
+            (safe ? "</a>" : "</span>") +
+            aiBadgeHtml(n) +
+            '<div class="meta">' +
+            esc([n.ticker_id, n.source].filter(Boolean).join(" · ")) +
+            "</div>";
+          feed.appendChild(li);
+        }
+      }
 
       function notifyModeValue() {
         const sel = document.getElementById("notifyMode");
@@ -4306,29 +4389,77 @@
           const news = await fetch("/api/news?limit=40").then((r) => r.json());
           const feed = document.getElementById("feed");
           if (!feed) return;
-          feed.innerHTML = "";
           if (!news || !news.length) {
             feed.innerHTML =
               '<li class="empty">Лента пуста — новых URL не нашли.</li>';
             return;
           }
-          for (const n of news) {
-            const li = document.createElement("li");
-            const href = String(n.url || "");
-            const safe =
-              href.startsWith("http://") || href.startsWith("https://") ? href : "";
-            li.innerHTML =
-              (safe
-                ? '<a href="' + esc(safe) + '" target="_blank" rel="noreferrer">'
-                : "<span>") +
-              esc(n.title || "(без заголовка)") +
-              (safe ? "</a>" : "</span>") +
-              '<div class="meta">' +
-              esc([n.ticker_id, n.source].filter(Boolean).join(" · ")) +
-              "</div>";
-            feed.appendChild(li);
-          }
+          renderNewsList(feed, news);
         } catch (_) {}
+      }
+
+      async function refreshAiStatus() {
+        const btn = document.getElementById("btnAiClassify");
+        const hint = document.getElementById("aiHint");
+        try {
+          const st = await fetch("/api/news/ai-status").then((r) => r.json());
+          const ready = !!(st && st.ready);
+          if (btn) {
+            btn.disabled = !ready || aiBusy;
+            btn.title = ready ? "Прогнать DeepSeek по сегодняшним" : st.hint || "";
+          }
+          if (hint) {
+            if (ready) {
+              hint.hidden = true;
+              hint.textContent = "";
+            } else {
+              hint.hidden = false;
+              hint.textContent = st.hint || "ИИ выкл";
+            }
+          }
+        } catch (_) {
+          if (btn) btn.disabled = true;
+          if (hint) {
+            hint.hidden = false;
+            hint.textContent = "статус ИИ недоступен";
+          }
+        }
+      }
+
+      async function runAiClassify() {
+        const btn = document.getElementById("btnAiClassify");
+        if (aiBusy) return;
+        aiBusy = true;
+        if (btn) btn.disabled = true;
+        setPollStatus("ИИ: классификация…");
+        try {
+          const r = await fetch("/api/news/ai-classify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ today_only: true, limit: 30 }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            const detail =
+              (data && (data.detail || data.error)) || r.statusText || "ошибка";
+            setPollStatus(
+              "ИИ: " + (typeof detail === "string" ? detail : JSON.stringify(detail)),
+              true
+            );
+            return;
+          }
+          setPollStatus(
+            "ИИ: помечено " +
+              (data.classified || 0) +
+              (data.skipped ? " · пропуск " + data.skipped : "")
+          );
+          await refreshNewsFeed();
+        } catch (e) {
+          setPollStatus("ИИ: " + (e && e.message ? e.message : "сеть"), true);
+        } finally {
+          aiBusy = false;
+          await refreshAiStatus();
+        }
       }
 
       async function pollTickStatus() {
@@ -4609,6 +4740,17 @@
       if (btnPoll) btnPoll.addEventListener("click", () => startNewsPoll());
       const btnPollCancel = document.getElementById("btnPollCancel");
       if (btnPollCancel) btnPollCancel.addEventListener("click", () => cancelNewsPoll());
+      const btnAi = document.getElementById("btnAiClassify");
+      if (btnAi) btnAi.addEventListener("click", () => runAiClassify());
+      const hideNoise = document.getElementById("aiHideNoise");
+      if (hideNoise) {
+        hideNoise.checked = aiHideNoiseOn();
+        hideNoise.addEventListener("change", () => {
+          setAiHideNoise(!!hideNoise.checked);
+          refreshNewsFeed();
+        });
+      }
+      refreshAiStatus();
       const notifyModeSel = document.getElementById("notifyMode");
       if (notifyModeSel) {
         notifyModeSel.addEventListener("change", () => {

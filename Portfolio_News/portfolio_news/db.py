@@ -40,6 +40,21 @@ class NewsItem(Base):
     ticker: Mapped[Ticker] = relationship(back_populates="news")
 
 
+class NewsAiCache(Base):
+    """F-A: DeepSeek noise label per news row (button classify, not poller)."""
+
+    __tablename__ = "news_ai_cache"
+
+    news_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("news.id"), primary_key=True
+    )
+    label: Mapped[str] = mapped_column(String(16), default="")  # noise|relevant|dup
+    urgency: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)  # low|mid|high
+    reason: Mapped[str] = mapped_column(String(160), default="")
+    model: Mapped[str] = mapped_column(String(64), default="")
+    as_of: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class BcsOperation(Base):
     """Cached BCS deal (K2). Primary key = broker deal_id or fingerprint."""
 

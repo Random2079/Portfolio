@@ -14,5 +14,4 @@
 
 ## Не здесь
 
-- Investing / IR эмитентов → слой I в TZ.
-- ИИ-фильтр → [08-ai-noise](08-ai-noise.md).
+- ИИ-фильтр → [08-ai-noise](08-ai-noise.md) · план A в [MAP §7](../../MAP.md).
