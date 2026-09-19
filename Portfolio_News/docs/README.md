@@ -2,9 +2,10 @@
 
 | Документ | Назначение |
 |----------|------------|
-| [TZ.md](TZ.md) | Главное ТЗ (слои, не делаем, проверка) |
+| **[MAP.md](../MAP.md)** | **Главная карта (статус, очередь, F-A) — открывай её** |
+| [TZ.md](TZ.md) | Техслои для кода |
 | [PROMPT_FOR_AGENT.md](PROMPT_FOR_AGENT.md) | Блок для нового чата |
-| [parts/INDEX.md](parts/INDEX.md) | Карта parts |
+| [parts/INDEX.md](parts/INDEX.md) | Оглавление parts |
 
 ## Parts → код
 
@@ -19,4 +20,5 @@
 | [07-bcs](parts/07-bcs.md) | `bcs_client.py` |
 | [08-ai-noise](parts/08-ai-noise.md) | *(план)* |
 | [09-watch-phone](parts/09-watch-phone.md) | CLI `watch` + план авто/телефон |
-| [10-bcs-terminal](parts/10-bcs-terminal.md) | Свой БКС: история / графики / разбор (K0–K6) |
+| [10-bcs-terminal](parts/10-bcs-terminal.md) | Свой БКС: история / графики / разбор (K0–K9) |
+| [11-review-checkpoint](parts/11-review-checkpoint.md) | **KS** сверка · `review_facts.py` + `/api/review` |

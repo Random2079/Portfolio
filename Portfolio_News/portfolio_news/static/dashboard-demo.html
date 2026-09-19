@@ -50,6 +50,36 @@
       .nav { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
       .panel[hidden] { display: none !important; }
       .ops-box, .feed-box { margin-top: 0; }
+      .feed-toolbar {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.55rem;
+        margin: 0 0 0.85rem;
+      }
+      .feed-toolbar label {
+        display: flex; align-items: center; gap: 0.35rem;
+        font-size: 0.8rem; color: var(--muted); font-weight: 600;
+      }
+      .feed-toolbar select {
+        font: inherit; font-size: 0.82rem; font-weight: 600;
+        border: 1px solid var(--border); border-radius: 8px;
+        padding: 0.28rem 0.55rem; background: #fff; color: var(--text);
+      }
+      .feed-toolbar .poll-btn {
+        font: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--accent); background: var(--accent); color: #fff;
+        border-radius: 8px; padding: 0.32rem 0.85rem;
+      }
+      .feed-toolbar .poll-btn:disabled { opacity: 0.55; cursor: default; }
+      .feed-toolbar .poll-cancel {
+        font: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--border); background: #fff; color: var(--muted);
+        border-radius: 8px; padding: 0.32rem 0.7rem;
+      }
+      .feed-toolbar .poll-cancel[hidden] { display: none !important; }
+      .feed-toolbar .poll-status {
+        font-size: 0.78rem; color: var(--muted); margin-left: auto;
+        min-height: 1.1em;
+      }
+      .feed-toolbar .poll-status.err { color: var(--down); }
       .banner {
         font-size: 0.8rem; color: var(--muted); background: #fff8e6;
         border: 1px solid #f0d78c; border-radius: 10px; padding: 0.65rem 0.85rem;
@@ -350,6 +380,50 @@
       .chart-toolbar .hint { font-size: 0.75rem; color: var(--muted); margin-left: auto; }
       .chart-wrap { position: relative; height: 260px; width: 100%; }
       .chart-wrap canvas { max-width: 100%; }
+      #priceChartWrap {
+        position: relative;
+        height: 380px;
+        width: 100%;
+        border-radius: 10px;
+        overflow: hidden;
+        background: #0b0e11;
+        border: 1px solid #222831;
+      }
+      #priceChartWrap #priceChart { width: 100%; height: 100%; }
+      .trade-tip {
+        position: absolute;
+        z-index: 5;
+        min-width: 11rem;
+        max-width: 18rem;
+        padding: 0.55rem 0.7rem;
+        border-radius: 8px;
+        background: rgba(15, 18, 24, 0.94);
+        border: 1px solid #3a4452;
+        color: #e8ecf1;
+        font-size: 0.78rem;
+        line-height: 1.35;
+        pointer-events: none;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+      }
+      .trade-tip[hidden] { display: none !important; }
+      .trade-tip .tt-side {
+        font-weight: 700;
+        margin-bottom: 0.25rem;
+      }
+      .trade-tip .tt-side.buy { color: #22c55e; }
+      .trade-tip .tt-side.sell { color: #ef4444; }
+      .trade-tip .tt-row {
+        font-variant-numeric: tabular-nums;
+        color: #c8cdd3;
+      }
+      .trade-tip .tt-sum {
+        margin-top: 0.3rem;
+        padding-top: 0.3rem;
+        border-top: 1px solid #2a313c;
+        color: #e8ecf1;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
 
       /* K7 payout calendar */
       .pay-box {
@@ -547,6 +621,7 @@
       tr.chart-active td { background: #eef4ff; }
       tr.chart-row { cursor: pointer; }
       tr.chart-row:hover td { background: #f7f9fc; }
+      li.day-row.chart-active { background: #eef4ff; outline: 1px solid #c5d6f5; }
       .pos-card {
         margin-top: 0.85rem; padding-top: 0.85rem;
         border-top: 1px solid var(--border);
@@ -572,8 +647,142 @@
       .pos-grid .cell .s {
         font-size: 0.75rem; color: var(--muted); margin-top: 0.08rem;
       }
+
+      /* KS mock — сверка / факты (UI only, no API yet) */
+      .review-box {
+        margin-top: 1rem; padding: 0.9rem 1rem 1rem;
+        border: 1px dashed #c5cedb; border-radius: 12px;
+        background: #fafbfd;
+      }
+      .review-box .rv-head {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem 0.65rem;
+        margin-bottom: 0.55rem;
+      }
+      .review-box h3 {
+        margin: 0; font-size: 0.95rem; font-weight: 700;
+      }
+      .review-box .rv-mock-tag {
+        font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+        text-transform: uppercase; color: #8a6d1d;
+        background: #fff6d6; border: 1px solid #e8d48a;
+        border-radius: 6px; padding: 0.12rem 0.4rem;
+      }
+      .review-box .rv-lead {
+        margin: 0 0 0.65rem; font-size: 0.8rem; color: var(--muted);
+      }
+      .review-kinds { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.75rem; }
+      .review-kinds button {
+        font: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--border); background: #fff; color: var(--muted);
+        border-radius: 8px; padding: 0.22rem 0.55rem;
+      }
+      .review-kinds button.on {
+        background: var(--accent); border-color: var(--accent); color: #fff;
+      }
+      .rv-bond-title {
+        font-size: 0.88rem; font-weight: 650; margin: 0 0 0.55rem;
+        line-height: 1.35;
+      }
+      .rv-bond-title .isin {
+        display: block; font-size: 0.75rem; font-weight: 600;
+        color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 0.15rem;
+      }
+      .rv-sector {
+        display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem 0.65rem;
+        margin-bottom: 0.7rem;
+      }
+      .rv-chip {
+        font-size: 0.72rem; font-weight: 700;
+        background: #eef4ff; color: #2f6fed;
+        border: 1px solid #c9daf8; border-radius: 999px;
+        padding: 0.18rem 0.55rem;
+      }
+      .rv-look {
+        font-size: 0.8rem; color: var(--text); flex: 1 1 12rem;
+      }
+      .rv-look span { color: var(--muted); font-weight: 600; }
+      .rv-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(9.8rem, 1fr));
+        gap: 0.5rem 0.75rem;
+        margin-bottom: 0.75rem;
+      }
+      .rv-cell {
+        background: #fff; border: 1px solid var(--border);
+        border-radius: 10px; padding: 0.5rem 0.55rem;
+      }
+      .rv-cell .k {
+        font-size: 0.68rem; color: var(--muted); font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.02em;
+      }
+      .rv-cell .v {
+        font-size: 0.9rem; font-weight: 650; margin-top: 0.15rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .rv-cell .v.miss { color: var(--muted); font-weight: 600; font-size: 0.82rem; }
+      .rv-src {
+        display: inline-block; margin-top: 0.28rem;
+        font-size: 0.65rem; font-weight: 700; letter-spacing: 0.02em;
+        color: var(--muted); background: #f0f3f7;
+        border-radius: 4px; padding: 0.08rem 0.32rem;
+      }
+      .rv-src.miss { color: #8a6d1d; background: #fff6d6; }
+      .rv-src.moex { color: #1a5f9e; background: #e8f1fa; }
+      .rv-src.bcs { color: #0f7a5a; background: #eaf7f1; }
+      .rv-flags { margin: 0 0 0.75rem; }
+      .rv-flags .fk {
+        font-size: 0.72rem; color: var(--muted); font-weight: 600;
+        text-transform: uppercase; margin-bottom: 0.35rem;
+      }
+      .rv-flags ul {
+        list-style: none; margin: 0; padding: 0;
+        display: flex; flex-direction: column; gap: 0.28rem;
+      }
+      .rv-flags li {
+        font-size: 0.8rem; display: flex; align-items: center; gap: 0.4rem;
+        color: var(--muted);
+      }
+      .rv-flags li .dot {
+        width: 0.55rem; height: 0.55rem; border-radius: 50%;
+        background: #d0d7e2; flex-shrink: 0;
+      }
+      .rv-flags li.warn { color: var(--text); }
+      .rv-flags li.warn .dot { background: #d97706; }
+      .rv-flags li.bad { color: var(--down); font-weight: 600; }
+      .rv-flags li.bad .dot { background: var(--down); }
+      .rv-verdict {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem;
+        padding-top: 0.55rem; border-top: 1px solid var(--border);
+      }
+      .rv-verdict .vk {
+        font-size: 0.72rem; color: var(--muted); font-weight: 600;
+        text-transform: uppercase; width: 100%;
+      }
+      .rv-verdict button {
+        font: inherit; font-size: 0.72rem; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--border); background: #fff; color: var(--muted);
+        border-radius: 8px; padding: 0.2rem 0.5rem;
+      }
+      .rv-verdict button.on {
+        background: #1a2330; border-color: #1a2330; color: #fff;
+      }
+      .rv-note {
+        margin: 0.55rem 0 0; font-size: 0.72rem; color: var(--muted);
+      }
+      .rv-pos {
+        margin: 0 0 0.65rem; font-size: 0.82rem; font-weight: 600;
+        color: var(--text); background: #fff; border: 1px solid var(--border);
+        border-radius: 8px; padding: 0.4rem 0.55rem;
+      }
+      .rv-err {
+        margin: 0 0 0.55rem; font-size: 0.78rem; color: var(--down);
+      }
+      .rv-legend {
+        margin: 0 0 0.35rem; font-size: 0.68rem; color: var(--muted);
+      }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body>
     <div class="wrap">
@@ -692,14 +901,32 @@
           <select id="chartTicker" aria-label="Тикер для графика">
             <option value="">—</option>
           </select>
-          <span class="hint" id="chartHint">цифры и график · не советы</span>
+          <span class="hint" id="chartHint">вид: этот год · ● зел./красн. · наведи — цена, шт, время</span>
         </div>
-        <div class="chart-wrap"><canvas id="priceChart" aria-label="График цены"></canvas></div>
+        <div class="chart-wrap" id="priceChartWrap">
+          <div id="priceChart" role="img" aria-label="График цены"></div>
+          <div class="trade-tip" id="tradeTip" hidden></div>
+        </div>
         <div class="chart-status" id="chartStatus">Выбери бумагу.</div>
         <div class="pos-card" id="posCard" aria-live="polite">
           <h3 id="posCardTitle">Карточка бумаги</h3>
           <p class="pos-empty" id="posCardEmpty">Кликни тикер — avg, покупки, PnL, доля.</p>
           <div class="pos-grid" id="posCardGrid" hidden></div>
+        </div>
+
+        <div class="review-box" id="reviewBox" aria-label="Сверка факты">
+          <div class="rv-head">
+            <h3>Сверка / факты</h3>
+            <span class="rv-mock-tag">KS</span>
+          </div>
+          <p class="rv-lead">Чек-поинт по активу. Не совет купить/продать. Кэш → MOEX; дырки = [НЕТ ДАННЫХ].</p>
+          <div class="review-kinds" id="reviewKindChips" role="tablist" aria-label="Тип (подсветка)">
+            <button type="button" class="on" data-rv-kind="equity" role="tab" aria-selected="true">Акция</button>
+            <button type="button" data-rv-kind="bond" role="tab" aria-selected="false">Облигация</button>
+            <button type="button" data-rv-kind="fund" role="tab" aria-selected="false">Фонд</button>
+          </div>
+          <div id="reviewBody"></div>
+          <p class="rv-note">Мультипликаторы SmartLab / Dohod — следующим слоем. Вердикт кликабельный, на тикер (localStorage).</p>
         </div>
       </section>
       </div>
@@ -707,7 +934,20 @@
       <div class="panel" data-panel="news" id="panelNews" hidden>
       <section class="feed-box">
         <h2>Новости</h2>
-        <p id="feedLead">Новости из базы по бумагам портфеля. Опрос: CLI <code>once</code> / POST <code>/api/poll</code>.</p>
+        <p class="lead" id="feedLead">Лента по бумагам портфеля. Toast — только сегодняшние, по умолчанию digest.</p>
+        <div class="feed-toolbar" id="feedToolbar">
+          <label for="notifyMode">
+            <span>Toast</span>
+            <select id="notifyMode" aria-label="Режим уведомлений">
+              <option value="digest">digest (один)</option>
+              <option value="off">off</option>
+              <option value="each">each (каждый)</option>
+            </select>
+          </label>
+          <button type="button" class="poll-btn" id="btnPoll">Искать новости</button>
+          <button type="button" class="poll-cancel" id="btnPollCancel" hidden>Отмена</button>
+          <span class="poll-status" id="pollStatus" aria-live="polite"></span>
+        </div>
         <ul id="feed"></ul>
       </section>
       </div>
@@ -776,7 +1016,8 @@
       } catch (_) {
         lastDaySnap = null;
       }
-      let priceChart = null;
+      let priceLwc = null; // { chart, series }
+      let priceLwcRo = null;
       let capitalChart = null;
       let lastCapitalPoints = null;
       let payMonthsChart = null;
@@ -788,8 +1029,10 @@
       let payStatuses = { paid: true, upcoming: true, announced: true };
       let chartTickerSel = "";
       let chartLoadSeq = 0;
+      let chartLoading = false;
       let posLoadSeq = 0;
       let lastPosCard = null;
+      let priceAvgLine = null;
 
       function fmtMoney(v) {
         if (v == null || Number.isNaN(Number(v))) return "—";
@@ -2179,21 +2422,636 @@
       }
 
       function destroyPriceChart() {
-        const canvas = document.getElementById("priceChart");
-        if (typeof Chart !== "undefined" && Chart.getChart && canvas) {
-          const existing = Chart.getChart(canvas);
-          if (existing) {
-            try {
-              existing.destroy();
-            } catch (_) {}
+        hideTradeTip();
+        priceAvgLine = null;
+        if (priceLwcRo) {
+          try {
+            priceLwcRo.disconnect();
+          } catch (_) {}
+          priceLwcRo = null;
+        }
+        if (priceLwc) {
+          try {
+            if (priceLwc.chart && priceLwc.chart.remove) priceLwc.chart.remove();
+          } catch (_) {}
+          priceLwc = null;
+        }
+        const host = document.getElementById("priceChart");
+        if (host) host.innerHTML = "";
+      }
+
+      function resizePriceChart() {
+        if (!priceLwc || !priceLwc.chart) return;
+        const host = document.getElementById("priceChart");
+        if (!host) return;
+        const w = host.clientWidth;
+        const h = host.clientHeight;
+        if (w > 0 && h > 0) {
+          try {
+            priceLwc.chart.applyOptions({ width: w, height: h });
+          } catch (_) {}
+        }
+      }
+
+      function fmtPxShort(v) {
+        if (v == null || !Number.isFinite(Number(v))) return "";
+        const n = Number(v);
+        if (Math.abs(n) >= 1000) {
+          return n.toLocaleString("ru-RU", { maximumFractionDigits: 0 });
+        }
+        if (Math.abs(n) >= 10) {
+          return n.toLocaleString("ru-RU", {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+          });
+        }
+        return n.toLocaleString("ru-RU", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 4,
+        });
+      }
+
+      function fmtMarkerDay(iso) {
+        const dk = markerDateKey(iso);
+        if (!dk || dk.length < 10) return "";
+        return dk.slice(8, 10) + "." + dk.slice(5, 7);
+      }
+
+      /** DD.MM; HH:MM только если не полночь (00:00 бессмысленно). */
+      function fmtMarkerWhen(s) {
+        const t = String(s || "").trim();
+        if (!t) return "";
+        let day = "";
+        let hm = "";
+        const iso = t.match(
+          /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/
+        );
+        if (iso) {
+          day = iso[3] + "." + iso[2];
+          if (iso[4] != null) hm = iso[4] + ":" + iso[5];
+        } else {
+          const ru = t.match(
+            /(\d{2})\.(\d{2})\.(\d{4})(?:[ T](\d{2}):(\d{2}))?/
+          );
+          if (ru) {
+            day = ru[1] + "." + ru[2];
+            if (ru[4] != null) hm = ru[4] + ":" + ru[5];
+          } else {
+            day = fmtMarkerDay(t);
           }
         }
-        if (priceChart) {
-          try {
-            priceChart.destroy();
-          } catch (_) {}
-          priceChart = null;
+        if (!day) return "";
+        if (!hm || hm === "00:00") return day;
+        return day + " " + hm;
+      }
+
+      /** Calendar year in Asia/Yekaterinburg → "YYYY-01-01". */
+      function chartYearStartKey() {
+        try {
+          const y = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Yekaterinburg",
+            year: "numeric",
+          }).format(new Date());
+          return String(y).slice(0, 4) + "-01-01";
+        } catch (_) {
+          return new Date().getFullYear() + "-01-01";
         }
+      }
+
+      function chartYearLabel() {
+        return chartYearStartKey().slice(0, 4);
+      }
+
+      /** Data = full history; viewport = this year (scroll/zoom out for older). */
+      function focusChartOnLocalYear(chart, bars) {
+        if (!chart || !bars || !bars.length) return false;
+        const ys = chartYearStartKey();
+        let fromIdx = -1;
+        for (let i = 0; i < bars.length; i++) {
+          if (String(bars[i].time) >= ys) {
+            fromIdx = i;
+            break;
+          }
+        }
+        if (fromIdx < 0) {
+          // no bars in this year yet → last ~1y of series
+          fromIdx = Math.max(0, bars.length - 260);
+        }
+        const from = bars[fromIdx].time;
+        const to = bars[bars.length - 1].time;
+        try {
+          chart.timeScale().setVisibleRange({ from: from, to: to });
+          return true;
+        } catch (_) {
+          try {
+            chart.timeScale().fitContent();
+          } catch (_) {}
+          return false;
+        }
+      }
+
+      function resolveAvgForChart(tid) {
+        const want = String(tid || "").trim().toUpperCase();
+        if (!want) return null;
+        if (
+          lastPosCard &&
+          String(lastPosCard.ticker || "").toUpperCase() === want &&
+          lastPosCard.avg_price != null &&
+          Number.isFinite(Number(lastPosCard.avg_price))
+        ) {
+          return Number(lastPosCard.avg_price);
+        }
+        const local = posCardFromLocal(want);
+        if (local && local.avg_price != null && Number.isFinite(Number(local.avg_price))) {
+          return Number(local.avg_price);
+        }
+        return null;
+      }
+
+      function syncAvgPriceLine(avg) {
+        if (!priceLwc || !priceLwc.series) return;
+        const series = priceLwc.series;
+        if (priceAvgLine) {
+          try {
+            if (series.removePriceLine) series.removePriceLine(priceAvgLine);
+          } catch (_) {}
+          priceAvgLine = null;
+        }
+        if (avg == null || !Number.isFinite(Number(avg)) || Number(avg) <= 0) return;
+        if (!series.createPriceLine) return;
+        const dashed =
+          LightweightCharts.LineStyle && LightweightCharts.LineStyle.Dashed != null
+            ? LightweightCharts.LineStyle.Dashed
+            : 2;
+        try {
+          priceAvgLine = series.createPriceLine({
+            price: Number(avg),
+            color: "#f0b429",
+            lineWidth: 2,
+            lineStyle: dashed,
+            axisLabelVisible: true,
+            title: "avg",
+          });
+        } catch (_) {
+          priceAvgLine = null;
+        }
+      }
+
+      function candlesToLwc(raw) {
+        const bars = [];
+        const vols = [];
+        const seen = new Set();
+        for (const c of raw || []) {
+          const time = candleDateKey(c.begin || c.time);
+          if (!time || seen.has(time)) continue;
+          const close = c.close != null ? Number(c.close) : NaN;
+          if (!Number.isFinite(close)) continue;
+          const open =
+            c.open != null && Number.isFinite(Number(c.open)) ? Number(c.open) : close;
+          let high =
+            c.high != null && Number.isFinite(Number(c.high))
+              ? Number(c.high)
+              : Math.max(open, close);
+          let low =
+            c.low != null && Number.isFinite(Number(c.low))
+              ? Number(c.low)
+              : Math.min(open, close);
+          if (high < Math.max(open, close)) high = Math.max(open, close);
+          if (low > Math.min(open, close)) low = Math.min(open, close);
+          seen.add(time);
+          bars.push({ time: time, open: open, high: high, low: low, close: close });
+          const vol = c.volume != null ? Number(c.volume) : NaN;
+          if (Number.isFinite(vol) && vol > 0) {
+            vols.push({
+              time: time,
+              value: vol,
+              color: close >= open ? "rgba(38,166,154,0.45)" : "rgba(239,83,80,0.45)",
+            });
+          } else {
+            vols.push({
+              time: time,
+              value: 0,
+              color: "rgba(139,148,158,0.2)",
+            });
+          }
+        }
+        bars.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+        vols.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+        return { bars: bars, vols: vols };
+      }
+
+      function markersToLwc(rawMarkers, candleTimes) {
+        const times = candleTimes || [];
+        function snap(dk) {
+          if (!dk || !times.length) return "";
+          if (times.indexOf(dk) >= 0) return dk;
+          let best = "";
+          for (let i = 0; i < times.length; i++) {
+            if (times[i] <= dk) best = times[i];
+            else break;
+          }
+          return best;
+        }
+        const byTime = {};
+        for (const m of rawMarkers || []) {
+          const rawAt = m.executed_at || m.time || "";
+          const dk = snap(markerDateKey(rawAt));
+          if (!dk) continue;
+          const side = String(m.side || "").toLowerCase();
+          if (side !== "buy" && side !== "sell") continue;
+          if (!byTime[dk]) byTime[dk] = { time: dk, buy: false, sell: false };
+          if (side === "buy") byTime[dk].buy = true;
+          if (side === "sell") byTime[dk].sell = true;
+        }
+        const out = [];
+        Object.keys(byTime)
+          .sort()
+          .forEach((k) => {
+            const s = byTime[k];
+            if (s.buy) {
+              out.push({
+                time: s.time,
+                position: "belowBar",
+                color: "#22c55e",
+                shape: "circle",
+                text: "покупка",
+              });
+            }
+            if (s.sell) {
+              out.push({
+                time: s.time,
+                position: "aboveBar",
+                color: "#ef4444",
+                shape: "circle",
+                text: "продажа",
+              });
+            }
+          });
+        return out;
+      }
+
+      /** Точки + подсказки (цена / кол-во / когда). */
+      function tradeDotsFromMarkers(rawMarkers, bars) {
+        const times = (bars || []).map((b) => b.time);
+        const closeBy = {};
+        for (const b of bars || []) closeBy[b.time] = b.close;
+        function snap(dk) {
+          if (!dk || !times.length) return "";
+          if (times.indexOf(dk) >= 0) return dk;
+          let best = "";
+          for (let i = 0; i < times.length; i++) {
+            if (times[i] <= dk) best = times[i];
+            else break;
+          }
+          return best;
+        }
+        const tips = {};
+        let buyN = 0;
+        let sellN = 0;
+        for (const m of rawMarkers || []) {
+          const rawAt = m.executed_at || m.time || "";
+          const dk = snap(markerDateKey(rawAt));
+          if (!dk) continue;
+          const side = String(m.side || "").toLowerCase();
+          if (side !== "buy" && side !== "sell") continue;
+          let px = m.price != null ? Number(m.price) : NaN;
+          if (!Number.isFinite(px)) px = Number(closeBy[dk]);
+          if (!Number.isFinite(px)) continue;
+          let qty = m.quantity != null ? Number(m.quantity) : NaN;
+          if (!Number.isFinite(qty) || qty <= 0) qty = null;
+          if (!tips[dk]) tips[dk] = { buys: [], sells: [] };
+          const row = {
+            price: px,
+            qty: qty,
+            when: fmtMarkerWhen(rawAt) || fmtMarkerDay(dk) || dk,
+            rawAt: rawAt,
+          };
+          if (side === "buy") {
+            tips[dk].buys.push(row);
+            buyN += 1;
+          } else {
+            tips[dk].sells.push(row);
+            sellN += 1;
+          }
+        }
+        function seriesFrom(sideKey) {
+          return Object.keys(tips)
+            .sort()
+            .filter((k) => (tips[k][sideKey] || []).length)
+            .map((k) => {
+              const rows = tips[k][sideKey];
+              let wSum = 0;
+              let qSum = 0;
+              let last = rows[rows.length - 1].price;
+              for (const r of rows) {
+                if (r.qty != null) {
+                  wSum += r.price * r.qty;
+                  qSum += r.qty;
+                }
+              }
+              const value = qSum > 0 ? wSum / qSum : last;
+              return { time: k, value: value };
+            });
+        }
+        return {
+          buys: seriesFrom("buys"),
+          sells: seriesFrom("sells"),
+          tips: tips,
+          buyN: buyN,
+          sellN: sellN,
+        };
+      }
+
+      function hideTradeTip() {
+        const el = document.getElementById("tradeTip");
+        if (el) el.hidden = true;
+      }
+
+      function fmtQtyTip(v) {
+        if (v == null || !Number.isFinite(Number(v))) return "—";
+        const n = Number(v);
+        return n.toLocaleString("ru-RU", { maximumFractionDigits: 4 });
+      }
+
+      function tradeTipHtml(dayTip) {
+        if (!dayTip) return "";
+        let html = "";
+        function block(label, cls, rows) {
+          if (!(rows || []).length) return;
+          html += '<div class="tt-side ' + cls + '">' + label + "</div>";
+          let qTot = 0;
+          let hasQ = false;
+          let wSum = 0;
+          for (const r of rows) {
+            html +=
+              '<div class="tt-row">' +
+              esc(r.when || "—") +
+              " · " +
+              (r.qty != null ? esc(fmtQtyTip(r.qty)) + " шт @ " : "@ ") +
+              esc(fmtPxShort(r.price)) +
+              " ₽</div>";
+            if (r.qty != null) {
+              qTot += r.qty;
+              wSum += r.price * r.qty;
+              hasQ = true;
+            }
+          }
+          if (rows.length > 1) {
+            const avg = hasQ && qTot > 0 ? wSum / qTot : rows[rows.length - 1].price;
+            html +=
+              '<div class="tt-sum">итого' +
+              (hasQ ? " " + esc(fmtQtyTip(qTot)) + " шт" : "") +
+              " · ср. " +
+              esc(fmtPxShort(avg)) +
+              " ₽</div>";
+          }
+        }
+        block("Покупка", "buy", dayTip.buys);
+        block("Продажа", "sell", dayTip.sells);
+        return html;
+      }
+
+      function showTradeTip(dayTip, point, wrap) {
+        const el = document.getElementById("tradeTip");
+        if (!el || !wrap || !dayTip) return;
+        const html = tradeTipHtml(dayTip);
+        if (!html) {
+          el.hidden = true;
+          return;
+        }
+        el.innerHTML = html;
+        el.hidden = false;
+        const pad = 12;
+        const w = el.offsetWidth || 160;
+        const h = el.offsetHeight || 60;
+        const maxX = Math.max(0, wrap.clientWidth - w - pad);
+        const maxY = Math.max(0, wrap.clientHeight - h - pad);
+        let x = (point && point.x != null ? point.x : 0) + pad;
+        let y = (point && point.y != null ? point.y : 0) + pad;
+        if (x > maxX) x = Math.max(pad, (point.x || 0) - w - pad);
+        if (y > maxY) y = Math.max(pad, (point.y || 0) - h - pad);
+        el.style.left = Math.max(pad, Math.min(x, maxX)) + "px";
+        el.style.top = Math.max(pad, Math.min(y, maxY)) + "px";
+      }
+
+      function bindTradeTip(chart, tips, bars) {
+        if (!chart || !chart.subscribeCrosshairMove) return;
+        const wrap = document.getElementById("priceChartWrap");
+        const barTimes = (bars || []).map((b) => String(b.time).slice(0, 10));
+        const tipDays = Object.keys(tips || {}).sort();
+        const tipIndex = {};
+        tipDays.forEach((d, i) => {
+          tipIndex[d] = i;
+        });
+        // Шире «попадание»: ±N свечей от дня сделки.
+        const HIT_BARS = 6;
+
+        function tipTimeKey(t) {
+          if (t == null) return "";
+          if (typeof t === "string") return t.slice(0, 10);
+          if (typeof t === "object" && t.year != null) {
+            const mo = String(t.month).padStart(2, "0");
+            const d = String(t.day).padStart(2, "0");
+            return t.year + "-" + mo + "-" + d;
+          }
+          return String(t).slice(0, 10);
+        }
+
+        function barIndexFor(day) {
+          if (!day || !barTimes.length) return -1;
+          let exact = barTimes.indexOf(day);
+          if (exact >= 0) return exact;
+          let best = -1;
+          for (let i = 0; i < barTimes.length; i++) {
+            if (barTimes[i] <= day) best = i;
+            else break;
+          }
+          return best;
+        }
+
+        function findTipNear(day) {
+          if (!day || !tips) return null;
+          if (tips[day]) return tips[day];
+          const idx = barIndexFor(day);
+          if (idx < 0) return null;
+          let best = null;
+          let bestDist = HIT_BARS + 1;
+          for (const td of tipDays) {
+            const ti = barIndexFor(td);
+            if (ti < 0) continue;
+            const dist = Math.abs(ti - idx);
+            if (dist < bestDist) {
+              bestDist = dist;
+              best = tips[td];
+            }
+          }
+          return bestDist <= HIT_BARS ? best : null;
+        }
+
+        chart.subscribeCrosshairMove((param) => {
+          if (
+            !param ||
+            param.time == null ||
+            !param.point ||
+            param.point.x < 0 ||
+            param.point.y < 0
+          ) {
+            hideTradeTip();
+            return;
+          }
+          const dayTip = findTipNear(tipTimeKey(param.time));
+          if (
+            !dayTip ||
+            (!(dayTip.buys && dayTip.buys.length) &&
+              !(dayTip.sells && dayTip.sells.length))
+          ) {
+            hideTradeTip();
+            return;
+          }
+          showTradeTip(dayTip, param.point, wrap);
+        });
+      }
+
+      function addTradeDotSeries(chart, color, data) {
+        if (!chart || !chart.addLineSeries || !(data || []).length) return null;
+        try {
+          const s = chart.addLineSeries({
+            color: color,
+            lineWidth: 1,
+            lineVisible: false,
+            lastValueVisible: false,
+            priceLineVisible: false,
+            crosshairMarkerVisible: true,
+            pointMarkersVisible: true,
+            pointMarkersRadius: 6,
+          });
+          s.setData(data);
+          return s;
+        } catch (_) {
+          return null;
+        }
+      }
+
+      /** @returns {boolean} true if LWC instance left for this seq */
+      function renderPriceChart(payload, seq, avgPrice) {
+        if (seq != null && seq !== chartLoadSeq) return false;
+        destroyPriceChart();
+        if (seq != null && seq !== chartLoadSeq) return false;
+        const host = document.getElementById("priceChart");
+        if (!host || typeof LightweightCharts === "undefined") {
+          setChartStatus("Lightweight Charts не загрузился (CDN).", true);
+          return false;
+        }
+        const packed = candlesToLwc(payload.candles || []);
+        const bars = packed.bars || [];
+        const vols = packed.vols || [];
+        if (!bars.length) {
+          setChartStatus("Нет свечей MOEX для отрисовки.", true);
+          return false;
+        }
+        try {
+          if (seq != null && seq !== chartLoadSeq) return false;
+          const chart = LightweightCharts.createChart(host, {
+            layout: {
+              background: { color: "#0b0e11" },
+              textColor: "#c8cdd3",
+            },
+            grid: {
+              vertLines: { color: "#1a1f27" },
+              horzLines: { color: "#1a1f27" },
+            },
+            crosshair: {
+              mode:
+                LightweightCharts.CrosshairMode &&
+                LightweightCharts.CrosshairMode.Normal != null
+                  ? LightweightCharts.CrosshairMode.Normal
+                  : 0,
+            },
+            rightPriceScale: {
+              borderColor: "#2a313c",
+              scaleMargins: { top: 0.08, bottom: 0.28 },
+            },
+            timeScale: { borderColor: "#2a313c", timeVisible: false },
+            width: Math.max(host.clientWidth || 0, 100),
+            height: Math.max(host.clientHeight || 0, 200),
+          });
+          const series = chart.addCandlestickSeries({
+            upColor: "#26a69a",
+            downColor: "#ef5350",
+            borderVisible: false,
+            wickUpColor: "#26a69a",
+            wickDownColor: "#ef5350",
+          });
+          series.setData(bars);
+          const hasVol = vols.some((v) => v.value > 0);
+          let volSeries = null;
+          if (hasVol && chart.addHistogramSeries) {
+            volSeries = chart.addHistogramSeries({
+              priceFormat: { type: "volume" },
+              priceScaleId: "vol",
+              lastValueVisible: false,
+              priceLineVisible: false,
+            });
+            volSeries.setData(vols);
+            try {
+              chart.priceScale("vol").applyOptions({
+                scaleMargins: { top: 0.78, bottom: 0 },
+                borderVisible: false,
+              });
+            } catch (_) {}
+          } else {
+            try {
+              series.priceScale().applyOptions({
+                scaleMargins: { top: 0.08, bottom: 0.08 },
+              });
+            } catch (_) {}
+          }
+          const dots = tradeDotsFromMarkers(payload.markers || [], bars);
+          const buyDots = addTradeDotSeries(chart, "#22c55e", dots.buys);
+          const sellDots = addTradeDotSeries(chart, "#ef4444", dots.sells);
+          // Если серии точек не взлетели — кружки на свечах.
+          if ((!buyDots && dots.buys.length) || (!sellDots && dots.sells.length)) {
+            const marks = markersToLwc(
+              payload.markers || [],
+              bars.map((b) => b.time)
+            );
+            if (marks.length && series.setMarkers) series.setMarkers(marks);
+          }
+          // Данные — вся история; стартовый вид — текущий год (Екб).
+          focusChartOnLocalYear(chart, bars);
+          bindTradeTip(chart, dots.tips || {}, bars);
+          priceLwc = {
+            chart: chart,
+            series: series,
+            vol: volSeries,
+            buyDots: buyDots,
+            sellDots: sellDots,
+            tips: dots.tips || {},
+            markN: (dots.buyN || 0) + (dots.sellN || 0),
+            buyN: dots.buyN || 0,
+            sellN: dots.sellN || 0,
+            hasVol: hasVol,
+          };
+          syncAvgPriceLine(
+            avgPrice != null ? avgPrice : resolveAvgForChart(payload.ticker || chartTickerSel)
+          );
+          if (typeof ResizeObserver !== "undefined") {
+            priceLwcRo = new ResizeObserver(() => resizePriceChart());
+            const wrap = document.getElementById("priceChartWrap") || host;
+            priceLwcRo.observe(wrap);
+          }
+        } catch (e) {
+          destroyPriceChart();
+          if (seq != null && seq !== chartLoadSeq) return false;
+          setChartStatus(shortErr(e.message || e), true);
+          return false;
+        }
+        if (seq != null && seq !== chartLoadSeq) {
+          destroyPriceChart();
+          return false;
+        }
+        resizePriceChart();
+        return true;
       }
 
       function setChartStatus(text, isErr) {
@@ -2398,6 +3256,13 @@
             );
           })
           .join("");
+        if (
+          priceLwc &&
+          data.ticker &&
+          String(data.ticker).toUpperCase() === String(chartTickerSel || "").toUpperCase()
+        ) {
+          syncAvgPriceLine(data.avg_price);
+        }
       }
 
       async function loadPosCard(ticker) {
@@ -2405,8 +3270,10 @@
         const seq = ++posLoadSeq;
         if (!tid) {
           clearPosCard();
+          loadReview("");
           return;
         }
+        loadReview(tid);
         const local = posCardFromLocal(tid);
         if (local) {
           renderPosCard(local);
@@ -2437,6 +3304,252 @@
         }
       }
 
+      let reviewKindHint = "equity";
+      let reviewVerdictByTicker = {};
+      let reviewLoadSeq = 0;
+      let lastReviewData = null;
+
+      const REVIEW_VERDICTS = [
+        { id: "жив", label: "тезис жив" },
+        { id: "ослаб", label: "ослаб" },
+        { id: "hold", label: "hold" },
+        { id: "pass", label: "PASS-кэш" },
+        { id: "watch", label: "WATCH" },
+        { id: "нет_данных", label: "[НЕТ ДАННЫХ]" },
+      ];
+
+      function reviewVerdictFor(tid) {
+        const t = String(tid || "").toUpperCase();
+        if (!t) return "";
+        try {
+          const raw = localStorage.getItem("pn_review_verdict_" + t);
+          if (raw) return raw;
+        } catch (_) {}
+        return reviewVerdictByTicker[t] || "";
+      }
+
+      function setReviewVerdict(tid, id) {
+        const t = String(tid || "").toUpperCase();
+        if (!t) return;
+        reviewVerdictByTicker[t] = id;
+        try {
+          localStorage.setItem("pn_review_verdict_" + t, id);
+        } catch (_) {}
+      }
+
+      function srcBadge(src, asOf) {
+        const s = String(src || "").trim();
+        const miss = !s;
+        const cls =
+          s === "MOEX"
+            ? "moex"
+            : s === "BCS"
+              ? "bcs"
+              : s === "calendar"
+                ? "moex"
+                : miss
+                  ? "miss"
+                  : "";
+        const text = miss ? "[НЕТ ДАННЫХ]" : s;
+        const when = asOf ? " · " + asOf : "";
+        return (
+          "<span class='rv-src " +
+          cls +
+          "'>" +
+          esc(text + (miss ? "" : when)) +
+          "</span>"
+        );
+      }
+
+      function rvFieldFrom(f) {
+        const missing = !!(f && f.missing);
+        return (
+          "<div class='rv-cell'><div class='k'>" +
+          esc((f && f.label) || "") +
+          "</div><div class='v" +
+          (missing ? " miss" : "") +
+          "'>" +
+          esc(missing ? "[НЕТ ДАННЫХ]" : (f && f.value) || "—") +
+          "</div>" +
+          srcBadge(missing ? "" : (f && f.source) || "", missing ? "" : (f && f.as_of) || "") +
+          "</div>"
+        );
+      }
+
+      function rvFlagsHtml(items) {
+        return (
+          "<div class='rv-flags'>" +
+          "<div class='fk'>Красные флаги</div>" +
+          "<p class='rv-legend'>пусто · серое (глянуть) · красное</p>" +
+          "<ul>" +
+          (items || [])
+            .map((f) => {
+              const st = f.state || "empty";
+              return (
+                "<li class='" +
+                (st === "bad" ? "bad" : st === "warn" ? "warn" : "") +
+                "'><span class='dot' aria-hidden='true'></span>" +
+                esc(f.label || "") +
+                "</li>"
+              );
+            })
+            .join("") +
+          "</ul></div>"
+        );
+      }
+
+      function rvVerdictHtml(tid) {
+        const cur = reviewVerdictFor(tid);
+        return (
+          "<div class='rv-verdict'><div class='vk'>Итог сверки (твой клик)</div>" +
+          REVIEW_VERDICTS.map((v) => {
+            const on = cur === v.id ? " on" : "";
+            return (
+              "<button type='button' class='" +
+              on.trim() +
+              "' data-verdict='" +
+              esc(v.id) +
+              "'>" +
+              esc(v.label) +
+              "</button>"
+            );
+          }).join("") +
+          "</div>"
+        );
+      }
+
+      function renderReviewPayload(data) {
+        const body = document.getElementById("reviewBody");
+        const tag = document.querySelector("#reviewBox .rv-mock-tag");
+        if (!body) return;
+        lastReviewData = data || null;
+        if (!data) {
+          body.innerHTML =
+            "<p class='rv-lead'>Кликни тикер — подтянется сверка (кэш / MOEX).</p>";
+          if (tag) tag.textContent = "KS";
+          return;
+        }
+        if (tag) {
+          tag.textContent = data.from_cache
+            ? data.stale
+              ? "кэш · stale"
+              : "кэш"
+            : "live";
+        }
+        const tid = String(data.ticker || "").toUpperCase();
+        const sec = data.sector || {};
+        let html = "";
+        if (data.kind === "bond") {
+          html +=
+            "<div class='rv-bond-title'>" +
+            esc(data.name || tid) +
+            (data.isin
+              ? "<span class='isin'>ISIN " + esc(data.isin) + "</span>"
+              : "") +
+            "</div>";
+        } else {
+          html +=
+            "<div class='rv-sector'>" +
+            "<span class='rv-chip'>" +
+            esc(sec.label || "сектор ?") +
+            "</span>" +
+            "<div class='rv-look'><span>Смотрим:</span> " +
+            esc(sec.look_for || "") +
+            "</div></div>";
+        }
+        if (data.position_line) {
+          html +=
+            "<p class='rv-pos'>" + esc(data.position_line) + "</p>";
+        }
+        if (data.error) {
+          html +=
+            "<p class='rv-err'>" + esc(String(data.error).slice(0, 180)) + "</p>";
+        }
+        html +=
+          "<div class='rv-grid'>" +
+          (data.fields || []).map(rvFieldFrom).join("") +
+          "</div>";
+        html += rvFlagsHtml(data.flags || []);
+        html += rvVerdictHtml(tid);
+        body.innerHTML = html;
+        body.querySelectorAll("[data-verdict]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            setReviewVerdict(tid, btn.getAttribute("data-verdict") || "");
+            renderReviewPayload(lastReviewData);
+          });
+        });
+        const kind = data.kind === "bond" || data.kind === "fund" ? data.kind : "equity";
+        reviewKindHint = kind;
+        document.querySelectorAll("#reviewKindChips button").forEach((btn) => {
+          const on = btn.getAttribute("data-rv-kind") === kind;
+          btn.classList.toggle("on", on);
+          btn.setAttribute("aria-selected", on ? "true" : "false");
+        });
+      }
+
+      async function loadReview(ticker) {
+        const tid = String(ticker || "").trim().toUpperCase();
+        const body = document.getElementById("reviewBody");
+        const seq = ++reviewLoadSeq;
+        if (!tid) {
+          renderReviewPayload(null);
+          return;
+        }
+        if (body) {
+          body.innerHTML = "<p class='rv-lead'>Сверка " + esc(tid) + "…</p>";
+        }
+        try {
+          const r = await fetch("/api/review/" + encodeURIComponent(tid));
+          const data = await r.json();
+          if (seq !== reviewLoadSeq) return;
+          if (!r.ok) {
+            if (body) {
+              body.innerHTML =
+                "<p class='rv-err'>HTTP " + r.status + "</p>";
+            }
+            return;
+          }
+          renderReviewPayload(data);
+        } catch (e) {
+          if (seq !== reviewLoadSeq) return;
+          if (body) {
+            body.innerHTML =
+              "<p class='rv-err'>" + esc(shortErr(e.message || e)) + "</p>";
+          }
+        }
+      }
+
+      function setReviewKindHint(kind) {
+        reviewKindHint =
+          kind === "bond" || kind === "fund" || kind === "equity" ? kind : "equity";
+        document.querySelectorAll("#reviewKindChips button").forEach((btn) => {
+          const k = btn.getAttribute("data-rv-kind");
+          const on = k === reviewKindHint;
+          btn.classList.toggle("on", on);
+          btn.setAttribute("aria-selected", on ? "true" : "false");
+        });
+      }
+
+      function ensureChartOption(tid) {
+        const sel = document.getElementById("chartTicker");
+        if (!sel || !tid) return;
+        const want = String(tid).trim().toUpperCase();
+        let found = false;
+        for (const opt of sel.options) {
+          if (String(opt.value || "").toUpperCase() === want) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          const opt = document.createElement("option");
+          opt.value = want;
+          opt.textContent = want;
+          sel.appendChild(opt);
+        }
+        sel.value = want;
+      }
+
       function fillChartSelect(papers) {
         const sel = document.getElementById("chartTicker");
         if (!sel) return;
@@ -2449,13 +3562,20 @@
           ids.push(id);
         }
         ids.sort();
-        const prev = chartTickerSel || sel.value || "";
+        // Keep user/day click selection — never silently switch to focus/first.
+        const prev = String(chartTickerSel || sel.value || "")
+          .trim()
+          .toUpperCase();
+        if (prev && !seen.has(prev)) {
+          ids.unshift(prev);
+          seen.add(prev);
+        }
         sel.innerHTML =
           '<option value="">— выбери —</option>' +
           ids
             .map((id) => "<option value='" + esc(id) + "'>" + esc(id) + "</option>")
             .join("");
-        if (prev && seen.has(prev)) {
+        if (prev) {
           sel.value = prev;
           chartTickerSel = prev;
         } else if (ids.length) {
@@ -2474,189 +3594,19 @@
       }
 
       function highlightChartRow(tid) {
+        const want = String(tid || "").trim().toUpperCase();
         document.querySelectorAll("tr.chart-row").forEach((tr) => {
-          tr.classList.toggle(
-            "chart-active",
-            tid && tr.getAttribute("data-ticker") === tid
-          );
+          const rowTid = String(tr.getAttribute("data-ticker") || "")
+            .trim()
+            .toUpperCase();
+          tr.classList.toggle("chart-active", !!(want && rowTid === want));
         });
-      }
-
-      function renderPriceChart(payload, seq) {
-        if (seq != null && seq !== chartLoadSeq) return;
-        destroyPriceChart();
-        if (seq != null && seq !== chartLoadSeq) return;
-        const canvas = document.getElementById("priceChart");
-        if (!canvas || typeof Chart === "undefined") {
-          setChartStatus("Chart.js не загрузился (CDN).", true);
-          return;
-        }
-        const candles = payload.candles || [];
-        const labels = candles.map((c) => candleDateKey(c.begin) || c.begin || "");
-        const closes = candles.map((c) => (c.close != null ? Number(c.close) : null));
-        const labelIndex = {};
-        labels.forEach((d, i) => {
-          if (d) labelIndex[d] = i;
+        document.querySelectorAll("li.day-row[data-ticker]").forEach((li) => {
+          const rowTid = String(li.getAttribute("data-ticker") || "")
+            .trim()
+            .toUpperCase();
+          li.classList.toggle("chart-active", !!(want && rowTid === want));
         });
-
-        function nearestIndex(dateKey) {
-          if (!dateKey || !labels.length) return -1;
-          if (labelIndex[dateKey] != null) return labelIndex[dateKey];
-          let best = -1;
-          for (let i = 0; i < labels.length; i++) {
-            if (labels[i] <= dateKey) best = i;
-            else break;
-          }
-          return best;
-        }
-
-        const buyPts = [];
-        const sellPts = [];
-        const otherPts = [];
-        for (const m of payload.markers || []) {
-          const dk = markerDateKey(m.executed_at);
-          const idx = nearestIndex(dk);
-          if (idx < 0) continue;
-          const y =
-            m.price != null && !Number.isNaN(Number(m.price))
-              ? Number(m.price)
-              : closes[idx];
-          if (y == null || Number.isNaN(y)) continue;
-          const pt = { x: idx, y: y };
-          const side = String(m.side || "").toLowerCase();
-          if (side === "buy") buyPts.push(pt);
-          else if (side === "sell") sellPts.push(pt);
-          else otherPts.push(pt);
-        }
-
-        // Line chart only — candlestick plugin was flaky with Chart.js 4 (empty canvas).
-        const priceDataset = {
-          type: "line",
-          label: "Цена",
-          data: closes.map((y, i) => ({ x: i, y: y })),
-          borderColor: "#2f6fed",
-          backgroundColor: "rgba(47,111,237,0.08)",
-          borderWidth: 2,
-          pointRadius: 0,
-          pointHoverRadius: 3,
-          tension: 0.15,
-          fill: true,
-          order: 3,
-        };
-
-        try {
-          // на всякий случай ещё раз снять чужой инстанс с canvas
-          destroyPriceChart();
-          if (seq != null && seq !== chartLoadSeq) return;
-          priceChart = new Chart(canvas.getContext("2d"), {
-          type: "line",
-          data: {
-            datasets: [
-              priceDataset,
-              {
-                type: "scatter",
-                label: "Покупка",
-                data: buyPts,
-                backgroundColor: "#0f7a5a",
-                borderColor: "#0f7a5a",
-                pointRadius: buyPts.length ? 5 : 0,
-                pointHoverRadius: 7,
-                order: 1,
-                hidden: !buyPts.length,
-              },
-              {
-                type: "scatter",
-                label: "Продажа",
-                data: sellPts,
-                backgroundColor: "#b42318",
-                borderColor: "#b42318",
-                pointRadius: sellPts.length ? 5 : 0,
-                pointHoverRadius: 7,
-                order: 1,
-                hidden: !sellPts.length,
-              },
-              {
-                type: "scatter",
-                label: "Сделка",
-                data: otherPts,
-                backgroundColor: "#6b7a8c",
-                borderColor: "#6b7a8c",
-                pointRadius: otherPts.length ? 4 : 0,
-                pointHoverRadius: 6,
-                order: 2,
-                hidden: !otherPts.length,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            parsing: false,
-            interaction: { mode: "nearest", intersect: false, axis: "x" },
-            plugins: {
-              legend: {
-                display: true,
-                labels: {
-                  boxWidth: 10,
-                  font: { size: 11 },
-                  filter: (item, chart) => {
-                    const ds = chart.data.datasets[item.datasetIndex];
-                    if (!ds) return true;
-                    if (ds.type === "scatter" && (!ds.data || !ds.data.length)) {
-                      return false;
-                    }
-                    return true;
-                  },
-                },
-                onClick: () => {},
-              },
-              tooltip: {
-                callbacks: {
-                  title: (items) => {
-                    const x =
-                      items[0] && items[0].parsed != null
-                        ? items[0].parsed.x
-                        : null;
-                    if (x == null) return "";
-                    const i = Math.round(Number(x));
-                    return labels[i] || "";
-                  },
-                },
-              },
-            },
-            scales: {
-              x: {
-                type: "linear",
-                min: 0,
-                max: Math.max(0, labels.length - 1),
-                offset: true,
-                ticks: {
-                  maxRotation: 0,
-                  autoSkip: true,
-                  maxTicksLimit: 8,
-                  font: { size: 10 },
-                  callback: (v) => {
-                    const i = Math.round(Number(v));
-                    return labels[i] || "";
-                  },
-                },
-                grid: { display: false },
-              },
-              y: {
-                ticks: { font: { size: 10 } },
-                grid: { color: "#e8ecf1" },
-              },
-            },
-          },
-        });
-        } catch (e) {
-          destroyPriceChart();
-          setChartStatus(shortErr(e.message || e), true);
-          return;
-        }
-        if (seq != null && seq !== chartLoadSeq) {
-          destroyPriceChart();
-        }
       }
 
       async function loadChart(ticker) {
@@ -2664,16 +3614,20 @@
         chartTickerSel = tid;
         highlightChartRow(tid);
         syncExamineBar(tid);
-        const sel = document.getElementById("chartTicker");
-        if (sel && sel.value !== tid) sel.value = tid || "";
         if (!tid) {
           destroyPriceChart();
           setChartStatus("Выбери бумагу.");
           clearPosCard();
           syncExamineBar("");
+          const sel = document.getElementById("chartTicker");
+          if (sel) sel.value = "";
           return;
         }
+        ensureChartOption(tid);
         const seq = ++chartLoadSeq;
+        chartLoading = true;
+        // Сразу убрать чужой график — иначе «не тот тикер» пока грузится.
+        destroyPriceChart();
         setChartStatus("Загрузка " + tid + "…");
         loadPosCard(tid);
         try {
@@ -2698,8 +3652,8 @@
             const dk = String(lastRender.dbById[tid].kind || "").toLowerCase();
             if (dk === "bond" || dk === "equity" || dk === "fund") kindHint = dk;
           }
-          let url = "/api/chart/" + encodeURIComponent(tid) + "?days=180";
-          if (kindHint) url += "&kind=" + encodeURIComponent(kindHint);
+          let url = "/api/chart/" + encodeURIComponent(tid);
+          if (kindHint) url += "?kind=" + encodeURIComponent(kindHint);
           const r = await fetch(url);
           let data = {};
           try {
@@ -2719,26 +3673,64 @@
             } else {
               msg = shortErr(msg);
             }
-            setChartStatus(msg, true);
+            setChartStatus(tid + " · " + msg, true);
             return;
           }
-          renderPriceChart(data, seq);
-          const markN = data.n_markers || 0;
-          const nCandles = data.n_candles || 0;
+          const avg = resolveAvgForChart(tid);
+          const drawn = renderPriceChart(data, seq, avg);
+          if (seq !== chartLoadSeq) return;
+          if (!drawn) {
+            // renderPriceChart уже писал #chartStatus при CDN/пустых свечах/exception
+            if (priceLwc == null) {
+              const el = document.getElementById("chartStatus");
+              const cur = el ? String(el.textContent || "") : "";
+              if (!cur || /Загрузка/.test(cur)) {
+                setChartStatus(tid + " · не удалось отрисовать", true);
+              }
+            }
+            return;
+          }
+          const markN =
+            (priceLwc && priceLwc.markN) ||
+            data.n_markers ||
+            0;
+          const nCandles = data.n_candles || (data.candles || []).length || 0;
+          const hasVol =
+            (priceLwc && priceLwc.hasVol) ||
+            (data.candles || []).some(
+              (c) => c && c.volume != null && Number(c.volume) > 0
+            );
           setChartStatus(
             tid +
-              " · " +
+              " · вид " +
+              chartYearLabel() +
+              " · данные: вся история (" +
               nCandles +
-              " дней" +
+              " свечей)" +
+              (data.from_cache
+                ? data.stale
+                  ? " · кэш stale"
+                  : " · кэш"
+                : " · live MOEX") +
               (data.board ? " · " + data.board : "") +
+              (data.kind === "bond" || data.price_unit === "rub_per_bond"
+                ? " · ₽/шт"
+                : "") +
+              (avg != null ? " · avg " + fmtPxShort(avg) : "") +
+              (hasVol ? " · объём" : "") +
               (markN
-                ? " · сделок на графике: " + markN
-                : " · сделок в этом окне нет (кэш BCS)")
+                ? " · сделки: ↑" +
+                  ((priceLwc && priceLwc.buyN) || 0) +
+                  " ↓" +
+                  ((priceLwc && priceLwc.sellN) || 0)
+                : " · сделок в кэше BCS нет")
           );
         } catch (e) {
           if (seq !== chartLoadSeq) return;
           destroyPriceChart();
-          setChartStatus(String(e.message || e), true);
+          setChartStatus(tid + " · " + shortErr(e.message || e), true);
+        } finally {
+          if (seq === chartLoadSeq) chartLoading = false;
         }
       }
 
@@ -2933,12 +3925,8 @@
             }
           }
         }
-        if (id === "home" && typeof priceChart !== "undefined" && priceChart) {
-          requestAnimationFrame(() => {
-            try {
-              priceChart.resize();
-            } catch (_) {}
-          });
+        if (id === "home" && priceLwc) {
+          requestAnimationFrame(() => resizePriceChart());
         }
         if (id === "ops") loadOpsFiltered();
         return id;
@@ -3182,7 +4170,9 @@
         el.querySelectorAll("tr.chart-row").forEach((tr) => {
           tr.addEventListener("click", (ev) => {
             if (ev.target.closest(".asset-more-btn")) return;
-            const tid = tr.getAttribute("data-ticker");
+            const tid = String(tr.getAttribute("data-ticker") || "")
+              .trim()
+              .toUpperCase();
             if (tid) {
               loadChart(tid);
               scrollToChart();
@@ -3221,7 +4211,11 @@
           countPapersByKind(papers, dbById, dbByIsin)
         );
 
-        const cashVal = sumField(groups.cash || [], "market_value");
+        const cashVal =
+          sumField(groups.cash || [], "market_value") ??
+          (snap.cash != null && !Number.isNaN(Number(snap.cash))
+            ? Number(snap.cash)
+            : null);
         const cashEl = document.getElementById("kpiCash");
         if (cashEl) cashEl.textContent = moneyShow(cashVal);
 
@@ -3237,16 +4231,16 @@
         }
 
         fillChartSelect(papers);
-        const want = chartTickerSel;
+        const want = String(chartTickerSel || "").trim().toUpperCase();
         if (!want) {
           destroyPriceChart();
           setChartStatus("Нет бумаг для графика.");
-        } else if (!priceChart) {
+        } else if (!priceLwc && !chartLoading) {
+          // Первый заход / после ошибки. Не рестартим, если уже «Загрузка…».
           loadChart(want);
         } else {
           highlightChartRow(want);
-          const sel = document.getElementById("chartTicker");
-          if (sel) sel.value = want;
+          ensureChartOption(want);
         }
 
         // Сделки грузит сама панель (со своими фильтрами) — см. loadOpsFiltered.
@@ -3255,12 +4249,14 @@
         const feed = document.getElementById("feed");
         feed.innerHTML = "";
         const newsList = news || [];
-        feedLead.textContent =
-          "Новости из базы по бумагам портфеля. Опрос: CLI once / POST /api/poll.";
-        feedLead.className = "";
+        if (feedLead) {
+          feedLead.textContent =
+            "Лента по бумагам портфеля. Toast — только сегодняшние (Екб), по умолчанию digest.";
+          feedLead.className = "lead";
+        }
         if (!newsList.length) {
           feed.innerHTML =
-            '<li class="empty">Лента пуста — новости появятся после опроса (CLI: once / poll).</li>';
+            '<li class="empty">Лента пуста — нажми «Искать новости» или CLI: once.</li>';
         } else {
           for (const n of newsList) {
             const li = document.createElement("li");
@@ -3279,6 +4275,165 @@
             feed.appendChild(li);
           }
         }
+      }
+
+      let pollTimer = null;
+      let pollBusy = false;
+
+      function notifyModeValue() {
+        const sel = document.getElementById("notifyMode");
+        const v = sel ? String(sel.value || "digest") : "digest";
+        return v === "off" || v === "each" || v === "digest" ? v : "digest";
+      }
+
+      function setPollStatus(text, isErr) {
+        const el = document.getElementById("pollStatus");
+        if (!el) return;
+        el.textContent = text || "";
+        el.className = "poll-status" + (isErr ? " err" : "");
+      }
+
+      function setPollBusy(on) {
+        pollBusy = !!on;
+        const btn = document.getElementById("btnPoll");
+        const cancel = document.getElementById("btnPollCancel");
+        if (btn) btn.disabled = pollBusy;
+        if (cancel) cancel.hidden = !pollBusy;
+      }
+
+      async function refreshNewsFeed() {
+        try {
+          const news = await fetch("/api/news?limit=40").then((r) => r.json());
+          const feed = document.getElementById("feed");
+          if (!feed) return;
+          feed.innerHTML = "";
+          if (!news || !news.length) {
+            feed.innerHTML =
+              '<li class="empty">Лента пуста — новых URL не нашли.</li>';
+            return;
+          }
+          for (const n of news) {
+            const li = document.createElement("li");
+            const href = String(n.url || "");
+            const safe =
+              href.startsWith("http://") || href.startsWith("https://") ? href : "";
+            li.innerHTML =
+              (safe
+                ? '<a href="' + esc(safe) + '" target="_blank" rel="noreferrer">'
+                : "<span>") +
+              esc(n.title || "(без заголовка)") +
+              (safe ? "</a>" : "</span>") +
+              '<div class="meta">' +
+              esc([n.ticker_id, n.source].filter(Boolean).join(" · ")) +
+              "</div>";
+            feed.appendChild(li);
+          }
+        } catch (_) {}
+      }
+
+      async function pollTickStatus() {
+        try {
+          const st = await fetch("/api/poll/status").then((r) => r.json());
+          if (!st) return;
+          if (st.running) {
+            setPollBusy(true);
+            const cur = st.current || 0;
+            const tot = st.total || 0;
+            const tid = st.ticker_id ? " · " + st.ticker_id : "";
+            setPollStatus(
+              "Опрос " + cur + "/" + tot + tid + " · +" + (st.inserted || 0)
+            );
+            return;
+          }
+          if (pollBusy) {
+            setPollBusy(false);
+            if (pollTimer) {
+              clearInterval(pollTimer);
+              pollTimer = null;
+            }
+            if (st.error && st.error !== "cancelled") {
+              setPollStatus(String(st.error), true);
+            } else if (st.error === "cancelled") {
+              setPollStatus("Опрос отменён · в БД +" + (st.inserted || 0));
+            } else {
+              const mode = notifyModeValue();
+              setPollStatus(
+                "Готово · +" +
+                  (st.inserted || 0) +
+                  " в БД" +
+                  (mode === "off"
+                    ? " · toast off"
+                    : " · toast " + mode + " (только сегодня)")
+              );
+            }
+            await refreshNewsFeed();
+          }
+        } catch (e) {
+          setPollStatus(String(e.message || e), true);
+          setPollBusy(false);
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+        }
+      }
+
+      async function startNewsPoll() {
+        if (pollBusy) return;
+        const mode = notifyModeValue();
+        try {
+          localStorage.setItem("pn_notify", mode);
+        } catch (_) {}
+        setPollBusy(true);
+        setPollStatus("Стартую опрос…");
+        try {
+          const r = await fetch(
+            "/api/poll?notify=" + encodeURIComponent(mode),
+            { method: "POST" }
+          );
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            setPollBusy(false);
+            setPollStatus(
+              (data && data.detail && (data.detail.error || data.detail)) ||
+                "HTTP " + r.status,
+              true
+            );
+            return;
+          }
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = setInterval(pollTickStatus, 800);
+          pollTickStatus();
+        } catch (e) {
+          setPollBusy(false);
+          setPollStatus(String(e.message || e), true);
+        }
+      }
+
+      async function cancelNewsPoll() {
+        try {
+          await fetch("/api/poll/cancel", { method: "POST" });
+          setPollStatus("Отмена…");
+        } catch (e) {
+          setPollStatus(String(e.message || e), true);
+        }
+      }
+
+      async function initNotifyMode() {
+        const sel = document.getElementById("notifyMode");
+        if (!sel) return;
+        let mode = "digest";
+        try {
+          const saved = localStorage.getItem("pn_notify");
+          if (saved === "off" || saved === "each" || saved === "digest") mode = saved;
+          else {
+            const r = await fetch("/api/notify").then((x) => x.json());
+            if (r && (r.default === "off" || r.default === "each" || r.default === "digest")) {
+              mode = r.default;
+            }
+          }
+        } catch (_) {}
+        sel.value = mode;
       }
 
       async function load() {
@@ -3450,6 +4605,48 @@
           loadChart(chartSel.value || "");
         });
       }
+      const btnPoll = document.getElementById("btnPoll");
+      if (btnPoll) btnPoll.addEventListener("click", () => startNewsPoll());
+      const btnPollCancel = document.getElementById("btnPollCancel");
+      if (btnPollCancel) btnPollCancel.addEventListener("click", () => cancelNewsPoll());
+      const notifyModeSel = document.getElementById("notifyMode");
+      if (notifyModeSel) {
+        notifyModeSel.addEventListener("change", () => {
+          try {
+            localStorage.setItem("pn_notify", notifyModeValue());
+          } catch (_) {}
+        });
+      }
+      initNotifyMode();
+      const reviewChips = document.getElementById("reviewKindChips");
+      if (reviewChips) {
+        reviewChips.addEventListener("click", (ev) => {
+          const btn = ev.target.closest("button[data-rv-kind]");
+          if (!btn) return;
+          const want = btn.getAttribute("data-rv-kind") || "equity";
+          setReviewKindHint(want);
+          // pick first portfolio ticker of that kind and load review
+          if (!lastRender || !lastRender.holdings) return;
+          for (const h of lastRender.holdings) {
+            const ac = assetClassOf(
+              h,
+              lastRender.dbById || {},
+              lastRender.dbByIsin || {}
+            );
+            const match =
+              (want === "bond" && ac === "bond") ||
+              (want === "fund" && ac === "fund") ||
+              (want === "equity" && (ac === "stock" || ac === "equity"));
+            if (!match) continue;
+            const tid = paperId(h);
+            if (tid) {
+              loadChart(tid);
+              return;
+            }
+          }
+        });
+      }
+      renderReviewPayload(null);
       const dayBox = document.getElementById("dayBox");
       if (dayBox) {
         dayBox.addEventListener("click", (ev) => {

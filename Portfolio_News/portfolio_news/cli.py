@@ -42,7 +42,13 @@ def cmd_import(args: argparse.Namespace) -> int:
 def cmd_once(args: argparse.Namespace) -> int:
     settings = get_settings()
     Session = make_session_factory(settings.database_url)
-    notify = "off" if args.quiet else (args.notify or "digest")
+    if args.quiet:
+        notify = "off"
+    elif getattr(args, "notify", None):
+        notify = args.notify
+    else:
+        raw = (settings.notify_default or "digest").strip().lower()
+        notify = raw if raw in ("off", "each", "digest") else "digest"
     bcs_only = not getattr(args, "all_tickers", False)
     with Session() as session:
         from sqlalchemy import select
@@ -102,9 +108,9 @@ def build_parser() -> argparse.ArgumentParser:
     once.add_argument("--category", default=None, help="Equity sector / category")
     once.add_argument(
         "--notify",
-        default="digest",
+        default=None,
         choices=["off", "each", "digest"],
-        help="Toast mode (default digest)",
+        help="Toast mode (default: NOTIFY_DEFAULT / digest)",
     )
     once.add_argument("--quiet", action="store_true", help="Same as --notify off")
     once.add_argument(
@@ -120,7 +126,12 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--ticker", default=None)
     watch.add_argument("--kind", default=None, choices=["equity", "bond", "fund"])
     watch.add_argument("--category", default=None)
-    watch.add_argument("--notify", default="digest", choices=["off", "each", "digest"])
+    watch.add_argument(
+        "--notify",
+        default=None,
+        choices=["off", "each", "digest"],
+        help="Toast mode (default: NOTIFY_DEFAULT / digest)",
+    )
     watch.add_argument("--quiet", action="store_true")
     watch.add_argument(
         "--all-tickers",

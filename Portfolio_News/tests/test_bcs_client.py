@@ -14,6 +14,7 @@ from portfolio_news.bcs_client import (
     _parse_summary,
     _parse_deals,
     _merge_limits,
+    _parse_money_limits_cash_rub,
 )
 
 class ParsePortfolioTests(unittest.TestCase):
@@ -78,6 +79,41 @@ class ParsePortfolioTests(unittest.TestCase):
         }
         out = _merge_limits(holdings, limits)
         self.assertEqual(out[0].quantity, 42)
+
+    def test_money_limits_cash_rub(self):
+        limits = {
+            "moneyLimits": [
+                {
+                    "currencyCode": "RUB",
+                    "instrumentType": "MONEY",
+                    "quantity": {"type": "T365", "value": 791.27},
+                },
+                {
+                    "currencyCode": "USD",
+                    "instrumentType": "MONEY",
+                    "quantity": {"type": "T365", "value": 10.0},
+                },
+            ]
+        }
+        self.assertAlmostEqual(_parse_money_limits_cash_rub(limits) or 0, 791.27)
+
+    def test_currency_row_is_cash(self):
+        raw = [
+            {
+                "ticker": "RUB",
+                "displayName": "RUB",
+                "instrumentType": "CURRENCY",
+                "quantity": 791.27,
+                "currentValue": 791.27,
+                "currentValueRub": 791.27,
+                "currency": "RUB",
+                "type": "depoLimit",
+            }
+        ]
+        rows = _parse_portfolio(raw)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].asset_class, "cash")
+        self.assertAlmostEqual(rows[0].market_value or 0, 791.27)
 
     def test_match_holding(self):
         hs = [

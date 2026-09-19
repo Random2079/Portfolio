@@ -79,7 +79,10 @@ class ChartApiTests(unittest.TestCase):
             CandlePoint(begin="2026-01-20 00:00:00", close=259.0),
         ]
         with patch(
-            "portfolio_news.api.fetch_candles",
+            "portfolio_news.ops_history.journal_rows",
+            return_value=[],
+        ), patch(
+            "portfolio_news.chart_cache.fetch_candles",
             return_value=(fake, "SBER", "TQBR", ""),
         ):
             r = self.client.get("/api/chart/SBER?days=90&kind=equity")
@@ -95,7 +98,7 @@ class ChartApiTests(unittest.TestCase):
 
     def test_chart_empty_candles_not_ok(self):
         with patch(
-            "portfolio_news.api.fetch_candles",
+            "portfolio_news.chart_cache.fetch_candles",
             return_value=([], "XXX", "", "boom"),
         ):
             r = self.client.get("/api/chart/XXX?kind=equity")
@@ -118,7 +121,7 @@ class ChartApiTests(unittest.TestCase):
         self.session.commit()
         fake = [CandlePoint(begin="2026-01-15 00:00:00", close=10.0)]
         with patch(
-            "portfolio_news.api.fetch_candles",
+            "portfolio_news.chart_cache.fetch_candles",
             return_value=(fake, "BCSR", "TQBR", ""),
         ) as fc:
             r = self.client.get("/api/chart/BCSR?days=90")
@@ -127,6 +130,37 @@ class ChartApiTests(unittest.TestCase):
         self.assertEqual(r.json()["kind"], "fund")
         self.assertEqual(fc.call_args.kwargs.get("isin"), "RU000A10A0N6")
         self.assertEqual(fc.call_args.args[1], "fund")
+
+    def test_chart_bond_candles_scaled_to_rub(self):
+        """MOEX % of par → ₽/шт so LWC scale matches avg/markers."""
+        fake = [
+            CandlePoint(
+                begin="2026-01-15 00:00:00",
+                open=87.0,
+                high=89.0,
+                low=86.5,
+                close=88.0,
+                volume=100,
+            )
+        ]
+        with patch(
+            "portfolio_news.ops_history.journal_rows",
+            return_value=[],
+        ), patch(
+            "portfolio_news.chart_cache.fetch_candles",
+            return_value=(fake, "RU000A107RZ0", "TQCB", ""),
+        ):
+            r = self.client.get("/api/chart/RU000A107RZ0?kind=bond&days=90")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["kind"], "bond")
+        self.assertEqual(data["price_unit"], "rub_per_bond")
+        c0 = data["candles"][0]
+        self.assertAlmostEqual(c0["close"], 880.0)
+        self.assertAlmostEqual(c0["open"], 870.0)
+        self.assertAlmostEqual(c0["high"], 890.0)
+        self.assertEqual(c0["volume"], 100)
 
 
 if __name__ == "__main__":

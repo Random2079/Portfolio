@@ -2,16 +2,17 @@
 
 Локальный монитор новостей по тикерам: **FastAPI + SQLite + vanilla UI + Windows toast**. Сырой MOEX + опционально позиции БКС (read-only).
 
-Не инвест-советы. Документация агента: **[docs/](docs/README.md)** (TZ, parts, промпт).
+Не инвест-советы. **Карта:** [MAP.md](MAP.md). Техника агента: **[docs/](docs/README.md)**.
 
 ## Структура
 
 ```
 Portfolio_News/
+├── MAP.md              ← статус / очередь / план F-A
 ├── portfolio_news/     ← код (API, poller, MOEX, BCS, static UI)
 ├── tests/
 ├── frontend/           ← заготовка Vite (опционально)
-├── docs/               ← ТЗ и инструкции → docs/README.md
+├── docs/               ← TZ + parts → docs/README.md
 ├── tickers.example.json
 ├── .env.example
 └── requirements.txt
@@ -39,8 +40,7 @@ CLI без UI: `python -m portfolio_news once --ticker SBER --notify digest` · 
 |------|--------|-----|
 | A–D | ✅ | Новости, poll/scope, MOEX, БКС позиции (каркас) |
 | **K0–K2** | ✅ | Список БКС + история сделок + кэш |
-| **KA–KB · K3–K8** | ✅ | День · Focus/Hold · график · карточка · scope БКС · линия капитала · календарь выплат · сделки с 2023 + фильтры/CSV |
-| **K9…** | ⬜ | Toast-антиспам по бумагам портфеля… |
-| E–J / F | ⬜ | Новостной хвост / разбор без ордеров (позже) |
+| **KA–KB · K3–K9** | ✅ | День · Focus · график · карточка · scope БКС · капитал · календарь · сделки + CSV · toast-антиспам |
+| E–J / F / KV | ⬜ | Новостной хвост / ИИ-шум / визуал (позже) |
 
-Полный канон: [docs/TZ.md](docs/TZ.md).
+Полный канон статуса/очереди: [MAP.md](MAP.md). Техника: [docs/TZ.md](docs/TZ.md).

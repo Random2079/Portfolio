@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # KA: MOEX → SQLite day snapshot (UI reads DB; no manual refresh habit)
     day_poll_sec: int = 60
 
+    # K9: default toast mode for CLI/API when caller omits notify (digest|off|each)
+    notify_default: str = "digest"
+
     # BCS Trade API (read-only). Never commit real token.
     bcs_trade_refresh_token: str = ""
     bcs_trade_client_id: str = "trade-api-read"

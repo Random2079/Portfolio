@@ -48,6 +48,31 @@ class CapitalReplayTests(unittest.TestCase):
     def test_bond_percent_to_rub(self):
         self.assertAlmostEqual(unit_rub(98.08, "bond"), 980.8)
         self.assertAlmostEqual(unit_rub(250.0, "equity"), 250.0)
+        # already ₽ — do not double-scale
+        self.assertAlmostEqual(unit_rub(939.5, "bond"), 939.5)
+
+    def test_candles_unit_rub_bond(self):
+        from portfolio_news.capital_replay import candles_unit_rub
+        from portfolio_news.metrics_moex import CandlePoint
+
+        pts = [
+            CandlePoint(
+                begin="2026-01-15",
+                open=87.0,
+                high=89.0,
+                low=86.0,
+                close=88.0,
+                volume=10,
+            )
+        ]
+        out = candles_unit_rub(pts, "bond")
+        self.assertAlmostEqual(out[0].close, 880.0)
+        self.assertAlmostEqual(out[0].open, 870.0)
+        self.assertAlmostEqual(out[0].high, 890.0)
+        self.assertEqual(out[0].volume, 10)
+        # equity untouched
+        eq = candles_unit_rub(pts, "equity")
+        self.assertAlmostEqual(eq[0].close, 88.0)
 
     def test_weekly_points_from_closes(self):
         ops = [

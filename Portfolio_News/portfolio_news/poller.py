@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, time, timedelta, timezone
 from typing import Callable, Literal, Optional, Sequence
 
 from sqlalchemy import select
@@ -18,6 +19,34 @@ log = logging.getLogger(__name__)
 
 NotifyMode = Literal["off", "each", "digest"]
 ProgressCallback = Callable[["PollProgress"], None]
+_TOAST_TZ = timezone(timedelta(hours=5))  # Asia/Yekaterinburg, no DST / no tzdata
+
+
+def news_is_today_for_toast(
+    published_at: Optional[datetime],
+    *,
+    now: Optional[datetime] = None,
+) -> bool:
+    """K9: toast only if published_at is today in Asia/Yekaterinburg (UTC+5).
+
+    No published_at → no toast (still OK to store in DB). Avoids undated RSS
+    catch-up spam on first poll.
+    """
+    if published_at is None:
+        return False
+    ref = now or datetime.now(_TOAST_TZ)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=_TOAST_TZ)
+    else:
+        ref = ref.astimezone(_TOAST_TZ)
+    start = datetime.combine(ref.date(), time.min, tzinfo=_TOAST_TZ)
+    pub = published_at
+    if pub.tzinfo is None:
+        # Naive timestamps from feeds: treat as local wall clock (Yekaterinburg).
+        pub = pub.replace(tzinfo=_TOAST_TZ)
+    else:
+        pub = pub.astimezone(_TOAST_TZ)
+    return pub >= start
 
 
 @dataclass
@@ -236,7 +265,10 @@ def poll_once(
                 if row is None:
                     continue
                 result.inserted += 1
-                toast_ok = (not notify_focus_only) or notify_allowed(t.id, focus_ids)
+                # K9: today-only toast; KB: optional Focus filter. DB insert always ok.
+                focus_ok = (not notify_focus_only) or notify_allowed(t.id, focus_ids)
+                today_ok = news_is_today_for_toast(raw.published_at)
+                toast_ok = bool(focus_ok and today_ok and mode != "off")
                 if toast_ok:
                     digest_titles.append(f"{t.id}: {raw.title}")
                 if mode == "each" and toast_ok:
@@ -251,8 +283,8 @@ def poll_once(
                 elif mode == "digest" and toast_ok:
                     row.notified = 1
                     session.commit()
-                elif mode == "digest" and not toast_ok:
-                    # Hold: keep in DB, skip toast (KB)
+                else:
+                    # Hold / not today / off: keep in DB, no toast
                     session.commit()
         if cancelled:
             break

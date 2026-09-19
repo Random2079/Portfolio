@@ -1,5 +1,7 @@
 # Parts — INDEX
 
+> **Человеку:** смотри [`../MAP.md`](../MAP.md). Этот INDEX — оглавление техфайлов для кода.
+
 | # | Part | Статус | Код |
 |---|------|--------|-----|
 | 01 | [core](01-core.md) | ✅ | `config.py`, `db.py`, `cli.py` |
@@ -9,10 +11,9 @@
 | 05 | [api-ui](05-api-ui.md) | ✅ A–D / 🟡 E | `api.py`, `static/dashboard-demo.html` |
 | 06 | [moex](06-moex.md) | ✅ | `metrics_moex.py` |
 | 07 | [bcs](07-bcs.md) | ✅ каркас | `bcs_client.py` |
-| 08 | [ai-noise](08-ai-noise.md) | ⬜ | — |
+| 08 | [ai-noise](08-ai-noise.md) | ⬜ F-A в MAP §7 | DeepSeek чистка ленты |
 | 09 | [watch-phone](09-watch-phone.md) | ⬜ | CLI `watch` есть; авто/телефон нет |
-| 10 | [bcs-terminal](10-bcs-terminal.md) | 🟡 K0–K8 · KA–KB ✅ → K9 | история / Focus / график / карточка / капитал / календарь / сделки |
+| 10 | [bcs-terminal](10-bcs-terminal.md) | ✅ K0–K9 · KA–KB | терминал BCS |
+| 11 | [review-checkpoint](11-review-checkpoint.md) | ✅ KS | сверка |
 
-**Фокус сейчас:** part 10 (K9→). Новостной хвост E–J — по остаточному принципу.
-
-Порядок для нового агента: TZ → 07 + 10; обзор 01–05 при необходимости.
+Агент: сначала [`MAP.md`](../MAP.md), потом нужный part.

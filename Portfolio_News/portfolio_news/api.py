@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+import logging
 import threading
 import time
 
@@ -23,13 +24,14 @@ from portfolio_news.import_tickers import load_tickers_from_json, upsert_tickers
 from portfolio_news.metrics_moex import (
     candle_to_dict,
     effective_moex_limit,
-    fetch_candles,
     fetch_coupons_for,
     fetch_dividends_for,
     fetch_metrics_for,
     metric_to_dict,
 )
 from portfolio_news.poll_job import get_poll_status, request_cancel_poll, start_poll_job
+
+log = logging.getLogger(__name__)
 
 _settings = get_settings()
 _SessionLocal = make_session_factory(_settings.database_url)
@@ -497,15 +499,19 @@ def run_poll(
     ticker_id: Optional[str] = Query(None),
     kind: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
-    notify: str = Query("digest"),
+    notify: Optional[str] = Query(
+        None,
+        description="digest|off|each; default from NOTIFY_DEFAULT / notify_default",
+    ),
     all_tickers: bool = Query(
         False,
         description="Legacy: poll full tickers DB (default false = K5 BCS holdings only)",
     ),
     cfg: Settings = Depends(get_cfg),
 ):
-    """Start background poll. K5: default scope = BCS holdings only."""
-    raw = (notify or "digest").strip().lower()
+    """Start background poll. K5: default scope = BCS holdings only. K9: toast rules."""
+    raw = (notify if notify is not None else (cfg.notify_default or "digest"))
+    raw = str(raw).strip().lower()
     if raw in ("true", "1", "each", "yes"):
         mode = "each"
     elif raw in ("false", "0", "off", "quiet", "no"):
@@ -529,6 +535,15 @@ def run_poll(
     if not started.get("ok"):
         raise HTTPException(status_code=409, detail=started)
     return started
+
+
+@app.get("/api/notify")
+def notify_settings(cfg: Settings = Depends(get_cfg)):
+    """K9: current server default toast mode (UI may override via poll ?notify=)."""
+    raw = (cfg.notify_default or "digest").strip().lower()
+    if raw not in ("digest", "off", "each"):
+        raw = "digest"
+    return {"default": raw, "modes": ["digest", "off", "each"]}
 
 
 @app.get("/api/poll/status")
@@ -957,17 +972,239 @@ def position_card(
     return data
 
 
+@app.get("/api/review/{ticker}")
+def review_ticker(
+    ticker: str,
+    force: bool = Query(False, description="Bypass fresh cache and refetch MOEX"),
+    db: Session = Depends(get_db),
+):
+    """KS: checkpoint facts under position card. Cache-first; no buy/sell text."""
+    from portfolio_news.calendar_own import load_calendar, today_local
+    from portfolio_news.day_attribution import is_cash_holding
+    from portfolio_news.metrics_moex import fetch_metric
+    from portfolio_news.position_card import build_position_card
+    from portfolio_news.review_facts import (
+        build_review_payload,
+        cache_is_fresh,
+        load_review_cache,
+        review_cache_complete,
+        save_review_cache,
+    )
+    from portfolio_news.ops_cache import list_cached_operations
+
+    tid = (ticker or "").strip().upper()
+    if not tid:
+        raise HTTPException(status_code=400, detail="ticker required")
+
+    cached = load_review_cache(db, tid)
+    if cached and not force:
+        data, upd = cached
+        if cache_is_fresh(upd) and review_cache_complete(data):
+            data = dict(data)
+            data["from_cache"] = True
+            data["stale"] = False
+            return data
+
+    client = _bcs()
+    snap = client.fetch_holdings(force=False)
+    row = db.get(Ticker, tid) or db.get(Ticker, tid.lower())
+    if row is None:
+        for t in db.scalars(select(Ticker)).all():
+            if str(t.id).upper() == tid:
+                row = t
+                break
+    isin = ((row.isin if row else "") or "").strip()
+    category = ((row.category if row else "") or "").strip()
+    kind = ((row.kind if row else "") or "equity").strip().lower()
+    if kind not in ("equity", "bond", "fund"):
+        kind = "equity"
+
+    hit = None
+    weight = None
+    qty = None
+    name = (row.name if row else "") or tid
+    if snap.holdings:
+        hit = match_holding(snap.holdings, ticker_id=tid, isin=isin)
+        if hit is not None:
+            if is_cash_holding(hit):
+                return {
+                    "ok": True,
+                    "ticker": tid,
+                    "kind": "cash",
+                    "name": hit.name or tid,
+                    "isin": "",
+                    "sector": {"id": "unknown", "label": "кэш", "look_for": "не сверка чек-поинта"},
+                    "position_line": "денежные средства",
+                    "fields": [],
+                    "flags": [],
+                    "verdict": None,
+                    "disclaimer": "кэш · не бумага",
+                    "updated_at": time.time(),
+                    "mock": False,
+                }
+            name = (hit.name or name).strip()
+            qty = hit.quantity
+            ac = (hit.asset_class or "").strip().lower()
+            if not ac or ac == "other":
+                ac = classify_asset_class(
+                    ticker=hit.ticker or "",
+                    sec_code=hit.sec_code or "",
+                    isin=hit.isin or isin,
+                    class_code=hit.class_code or "",
+                    name=hit.name or "",
+                    db_kind=kind,
+                )
+            if ac == "bond":
+                kind = "bond"
+            elif ac == "fund":
+                kind = "fund"
+            elif ac in ("stock", "equity"):
+                kind = "equity"
+            ops = list_cached_operations(db, ticker=tid, limit=500)
+            card = build_position_card(
+                ticker=tid,
+                holding=hit,
+                operations=ops,
+                holdings=list(snap.holdings),
+                total_value=snap.total_value,
+            )
+            weight = card.weight_pct
+            if hit.isin:
+                isin = hit.isin
+
+    cal_events: list = []
+    cal_as_of = ""
+    loaded = load_calendar(db)
+    if loaded:
+        cal_data, cal_upd = loaded
+        cal_events = list(cal_data.get("events") or [])
+        if cal_upd:
+            cal_as_of = datetime.fromtimestamp(cal_upd, tz=timezone(timedelta(hours=5))).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+
+    metric = None
+    moex_err = ""
+    try:
+        metric = fetch_metric(tid, kind, name or tid, isin=isin)
+        if getattr(metric, "error", ""):
+            moex_err = str(metric.error)[:200]
+            # keep partial metric if any fields present
+            if metric.last is None and not metric.coupon_percent and not metric.div_yield:
+                metric = None
+    except Exception as exc:  # noqa: BLE001
+        moex_err = str(exc)[:200]
+        metric = None
+
+    if metric is None and cached and not force:
+        data, upd = cached
+        data = dict(data)
+        data["from_cache"] = True
+        data["stale"] = True
+        data["error"] = moex_err or data.get("error") or "MOEX недоступен · показан кэш"
+        # refresh position line if we have holdings
+        if weight is not None or qty is not None:
+            bits = ["уже в портфеле"]
+            if qty is not None:
+                bits.append(f"qty {qty}")
+            if weight is not None:
+                bits.append(f"доля {weight:.2f}%".replace(".", ","))
+            bits.append("кэш на добор: вручную (нет источника)")
+            data["position_line"] = " · ".join(bits)
+        return data
+
+    smartlab_row = None
+    smartlab_as_of = ""
+    smartlab_alias = False
+    dohod_facts = None
+    dohod_as_of = ""
+    fund_ter = None
+    fund_ter_as_of = ""
+    if kind == "equity":
+        try:
+            from portfolio_news.fundamentals_smartlab import (
+                get_fundamentals_map,
+                resolve_fundamental,
+            )
+
+            # Universe TTL/incomplete handles refresh; don't refetch 5 HTML pages on every ?force=
+            fmap, smartlab_as_of = get_fundamentals_map(db, force=False)
+            smartlab_row, _, smartlab_alias = resolve_fundamental(fmap, tid)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("smartlab fundamentals for review failed: %s", exc)
+    elif kind == "bond" and isin:
+        try:
+            from portfolio_news.bonds_dohod import get_dohod_bond
+
+            dohod_facts, dohod_as_of = get_dohod_bond(db, isin, force=force)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("dohod bond for review failed: %s", exc)
+    elif kind == "fund":
+        try:
+            from portfolio_news.funds_cbr_ter import get_fund_ter_map, resolve_fund_ter
+            from portfolio_news.funds_investfunds import resolve_fund_isin
+
+            if not isin:
+                isin = resolve_fund_isin(tid) or isin
+            fmap, fund_ter_as_of = get_fund_ter_map(db, force=force)
+            if isin:
+                fund_ter = resolve_fund_ter(fmap, isin)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("cbr fund ter for review failed: %s", exc)
+
+    payload = build_review_payload(
+        ticker=tid,
+        kind=kind,
+        name=name,
+        isin=isin,
+        category=category,
+        weight_pct=weight,
+        qty=float(qty) if qty is not None else None,
+        metric=metric,
+        calendar_events=cal_events,
+        calendar_as_of=cal_as_of,
+        today=today_local(),
+        smartlab=smartlab_row,
+        smartlab_as_of=smartlab_as_of,
+        smartlab_alias=smartlab_alias,
+        dohod=dohod_facts,
+        dohod_as_of=dohod_as_of,
+        fund_ter=fund_ter,
+        fund_ter_as_of=fund_ter_as_of,
+    )
+    if moex_err and metric is None:
+        payload.error = moex_err
+        # partial OK: SmartLab/Dohod/calendar may still fill slots
+        payload.ok = any(not getattr(f, "missing", True) for f in payload.fields)
+    elif moex_err:
+        payload.error = moex_err
+
+    out = payload.to_dict()
+    out["from_cache"] = False
+    out["stale"] = False
+    try:
+        save_review_cache(db, tid, out)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("review cache save failed: %s", exc)
+    return out
+
+
 @app.get("/api/chart/{ticker}")
 def chart_ticker(
     ticker: str,
-    days: int = Query(180, ge=14, le=900),
+    days: int = Query(
+        0,
+        ge=0,
+        le=8000,
+        description="Lookback calendar days; 0 = full MOEX history (default)",
+    ),
     interval: int = Query(24, description="MOEX candle interval; 24=day"),
     kind: Optional[str] = Query(None, description="equity|bond|fund; default from tickers DB"),
+    force: bool = Query(False, description="Bypass SQLite candle cache"),
     db: Session = Depends(get_db),
 ):
     """K3: MOEX close series + BCS trade markers for one ticker."""
-    from datetime import date, timedelta
-
+    from portfolio_news.chart_cache import resolve_chart_candles
     from portfolio_news.ops_cache import list_cached_operations
 
     tid = (ticker or "").strip().upper()
@@ -985,34 +1222,50 @@ def chart_ticker(
         resolved_kind = (row.kind if row else "equity") or "equity"
         if resolved_kind not in ("equity", "bond", "fund"):
             resolved_kind = "equity"
+    # ISIN-as-ticker (RU000A…) — bond even if tickers DB empty / kind hint lost
+    if resolved_kind != "bond" and tid.startswith("RU000"):
+        resolved_kind = "bond"
     isin = ((row.isin if row else "") or "").strip()
+    if not isin and tid.startswith("RU000"):
+        isin = tid
 
-    from_date = (date.today() - timedelta(days=int(days))).isoformat()
-    points, secid, board, err = fetch_candles(
+    from_date = ""
+    if int(days) > 0:
+        from datetime import date, timedelta
+
+        from_date = (date.today() - timedelta(days=int(days))).isoformat()
+
+    points, secid, board, err, from_cache, stale = resolve_chart_candles(
+        db,
         tid,
         resolved_kind,
-        interval=int(interval) or 24,
-        from_date=from_date,
-        limit=800,
         isin=isin,
+        days=int(days),
+        interval=int(interval) or 24,
+        force=bool(force),
     )
+    # Bonds: MOEX candles are % of par; avg/markers are ₽/шт — one scale for LWC.
+    if resolved_kind == "bond" and points:
+        from portfolio_news.capital_replay import candles_unit_rub
 
-    ops = list_cached_operations(db, ticker=tid, limit=500)
+        points = candles_unit_rub(points, "bond")
+
+    from portfolio_news.ops_history import build_history
+
+    hist = build_history(db, ticker=tid, limit=0, include_journal=True)
     markers: list[dict] = []
-    for op in ops:
-        side = (op.side or "").strip().lower()
+    for op in hist.get("operations") or []:
+        side = str(op.get("side") or "").strip().lower()
         if side not in ("buy", "sell"):
-            # keep unknown sides too (broker quirks) but tag them
-            if not side:
-                side = "other"
+            continue
         markers.append(
             {
-                "deal_id": op.deal_id,
-                "executed_at": op.executed_at or "",
+                "deal_id": str(op.get("deal_id") or op.get("id") or ""),
+                "executed_at": str(op.get("executed_at") or op.get("day") or ""),
                 "side": side,
-                "price": op.price,
-                "quantity": op.quantity,
-                "volume": op.volume,
+                "price": op.get("price"),
+                "quantity": op.get("quantity"),
+                "volume": op.get("volume"),
             }
         )
     # chronological for chart overlay
@@ -1024,10 +1277,13 @@ def chart_ticker(
         "error": "" if ok else (err or "Нет свечей MOEX для тикера"),
         "ticker": tid,
         "kind": resolved_kind,
+        "price_unit": "rub_per_bond" if resolved_kind == "bond" else "price",
         "secid": secid,
         "board": board,
         "interval": int(interval) or 24,
         "from": from_date,
+        "from_cache": bool(from_cache),
+        "stale": bool(stale),
         "candles": [candle_to_dict(p) for p in points],
         "markers": markers,
         "n_candles": len(points),

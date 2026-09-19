@@ -330,12 +330,16 @@ class BcsClient:
         self._ensure_access()
         return {"Authorization": f"Bearer {self._access_token}"}
 
-    def _get_json(self, url: str) -> Any:
-        resp = self._session.get(url, headers=self._auth_headers(), timeout=_TIMEOUT)
+    def _get_json(self, url: str, *, params: Optional[dict[str, Any]] = None) -> Any:
+        resp = self._session.get(
+            url, headers=self._auth_headers(), params=params, timeout=_TIMEOUT
+        )
         if resp.status_code == 401:
             # one retry after forced refresh
             self._access_expires_at = 0
-            resp = self._session.get(url, headers=self._auth_headers(), timeout=_TIMEOUT)
+            resp = self._session.get(
+                url, headers=self._auth_headers(), params=params, timeout=_TIMEOUT
+            )
         if resp.status_code == 429:
             raise RuntimeError("BCS rate limit (429) — подожди и обнови снова")
         if resp.status_code != 200:
@@ -542,27 +546,54 @@ class BcsClient:
         )
 
     def _fetch_uncached(self) -> HoldingsSnapshot:
-        raw = self._get_json(PORTFOLIO_URL)
+        # currency=RUB — иначе moneyLimits пустой и CURRENCY/RUB нет в portfolio
+        raw = self._get_json(PORTFOLIO_URL, params={"currency": "RUB"})
         raw_keys: list[str] = []
         if isinstance(raw, dict):
             raw_keys = sorted(raw.keys())
+        elif isinstance(raw, list):
+            raw_keys = ["<list>"]
         holdings = _parse_portfolio(raw)
 
-        # Enrich qty from limits if portfolio rows lack quantity
+        money_cash: Optional[float] = None
         try:
-            limits = self._get_json(LIMITS_URL)
+            limits = self._get_json(LIMITS_URL, params={"currency": "RUB"})
             holdings = _merge_limits(holdings, limits)
+            money_cash = _parse_money_limits_cash_rub(limits)
         except Exception as exc:  # noqa: BLE001
             log.debug("BCS limits skip: %s", exc)
 
         summary = _parse_summary(raw)
+        cash = summary.get("cash")
+        if cash is None:
+            cash = money_cash
+        if cash is None:
+            cash_rows = [h for h in holdings if (h.asset_class or "").lower() == "cash"]
+            if cash_rows:
+                vals = [h.market_value for h in cash_rows if h.market_value is not None]
+                cash = sum(vals) if vals else None
+        # если summary/limits дали кэш, а строк CURRENCY нет — добавим RUB для KPI/карточки
+        if cash is not None and not any((h.asset_class or "").lower() == "cash" for h in holdings):
+            holdings.append(
+                Holding(
+                    ticker="RUB",
+                    name="RUB",
+                    quantity=cash,
+                    market_price=1.0,
+                    market_value=cash,
+                    cost_value=cash,
+                    currency="RUB",
+                    asset_class="cash",
+                )
+            )
+
         return HoldingsSnapshot(
             configured=True,
             ok=True,
             error="",
             fetched_at=time.time(),
             total_value=summary.get("total_value"),
-            cash=summary.get("cash"),
+            cash=cash,
             pnl=summary.get("pnl"),
             pnl_pct=summary.get("pnl_pct"),
             currency=str(summary.get("currency") or "RUB"),
@@ -695,6 +726,7 @@ def _row_to_holding(row: dict) -> Holding:
     sec_code = _s(pick("secCode", "sec_code"))
     class_code = _s(pick("classCode", "class_code", "board"))
     name = _s(pick("name", "displayName", "shortName", "short_name", "secName"))
+    itype = _s(pick("instrumentType", "upperType")).upper()
     asset_class = classify_asset_class(
         ticker=ticker,
         sec_code=sec_code,
@@ -702,6 +734,12 @@ def _row_to_holding(row: dict) -> Holding:
         class_code=class_code,
         name=name,
     )
+    if itype in ("CURRENCY", "MONEY") or (itype == "CASH"):
+        asset_class = "cash"
+        if not ticker:
+            ticker = _s(pick("currency", "currencyCode")) or "RUB"
+        if not name:
+            name = ticker
     return Holding(
         ticker=ticker,
         isin=isin,
@@ -715,7 +753,7 @@ def _row_to_holding(row: dict) -> Holding:
         cost_value=cost,
         pnl=pnl,
         pnl_pct=pnl_pct,
-        currency=_s(pick("currency", "currencyId", "faceUnit")) or "RUB",
+        currency=_s(pick("currency", "currencyId", "faceUnit", "currencyCode")) or "RUB",
         asset_class=asset_class,
     )
 
@@ -928,6 +966,37 @@ def _parse_deals(raw: Any) -> list[Operation]:
     # newest first when ISO-ish timestamps present
     out.sort(key=lambda o: o.executed_at or "", reverse=True)
     return out
+
+
+def _parse_money_limits_cash_rub(limits: Any) -> Optional[float]:
+    """Sum free RUB from limits.moneyLimits (needs ?currency=RUB on the request)."""
+    if not isinstance(limits, dict):
+        return None
+    rows = limits.get("moneyLimits") or limits.get("MoneyLimits") or []
+    if not isinstance(rows, list) or not rows:
+        return None
+    total = 0.0
+    found = False
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        lower = {str(k).lower(): v for k, v in row.items()}
+        code = _s(lower.get("currencycode") or lower.get("currency") or lower.get("ticker")).upper()
+        if code and code != "RUB":
+            continue
+        qty = lower.get("quantity")
+        val: Optional[float] = None
+        if isinstance(qty, dict):
+            val = _f(qty.get("value") or qty.get("Value"))
+        else:
+            val = _f(qty)
+        if val is None:
+            val = _f(lower.get("currentvalue") or lower.get("currentvaluerub") or lower.get("free"))
+        if val is None:
+            continue
+        total += val
+        found = True
+    return total if found else None
 
 
 def _merge_limits(holdings: list[Holding], limits: Any) -> list[Holding]:

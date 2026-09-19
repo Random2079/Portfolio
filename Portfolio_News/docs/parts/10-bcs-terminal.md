@@ -4,7 +4,7 @@
 |---|---|
 | **Код** | [`bcs_client.py`](../../portfolio_news/bcs_client.py) · [`day_attribution.py`](../../portfolio_news/day_attribution.py) · [`position_card.py`](../../portfolio_news/position_card.py) · [`api.py`](../../portfolio_news/api.py) · [`static/dashboard-demo.html`](../../portfolio_news/static/dashboard-demo.html) · *(новые модули по мере K)* |
 | **Слой** | K0–K9 |
-| **Статус** | K0–K8 · KA–KB ✅; дальше K9… |
+| **Статус** | K0–K9 · KA–KB ✅ |
 | **Навигация** | [INDEX](INDEX.md) · [TZ](../TZ.md) |
 
 ## Шаги
@@ -22,7 +22,8 @@
 | K6 | Daily snapshot → график капитала | ✅ `/api/capital` + блок «Капитал»; недельный backfill с 01.2024 из журнала |
 | K7 | Календарь купонов/дивов по своим | ✅ `calendar_own.py` + `/api/calendar` + блок «Что прилетит»; MOEX только фоном, кэш `calendar_cache` |
 | K8 | Фильтр операций + CSV | ✅ `ops_history.py`: журнал Snowball (с 2023) + кэш БКС, дедуп по локальной дате; чипы акции/облигации/фонды, период по годам, тикер; `/api/operations.csv` |
-| K9 | Toast по новостям портфеля | ✅ + антиспам |
+| K9 | Toast по новостям портфеля | ✅ только сегодня (Екб); digest дефолт; BCS scope; UI/`.env` off; дедуп URL |
+| KS | Сверка / факты (чек-поинт UI) | ⬜ → [11-review-checkpoint.md](11-review-checkpoint.md) |
 
 ## K9 антиспам (не ломать)
 

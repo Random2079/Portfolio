@@ -1,14 +1,17 @@
 ---
-description: Ground rules — coding vs investments, sparse git (no auto-push), exams.
+description: Ground rules — coding vs investments, stage-commit no push, MAP canon.
 alwaysApply: true
 ---
 
 # Coding chat defaults
 
-Глобально: `~/.cursor/rules/coding-chat-defaults.mdc`.
+Глобально: `~/.cursor/rules/coding-chat-defaults.mdc` (канон там).
 
 - Репо = **прога**, не финансист (`Инвестиции/` — другой воркспейс).
-- **Не** коммить/пушить после каждого фикса. Коммит — по просьбе, в конце этапа/фичи, или чекпоинт для отката. **Пуш только если попросили.**
+- Есть **`MAP.md`** → статус/очередь/план только там; TZ/parts — техника; plans/WHERE_WE_ARE — указатели. Расхождение → MAP.
+- **Коммит без спроса** на закрытии этапа/слоя/пласта (не после каждой правки). В чат: hash + что. Неясно → «чекпоинт?».
+- **Пуш только если попросили.**
+- Перед коммитом: не `.env`, `data/`, токены, `DAY_LOG/`, dumps, кеши. MAP обновлённый — в коммит этапа.
 - Не переспрашивай `IDEAS.md` / exam-me / PROJECTS.
 - Экзамен: роли, не имена функций.
 - Тон: код по делу, болтовня по-человечески.

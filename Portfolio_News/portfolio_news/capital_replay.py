@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -95,6 +95,31 @@ def unit_rub(close: float, kind: str) -> float:
     if kind == "bond" and 0 < close < 300:
         return close / 100.0 * _BOND_FACE
     return close
+
+
+def candles_unit_rub(points: Sequence[Any], kind: str) -> list[Any]:
+    """Scale bond OHLC from % of par → ₽/шт (same as markers/avg). Equity unchanged."""
+    if (kind or "").strip().lower() != "bond" or not points:
+        return list(points)
+    out: list[Any] = []
+    for p in points:
+        o = getattr(p, "open", None)
+        c = getattr(p, "close", None)
+        h = getattr(p, "high", None)
+        lo = getattr(p, "low", None)
+        out.append(
+            type(p)(
+                begin=getattr(p, "begin", "") or "",
+                end=getattr(p, "end", "") or "",
+                open=unit_rub(float(o), "bond") if o is not None else None,
+                close=unit_rub(float(c), "bond") if c is not None else None,
+                high=unit_rub(float(h), "bond") if h is not None else None,
+                low=unit_rub(float(lo), "bond") if lo is not None else None,
+                volume=getattr(p, "volume", None),
+                value=getattr(p, "value", None),
+            )
+        )
+    return out
 
 
 def last_close_on_or_before(

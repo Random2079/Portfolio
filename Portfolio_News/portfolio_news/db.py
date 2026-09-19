@@ -111,6 +111,62 @@ class MoexClose(Base):
     updated_at: Mapped[float] = mapped_column(Float, default=0.0)
 
 
+class ChartCandleCache(Base):
+    """K3: full OHLCV candle series per ticker for разбор (avoid ISS every click)."""
+
+    __tablename__ = "chart_candle_cache"
+
+    ticker: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
+    ok: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ReviewCache(Base):
+    """KS: last review/checkpoint payload per ticker (cache-first UI)."""
+
+    __tablename__ = "review_cache"
+
+    ticker: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
+    ok: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class SmartlabFundamentalsCache(Base):
+    """KS: Smart-Lab fundamental table universe (singleton)."""
+
+    __tablename__ = "smartlab_fundamentals_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # singleton = 1
+    payload_json: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
+    ok: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class DohodBondCache(Base):
+    """KS: Dohod getbondinfo payload per ISIN."""
+
+    __tablename__ = "dohod_bond_cache"
+
+    isin: Mapped[str] = mapped_column(String(32), primary_key=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
+    ok: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class FundTerUniverseCache(Base):
+    """KS: CBR PIF showcase Excel → TER/fees by ISIN (universe blob)."""
+
+    __tablename__ = "fund_ter_universe_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
+    ok: Mapped[int] = mapped_column(Integer, default=0)
+    source_as_of: Mapped[str] = mapped_column(String(128), default="")
+
+
 def make_engine(database_url: str):
     connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
     return create_engine(database_url, future=True, connect_args=connect_args)
