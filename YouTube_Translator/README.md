@@ -21,9 +21,11 @@ YouTube_Translator/
 ├── requirements.txt
 ├── bookmarks.json
 ├── dist/                 # субтитры_<title> [youtubeId]/
-├── yt_profile/           # cookies WebView YouTube
+├── yt_profile/           # устар.: мигрирует в %LOCALAPPDATA%\SubtitleRipperPro\
 └── docs/                 # ТЗ, parts (не смешивать с .py)
 ```
+
+WebEngine-профили (куки YouTube/закладки) живут в `%LOCALAPPDATA%\SubtitleRipperPro\`, не в OneDrive — иначе SearchIndexer разгоняется на тысячах мелких файлов Chromium.
 
 Бэкап старого CTk/Qt: `Subtitle_App_qt_backup.py` / тонкие backup-файлы — не боевой путь.
 

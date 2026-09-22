@@ -93,6 +93,11 @@ class DownloadCancelled(Exception):
 _player_httpd: ThreadingHTTPServer | None = None
 _player_httpd_folder: str | None = None
 _player_httpd_lock = threading.Lock()
+# Живые yt-dlp/ffmpeg от скачиваний — гасим при закрытии окна
+_active_child_procs: set[subprocess.Popen] = set()
+_active_child_lock = threading.Lock()
+# Windows: не индексировать (SearchIndexer / «Поиск»)
+_FILE_ATTR_NOT_CONTENT_INDEXED = 0x2000
 
 
 # =====================================================================
@@ -278,9 +283,68 @@ def _inspect_youtube_cookies(path: str | None) -> dict:
     return info
 
 
+def _mark_not_content_indexed(path: str) -> None:
+    """Пометить путь «не индексировать» — меньше работы Search на OneDrive."""
+    if os.name != "nt" or not path or not os.path.exists(path):
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        get_attrs = kernel32.GetFileAttributesW
+        set_attrs = kernel32.SetFileAttributesW
+        get_attrs.argtypes = [ctypes.c_wchar_p]
+        get_attrs.restype = ctypes.c_uint32
+        set_attrs.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32]
+        set_attrs.restype = ctypes.c_bool
+        attrs = int(get_attrs(path))
+        if attrs == 0xFFFFFFFF:
+            return
+        if attrs & _FILE_ATTR_NOT_CONTENT_INDEXED:
+            return
+        set_attrs(path, attrs | _FILE_ATTR_NOT_CONTENT_INDEXED)
+    except Exception:
+        pass
+
+
+def webengine_data_root() -> str:
+    """Профили Chromium вне OneDrive: %LOCALAPPDATA%\\SubtitleRipperPro.
+
+    Иначе SearchIndexer + OneDrive синк жрут тысячи мелких файлов профиля
+    при каждом старте WebEngine — «Поиск» в диспетчере и подвисания.
+    """
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
+        root = os.path.join(base, "SubtitleRipperPro")
+    else:
+        root = os.path.join(os.path.expanduser("~"), ".cache", "SubtitleRipperPro")
+    os.makedirs(root, exist_ok=True)
+    _mark_not_content_indexed(root)
+    return root
+
+
+def webengine_profile_dir(name: str) -> str:
+    """Каталог профиля WebEngine; один раз мигрирует со старого пути в project/."""
+    dest = os.path.join(webengine_data_root(), name)
+    legacy = os.path.join(app_install_dir(), name)
+    if not os.path.isdir(dest) and os.path.isdir(legacy):
+        try:
+            shutil.move(legacy, dest)
+        except OSError:
+            try:
+                shutil.copytree(legacy, dest, dirs_exist_ok=True)
+            except OSError:
+                pass
+    os.makedirs(dest, exist_ok=True)
+    _mark_not_content_indexed(dest)
+    if os.path.isdir(legacy):
+        _mark_not_content_indexed(legacy)
+    return dest
+
+
 def _yt_profile_cookie_db_paths() -> list[str]:
     """Файлы Cookies Chromium/Qt WebEngine в yt_profile."""
-    root = os.path.join(app_install_dir(), "yt_profile")
+    root = webengine_profile_dir("yt_profile")
     return [
         os.path.join(root, "Cookies"),
         os.path.join(root, "Network", "Cookies"),
@@ -814,10 +878,15 @@ def default_output_root() -> str:
     if getattr(sys, "frozen", False):
         # exe уже в dist/ — писать рядом с ним
         os.makedirs(here, exist_ok=True)
+        _mark_not_content_indexed(here)
         return here
     # скрипт — писать в dist/ внутри папки проекта
     dist = os.path.join(here, "dist")
     os.makedirs(dist, exist_ok=True)
+    _mark_not_content_indexed(dist)
+    # legacy-профили на OneDrive (если остались) — тоже не индексировать
+    for legacy_name in ("yt_profile", "bookmarks_profile"):
+        _mark_not_content_indexed(os.path.join(here, legacy_name))
     return dist
 
 
@@ -825,6 +894,7 @@ def default_audio_output_dir() -> str:
     """Куда класть MP3 — как в YouTube_DL (~/Music/YouTube_DL)."""
     path = os.path.join(os.path.expanduser("~"), "Music", "YouTube_DL")
     os.makedirs(path, exist_ok=True)
+    _mark_not_content_indexed(path)
     return path
 
 
@@ -876,6 +946,10 @@ def ensure_player_http_url(folder: str) -> str:
                 _player_httpd.shutdown()
             except Exception:  # noqa: BLE001
                 pass
+            try:
+                _player_httpd.server_close()
+            except Exception:  # noqa: BLE001
+                pass
             _player_httpd = None
             _player_httpd_folder = None
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
@@ -885,6 +959,71 @@ def ensure_player_http_url(folder: str) -> str:
         port = httpd.server_address[1]
 
     return f"http://127.0.0.1:{port}/{PLAYER_FILENAME}"
+
+
+def shutdown_player_httpd() -> None:
+    """Остановить локальный HTTP для player.html (при закрытии приложения)."""
+    global _player_httpd, _player_httpd_folder
+    with _player_httpd_lock:
+        httpd = _player_httpd
+        _player_httpd = None
+        _player_httpd_folder = None
+    if httpd is None:
+        return
+    try:
+        httpd.shutdown()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        httpd.server_close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _register_child_proc(proc: subprocess.Popen) -> None:
+    with _active_child_lock:
+        _active_child_procs.add(proc)
+
+
+def _unregister_child_proc(proc: subprocess.Popen) -> None:
+    with _active_child_lock:
+        _active_child_procs.discard(proc)
+
+
+def _kill_proc_tree(proc: subprocess.Popen) -> None:
+    """Убить процесс и детей (yt-dlp → ffmpeg)."""
+    pid = getattr(proc, "pid", None)
+    if not pid:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=8,
+                creationflags=0x08000000,
+            )
+        else:
+            proc.kill()
+    except (OSError, subprocess.SubprocessError):
+        try:
+            proc.kill()
+        except (OSError, ProcessLookupError):
+            pass
+
+
+def kill_active_child_processes() -> int:
+    """Убить зарегистрированные yt-dlp/ffmpeg и их деревья. Возвращает число попыток."""
+    with _active_child_lock:
+        procs = list(_active_child_procs)
+        _active_child_procs.clear()
+    killed = 0
+    for proc in procs:
+        if getattr(proc, "pid", None):
+            _kill_proc_tree(proc)
+            killed += 1
+    return killed
 
 
 def resolve_player_target(
@@ -1025,6 +1164,7 @@ def _run_ytdlp_with_heartbeat(
         text=True,
         creationflags=creation_flags,
     )
+    _register_child_proc(proc)
     chunks_out: list[str] = []
     chunks_err: list[str] = []
 
@@ -1042,28 +1182,31 @@ def _run_ytdlp_with_heartbeat(
     t0 = time.monotonic()
     last_tick = -1
     _emit(status_cb, f"{status_prefix} — 0с / {timeout}с…")
-    while proc.poll() is None:
-        if cancel_event and cancel_event.is_set():
-            proc.kill()
-            t_out.join(timeout=2)
-            t_err.join(timeout=2)
-            raise DownloadCancelled()
-        elapsed = int(time.monotonic() - t0)
-        if elapsed != last_tick:
-            last_tick = elapsed
-            _emit(status_cb, f"{status_prefix} — {elapsed}с / {timeout}с…")
-        if elapsed >= timeout:
-            proc.kill()
-            t_out.join(timeout=2)
-            t_err.join(timeout=2)
-            raise subprocess.TimeoutExpired(cmd, timeout)
-        time.sleep(0.2)
+    try:
+        while proc.poll() is None:
+            if cancel_event and cancel_event.is_set():
+                _kill_proc_tree(proc)
+                t_out.join(timeout=2)
+                t_err.join(timeout=2)
+                raise DownloadCancelled()
+            elapsed = int(time.monotonic() - t0)
+            if elapsed != last_tick:
+                last_tick = elapsed
+                _emit(status_cb, f"{status_prefix} — {elapsed}с / {timeout}с…")
+            if elapsed >= timeout:
+                _kill_proc_tree(proc)
+                t_out.join(timeout=2)
+                t_err.join(timeout=2)
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            time.sleep(0.2)
 
-    t_out.join(timeout=8)
-    t_err.join(timeout=8)
-    stdout = chunks_out[0] if chunks_out else ""
-    stderr = chunks_err[0] if chunks_err else ""
-    return subprocess.CompletedProcess(cmd, proc.returncode or 0, stdout, stderr)
+        t_out.join(timeout=8)
+        t_err.join(timeout=8)
+        stdout = chunks_out[0] if chunks_out else ""
+        stderr = chunks_err[0] if chunks_err else ""
+        return subprocess.CompletedProcess(cmd, proc.returncode or 0, stdout, stderr)
+    finally:
+        _unregister_child_proc(proc)
 
 
 # =====================================================================
@@ -2383,7 +2526,8 @@ class SubtitleApp(QMainWindow):
         self.login_btn.setToolTip("Войти в YouTube / назад к видео")
         self._login_mode = False  # False=войти, True=назад к видео
         self.login_btn.clicked.connect(self._login_btn_clicked)
-        row1.addWidget(self.login_btn)
+        # Кнопка «Войти» убрана из UI (логин через cookies/профиль при необходимости)
+        self.login_btn.hide()
         self._refresh_login_btn_visibility()
         layout.addWidget(self.player_chrome_row1)
 
@@ -2402,7 +2546,7 @@ class SubtitleApp(QMainWindow):
         self._player_video_layout = video_layout
         video_layout.setContentsMargins(8, 8, 8, 8)
         # Постоянный профиль — куки YouTube сохраняются между запусками
-        profile_path = os.path.join(app_install_dir(), "yt_profile")
+        profile_path = webengine_profile_dir("yt_profile")
         self._yt_profile = QWebEngineProfile("yt_player", self)
         self._yt_profile.setPersistentStoragePath(profile_path)
         self._yt_profile.setPersistentCookiesPolicy(
@@ -2520,10 +2664,10 @@ class SubtitleApp(QMainWindow):
         self._theater_esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), page)
         self._theater_esc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._theater_esc.activated.connect(self._on_theater_escape)
-        # T = theater (не F: на YouTube F — их «fullscreen», в WebEngine бесполезен)
-        self._theater_t = QShortcut(QKeySequence(Qt.Key.Key_T), page)
-        self._theater_t.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        self._theater_t.activated.connect(self._on_theater_hotkey)
+        # F = theater (приложение); F11 — то же полномасштабное
+        self._theater_f = QShortcut(QKeySequence(Qt.Key.Key_F), page)
+        self._theater_f.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._theater_f.activated.connect(self._on_theater_hotkey)
         self._theater_f11 = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
         self._theater_f11.activated.connect(self._toggle_os_fullscreen)
         # R = свернуть/показать правую панель (в окне, не fullscreen)
@@ -2575,7 +2719,7 @@ class SubtitleApp(QMainWindow):
         web_layout = QVBoxLayout(web_card)
         web_layout.setContentsMargins(8, 8, 8, 8)
 
-        profile_path = os.path.join(app_install_dir(), "bookmarks_profile")
+        profile_path = webengine_profile_dir("bookmarks_profile")
         self._bookmarks_profile = QWebEngineProfile("bookmarks", self)
         self._bookmarks_profile.setPersistentStoragePath(profile_path)
         self._bookmarks_profile.setPersistentCookiesPolicy(
@@ -2843,14 +2987,14 @@ class SubtitleApp(QMainWindow):
         self._sync_cancel_buttons()
 
     def _toggle_player_theater(self) -> None:
-        """Полномасштабный режим: весь монитор + без панелей (⛶ / T)."""
+        """Полномасштабный режим: весь монитор + без панелей (⛶ / F)."""
         if self.isFullScreen() or self._player_theater:
             self._exit_immersive_playback()
         else:
             self._enter_immersive_playback()
 
     def _on_theater_hotkey(self) -> None:
-        """T — immersive fullscreen; только на экране плеера."""
+        """F — immersive fullscreen; только на экране плеера."""
         if self.stack.currentWidget() is not self.player_view:
             return
         self._toggle_player_theater()
@@ -2939,7 +3083,7 @@ class SubtitleApp(QMainWindow):
 
     def _theater_btn_tooltip_idle(self) -> str:
         return (
-            "Полный экран (T / ⛶) — видео на весь монитор · Esc — выход · "
+            "Полный экран (F / ⛶) — видео на весь монитор · Esc — выход · "
             "F11 — то же"
         )
 
@@ -2989,7 +3133,7 @@ class SubtitleApp(QMainWindow):
                 widget.setVisible(False)
             self._player_theater = True
         self._set_immersive_chrome(True)
-        self.theater_btn.setToolTip("Выйти из полного экрана (Esc / T / F11)")
+        self.theater_btn.setToolTip("Выйти из полного экрана (Esc / F / F11)")
         if not self.isFullScreen():
             self.showFullScreen()
         # Best-effort: HTML5 video fullscreen внутри Chromium
@@ -3075,7 +3219,7 @@ class SubtitleApp(QMainWindow):
             self._exit_immersive_playback()
 
     def _toggle_os_fullscreen(self) -> None:
-        """F11 — тот же полномасштабный режим, что ⛶ / T."""
+        """F11 — тот же полномасштабный режим, что ⛶ / F."""
         if self.stack.currentWidget() is not self.player_view:
             return
         self._toggle_player_theater()
@@ -3768,23 +3912,22 @@ class SubtitleApp(QMainWindow):
         return _yt_profile_looks_logged_in()
 
     def _refresh_login_btn_visibility(self) -> None:
-        """«Войти» только если нет логина; в режиме «Назад» всегда видна."""
+        """Кнопка «Войти» скрыта из UI (оставлена в коде на случай возврата)."""
         if not hasattr(self, "login_btn"):
             return
-        if self._login_mode:
-            self.login_btn.setVisible(True)
-            return
-        self.login_btn.setVisible(not self._cookies_look_logged_in())
+        self.login_btn.hide()
+        self._login_mode = False
 
     def _login_btn_clicked(self) -> None:
+        # UI-кнопки нет; логика сохранена на случай ручного вызова
         if not self._login_mode:
             # → открыть страницу входа
             self.web_view.setUrl(QUrl("https://accounts.google.com/signin/v2/identifier?service=youtube"))
-            self._set_player_status("Статус: войди в аккаунт, потом нажми «Назад»")
+            self._set_player_status("Статус: войди в аккаунт (кнопка Войти скрыта — логин через cookies)")
             self.login_btn.setText("Назад")
             self.login_btn.setToolTip("Назад к видео")
             self._login_mode = True
-            self.login_btn.setVisible(True)
+            self.login_btn.hide()
         else:
             # → вернуться на видео
             self.login_btn.setText("Войти")
@@ -3939,8 +4082,32 @@ class SubtitleApp(QMainWindow):
         self.activateWindow()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        close_overlay_player()
+        # 1) отмена фоновых задач → 2) дети yt-dlp → 3) overlay/http/webview
+        try:
+            self._ai_cancel_event.set()
+            self._ai_job_id += 1
+        except Exception:
+            pass
+        try:
+            self._cancel_event.set()
+        except Exception:
+            pass
+        kill_active_child_processes()
+        try:
+            close_overlay_player()
+        except Exception:
+            pass
         self._overlay_window = None
+        try:
+            self._unload_player()
+        except Exception:
+            pass
+        if hasattr(self, "bookmarks_web_view"):
+            try:
+                self.bookmarks_web_view.setUrl(QUrl("about:blank"))
+            except Exception:
+                pass
+        shutdown_player_httpd()
         super().closeEvent(event)
 
     def on_download_audio_from_player(self) -> None:
@@ -4450,6 +4617,13 @@ if __name__ == "__main__":
         sys.exit(0)
 
     _apply_sr_aumid()
+    # Профили/dist вне индекса Search; миграция yt_profile с OneDrive при первом старте
+    try:
+        default_output_root()
+        webengine_profile_dir("yt_profile")
+        webengine_profile_dir("bookmarks_profile")
+    except OSError:
+        pass
     app = QApplication(sys.argv)
     app.setWindowIcon(make_app_icon())
     configure_qt_theme(app)
