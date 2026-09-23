@@ -60,10 +60,11 @@ DEFAULT_TERA_VOICE = "ru_f1"
 DEFAULT_TERA_DURATION_SCALE = 1.0
 _ENGINES = {"local", "edge", "tera", "qwen", "openai"}
 _DEAD_ENGINES = {"kokoro", "piper"}
-_HYBRID_MODES = {"off", "dict_only"}
+_HYBRID_MODES = {"off", "dict_only", "dict_and_en"}
 HYBRID_ITEMS = [
     ("off", "Как написано (без словаря)"),
     ("dict_only", "Словарь IT (fallback → фэлбэк)"),
+    ("dict_and_en", "Словарь + EN (Tera <en>)"),
 ]
 VOICES_QWEN = [
     ("micro_wife/designs/06_work_male_neutral.txt", "6 · рабочий мужской (ровный)"),
@@ -156,8 +157,6 @@ def load_config() -> dict:
     data["tera_duration_scale"] = max(0.6, min(1.5, scale))
 
     hybrid = str(data.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
-    if hybrid == "dict_and_en":
-        hybrid = "dict_only"
     data["hybrid_mode"] = hybrid if hybrid in _HYBRID_MODES else DEFAULT_HYBRID_MODE
 
     design = str(data.get("micro_wife_design_file", DEFAULT_QWEN_DESIGN)).strip()
@@ -224,8 +223,6 @@ def save_config(
         data["tera_duration_scale"] = max(0.6, min(1.5, scale))
     if hybrid_mode is not None:
         mode = str(hybrid_mode).strip().lower()
-        if mode == "dict_and_en":
-            mode = "dict_only"
         data["hybrid_mode"] = mode if mode in _HYBRID_MODES else DEFAULT_HYBRID_MODE
     if micro_wife_design_file is not None:
         data["micro_wife_design_file"] = micro_wife_design_file

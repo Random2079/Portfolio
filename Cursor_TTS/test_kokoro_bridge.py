@@ -80,20 +80,20 @@ class ConfigMigrationTests(unittest.TestCase):
             finally:
                 panel.CONFIG_FILE = old
 
-    def test_dict_and_en_collapses(self) -> None:
+    def test_dict_and_en_kept_for_tera_path(self) -> None:
         import TTS_Panel as panel
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = Path(tmp) / "tts_config.json"
             cfg_path.write_text(
-                json.dumps({"engine": "kokoro", "hybrid_mode": "dict_and_en"}),
+                json.dumps({"engine": "tera", "hybrid_mode": "dict_and_en"}),
                 encoding="utf-8",
             )
             old = panel.CONFIG_FILE
             try:
                 panel.CONFIG_FILE = cfg_path
                 data = panel.load_config()
-                self.assertEqual(data["hybrid_mode"], "dict_only")
+                self.assertEqual(data["hybrid_mode"], "dict_and_en")
             finally:
                 panel.CONFIG_FILE = old
 

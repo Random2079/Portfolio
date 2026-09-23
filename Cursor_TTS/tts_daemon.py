@@ -45,7 +45,7 @@ DEFAULT_QWEN_SPEAKER = "serena"
 DEFAULT_QWEN_DESIGN = "micro_wife/voice_design.txt"
 _ENGINES = {"local", "edge", "tera", "qwen", "openai"}
 _DEAD_ENGINES = {"kokoro", "piper"}  # kokoro→edge, piper→local
-_HYBRID_MODES = {"off", "dict_only"}
+_HYBRID_MODES = {"off", "dict_only", "dict_and_en"}
 # Живой Qwen на 3050: 20–30с / до ~160с если тесно. Дальше CUDA стоит — процесс надо убить.
 WARMUP_STALE_SEC = 240
 WARMUP_BUSY_OTHER = -1
@@ -328,8 +328,6 @@ def load_config() -> dict:
             except Exception:
                 data["tera_duration_scale"] = DEFAULT_TERA_DURATION_SCALE
             hybrid = str(raw.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
-            if hybrid == "dict_and_en":
-                hybrid = "dict_only"
             data["hybrid_mode"] = hybrid if hybrid in _HYBRID_MODES else DEFAULT_HYBRID_MODE
             data["qwen_model"] = (
                 str(raw.get("qwen_model", DEFAULT_QWEN_MODEL)).strip() or DEFAULT_QWEN_MODEL
@@ -671,6 +669,25 @@ CHUNK_TARGET = 900  # символов на кусок (legacy; kokoro/qwen ре
 FAST_START = 220
 
 
+def _is_chunk_boundary(text: str, index: int) -> bool:
+    """Точка — граница, кроме дат (13.08) и хвостов вроде file.ext."""
+    ch = text[index]
+    if ch in "!?\n;":
+        return True
+    if ch != ".":
+        return False
+    nxt = text[index + 1 : index + 2]
+    if not nxt:
+        return True
+    # 13.08 / v1.2 — не предложение
+    if nxt.isdigit():
+        return False
+    # остаток расширения или инициал: буква сразу после точки
+    if nxt.isalpha() and nxt.islower():
+        return False
+    return True
+
+
 def split_into_chunks(text: str, target: int = CHUNK_TARGET) -> list[str]:
     """Режет длинный текст на куски по предложениям/пробелам."""
     text = text.strip()
@@ -695,7 +712,7 @@ def split_into_chunks(text: str, target: int = CHUNK_TARGET) -> list[str]:
 
         cut = -1
         for i in range(len(window) - 1, max(len(window) // 3, 0), -1):
-            if window[i] in ".!?\n;":
+            if _is_chunk_boundary(window, i):
                 cut = i + 1
                 break
         if cut < 0:
@@ -808,10 +825,10 @@ def _audio_suffix(engine: str) -> str:
 
 
 def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None:
-    """local / edge / kokoro / qwen / openai → audio.
+    """local / edge / tera / qwen / openai → audio.
     Смену движка (_prepare_engine) делает speak_text/warmup один раз — не на каждый chunk.
+    lang учитывает только Tera (<en>/<ru>); остальные движки всегда RU-пайплайн.
     """
-    del lang  # EN hybrid убран вместе с Piper
     engine = cfg["engine"]
     if engine == "local":
         from speak_local import synthesize_wav as synthesize_local
@@ -842,6 +859,7 @@ def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None
             duration_scale=normalize_duration_scale(
                 cfg.get("tera_duration_scale", DEFAULT_TERA_DURATION_SCALE)
             ),
+            lang=lang,
         )
         return
     if engine == "qwen":
@@ -905,24 +923,42 @@ def _parts_for_engine(text: str, engine: str) -> list[str]:
 
 
 def _effective_hybrid(cfg: dict) -> str:
+    """dict_and_en только у Tera (нативные <en>/<ru>). Иначе → dict_only."""
     mode = str(cfg.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
     if mode not in _HYBRID_MODES:
         mode = DEFAULT_HYBRID_MODE
-    return "off" if mode == "off" else "dict_only"
+    if mode == "off":
+        return "off"
+    if mode == "dict_and_en":
+        engine = str(cfg.get("engine", DEFAULT_ENGINE)).strip().lower()
+        if engine == "tera":
+            return "dict_and_en"
+        return "dict_only"
+    return "dict_only"
 
 
 def _speech_units(text: str, cfg: dict) -> list[tuple[str, str]]:
-    """Куски [(текст, lang)]. Всегда ru после удаления Piper EN hybrid."""
+    """Куски [(текст, lang)]. dict_and_en+Tera → RU/EN сегменты; иначе всё ru."""
     hybrid = _effective_hybrid(cfg)
     engine = str(cfg.get("engine", DEFAULT_ENGINE))
-    prepared = text
     try:
+        if hybrid == "dict_and_en":
+            from text_prep import finalize_speech_segments
+
+            units: list[tuple[str, str]] = []
+            for seg in finalize_speech_segments(text):
+                for chunk in _parts_for_engine(seg.text, engine):
+                    if chunk:
+                        units.append((chunk, seg.lang))
+            return units
+
         from text_prep import finalize_speech_text
 
         prepared = finalize_speech_text(text, apply_dict=hybrid != "off")
+        return [(chunk, "ru") for chunk in _parts_for_engine(prepared, engine) if chunk]
     except Exception as error:
         debug_log(f"text_prep skipped: {error}")
-    return [(chunk, "ru") for chunk in _parts_for_engine(prepared, engine) if chunk]
+        return [(chunk, "ru") for chunk in _parts_for_engine(text, engine) if chunk]
 
 
 def speak_text(item: SpeechItem) -> None:

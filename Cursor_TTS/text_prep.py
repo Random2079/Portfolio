@@ -229,6 +229,13 @@ def _table_rows_to_speech(headers: list[str], body: list[list[str]]) -> str:
     return "\n".join(sentences)
 
 
+# Расширения файлов: точка = не конец предложения (иначе MAP.md → «…пи. Мд»).
+_FILE_EXT_RE = re.compile(
+    r"(?i)\.(md|txt|py|json|vbs|bat|cmd|exe|log|wav|mp3|onnx|ps1|"
+    r"yml|yaml|toml|ini|cfg|html|css|js|ts|tsx|jsx|csv|xml)\b"
+)
+
+
 def soften_symbols(text: str) -> str:
     """Стрелки, кавычки, списки — без вырезания латиницы и без словаря."""
     text = text.replace("\\n", " ").replace("\\t", " ").replace("\\r", " ")
@@ -247,11 +254,16 @@ def soften_symbols(text: str) -> str:
     text = text.replace('"', "").replace("'", "").replace("`", "")
 
     text = text.replace("—", ", ").replace("–", ", ").replace("−", ", ")
-    text = re.sub(r"\s*/\s*", " или ", text)
+    # «A / B» → «или»; путь docs/parts → пробел (не «дакс или партс»).
+    text = re.sub(r"\s+/\s+", " или ", text)
+    text = re.sub(r"(?<=[\w.])/(?=[\w.])", " ", text)
     text = re.sub(r"\s*\+\s*", " плюс ", text)
 
     text = re.sub(r"\(([^)]{1,120})\)", r", \1,", text)
     text = re.sub(r"\[([^\]]{1,120})\]", r", \1,", text)
+
+    # MAP.md / Panel.vbs → «MAP md» / «Panel vbs» до вырезания прочих знаков.
+    text = _FILE_EXT_RE.sub(lambda m: " " + m.group(1).lower(), text)
 
     text = re.sub(r"[~^#_*=|\\<>]+", " ", text)
     text = re.sub(r"[…]{1,}", ". ", text)
@@ -323,7 +335,7 @@ def segment_languages(
     """
     RU по умолчанию. 1–2 латинских токена / слово из словаря → RU.
     3+ подряд английских слова или ~60–70% латиницы в куске → EN.
-    Знаки остаются при соседнем сегменте.
+    Пробелы и знаки наследуют язык соседних слов (не рвут EN-фразу).
     """
     mapping = vocab if vocab is not None else load_pronunciations()
     text = text.strip()
@@ -357,7 +369,8 @@ def segment_languages(
                 k += 1
                 continue
             if tokens[k].strip() == "" or (
-                kinds[k] == "other" and not any(ch.isalpha() or ch.isdigit() for ch in tokens[k])
+                kinds[k] == "other"
+                and not any(ch.isalpha() or ch.isdigit() for ch in tokens[k])
             ):
                 k += 1
                 continue
@@ -367,27 +380,41 @@ def segment_languages(
                 en_run_len[idx] = count
         i = j + 1
 
-    langs: list[str] = []
+    langs: list[str | None] = []
     for idx, kind in enumerate(kinds):
         if kind == "en" and en_run_len[idx] >= 3:
             langs.append("en")
-        else:
+        elif kind in {"en", "dict"}:
             langs.append("ru")
+        elif any(ch.isalpha() or ch.isdigit() for ch in tokens[idx]):
+            langs.append("ru")
+        else:
+            langs.append(None)  # пробел/знак — от соседей
 
-    # Кусок с высокой долей латиницы и без кириллицы → EN.
-    latin_words = sum(1 for kind in kinds if kind in {"en", "dict"})
+    # Кусок с высокой долей «настоящего» EN (не словарь) и без кириллицы → EN.
+    pure_en = sum(1 for kind in kinds if kind == "en")
     has_cyr = any(
         any(("а" <= ch.lower() <= "я") or ch.lower() == "ё" for ch in tok)
         for tok, kind in zip(tokens, kinds)
         if kind == "other"
     )
-    if latin_words >= 3 and _latin_letter_ratio(text) >= 0.6 and not has_cyr:
+    if pure_en >= 3 and _latin_letter_ratio(text) >= 0.6 and not has_cyr:
         langs = ["en"] * len(tokens)
+
+    # Пробелы/знаки: тянем язык предыдущего слова, иначе следующего.
+    last_word: str | None = None
+    for idx, lang in enumerate(langs):
+        if lang is not None:
+            last_word = lang
+            continue
+        nxt = next((langs[j] for j in range(idx + 1, len(langs)) if langs[j]), None)
+        langs[idx] = last_word or nxt or "ru"
 
     merged: list[SpeechSegment] = []
     buf = ""
     current: str | None = None
     for tok, lang in zip(tokens, langs):
+        assert lang is not None
         if current is None:
             current = lang
             buf = tok

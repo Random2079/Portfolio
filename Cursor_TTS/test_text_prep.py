@@ -116,17 +116,56 @@ class TestQwenChunkIntegrity(unittest.TestCase):
         self.assertTrue(prepared.endswith("не считает аварией."))
 
 
-class TestMissingEnModel(unittest.TestCase):
-    def test_hybrid_falls_back_without_en_file(self) -> None:
+class TestPathAndChunkPrep(unittest.TestCase):
+    def test_path_slash_not_or(self) -> None:
+        out = finalize_speech_text("docs/parts/MAP.md", apply_dict=True)
+        self.assertNotIn("или", out)
+        self.assertNotIn(".md", out.lower())
+        self.assertIn("мэп", out.lower())
+
+    def test_spaced_slash_is_or(self) -> None:
+        out = finalize_speech_text("take / pass", apply_dict=False)
+        self.assertIn("или", out)
+
+    def test_file_ext_not_sentence_break(self) -> None:
         import tts_daemon as daemon
 
-        cfg = {
-            "engine": "piper",
-            "hybrid_mode": "dict_and_en",
-            "piper_model_en": "models/en_US-ryan-medium.onnx",
-        }
-        with patch("speak_piper.model_exists", return_value=False):
-            self.assertEqual(daemon._effective_hybrid(cfg), "dict_only")
+        source = "Открыл Portfolio_News/MAP.md — короткий."
+        with patch("text_prep.normalize_tts", side_effect=lambda text: text):
+            units = daemon._speech_units(
+                source, {"engine": "tera", "hybrid_mode": "dict_only"}
+            )
+        joined = " ".join(t for t, _ in units)
+        self.assertNotRegex(joined, r"(?i)\bмд\b")
+        self.assertFalse(any(t.strip().lower().startswith("мд") for t, _ in units))
+
+
+class TestTeraEnHybrid(unittest.TestCase):
+    def test_dict_and_en_routes_english(self) -> None:
+        import tts_daemon as daemon
+
+        source = "Check the network connection and restart."
+        with patch("text_prep.normalize_tts", side_effect=lambda text: text):
+            units = daemon._speech_units(
+                source, {"engine": "tera", "hybrid_mode": "dict_and_en"}
+            )
+        self.assertTrue(units)
+        self.assertTrue(any(lang == "en" for _, lang in units))
+        self.assertIn("network", " ".join(t for t, lang in units if lang == "en").lower())
+
+    def test_dict_and_en_falls_back_on_edge(self) -> None:
+        import tts_daemon as daemon
+
+        cfg = {"engine": "edge", "hybrid_mode": "dict_and_en"}
+        self.assertEqual(daemon._effective_hybrid(cfg), "dict_only")
+
+
+class TestMissingEnModel(unittest.TestCase):
+    def test_hybrid_collapses_without_tera(self) -> None:
+        import tts_daemon as daemon
+
+        cfg = {"engine": "local", "hybrid_mode": "dict_and_en"}
+        self.assertEqual(daemon._effective_hybrid(cfg), "dict_only")
 
 
 if __name__ == "__main__":

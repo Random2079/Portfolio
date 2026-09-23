@@ -90,13 +90,15 @@ def synthesize_wav(
     *,
     voice: str | None = None,
     duration_scale: float | None = None,
+    lang: str = "ru",
 ) -> None:
     text = (text or "").strip()
     if len(text) < 1:
         raise ValueError("empty text")
-    # язык обязателен для Tera
+    # Tera требует теги: <ru>…</ru> или <en>…</en> (можно миксовать в одном вызове).
     if "<ru>" not in text and "<en>" not in text:
-        text = f"<ru>{text}</ru>"
+        tag = "en" if str(lang).strip().lower() == "en" else "ru"
+        text = f"<{tag}>{text}</{tag}>"
 
     tts = _get_tts()
     voice_id = normalize_voice(voice)
