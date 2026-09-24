@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QKeySequenceEdit,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -682,25 +683,38 @@ def _key_event_to_hotkey_spec(event) -> str | None:
     return "+".join(parts)
 
 
-class HotkeyCaptureEdit(QLineEdit):
-    """Клик → жми сочетание (Ctrl+Shift+1). Не свободный текст. Backspace — дефолт."""
+def _hotkey_spec_to_sequence(spec: str) -> QKeySequence:
+    return QKeySequence(str(spec or "").strip())
+
+
+def _sequence_to_hotkey_spec(seq: QKeySequence) -> str:
+    """PortableText → 'Ctrl+Shift+1' (как в prefs / RegisterHotKey)."""
+    if seq.isEmpty():
+        return ""
+    raw = seq.toString(QKeySequence.SequenceFormat.PortableText)
+    # Берём только первую комбинацию, если Qt склеил несколько
+    return raw.split(", ")[0].strip()
+
+
+class HotkeyCaptureEdit(QKeySequenceEdit):
+    """Клик → жми сочетание. QKeySequenceEdit, не свободный текст."""
 
     def __init__(self, initial: str, default: str, parent: QWidget | None = None) -> None:
-        super().__init__(initial or default, parent)
+        super().__init__(parent)
         self._default = default
-        self.setReadOnly(True)
-        self.setPlaceholderText("клик → жми сочетание")
+        self.setMaximumSequenceLength(1)
+        self.setKeySequence(_hotkey_spec_to_sequence(initial or default))
         self.setToolTip(
-            "Кликни поле, затем нажми нужные клавиши (например Ctrl+Shift+1).\n"
-            "Backspace / Delete — вернуть значение по умолчанию."
+            "Кликни поле, затем нажми сочетание (Ctrl+Shift+1 и т.п.).\n"
+            "Backspace — сброс на значение по умолчанию."
         )
+        self.setMinimumHeight(28)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.isAutoRepeat():
             event.accept()
             return
         key = event.key()
-        # Сброс на дефолт — только без модификаторов (иначе Delete в комбо)
         if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete) and not (
             event.modifiers()
             & (
@@ -709,25 +723,18 @@ class HotkeyCaptureEdit(QLineEdit):
                 | Qt.KeyboardModifier.MetaModifier
             )
         ):
-            self.setText(self._default)
+            self.setKeySequence(_hotkey_spec_to_sequence(self._default))
             event.accept()
             return
-        spec = _key_event_to_hotkey_spec(event)
-        if spec is None:
-            event.accept()
-            return
-        # RegisterHotKey не все спецклавиши ест — проверяем парсер
-        if _parse_hotkey(spec, allow_repeat=True) is None and _parse_hotkey(spec) is None:
-            # Enter/Tab/и т.п. — не пишем, оставляем как было
-            event.accept()
-            return
-        self.setText(spec)
-        event.accept()
+        super().keyPressEvent(event)
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
-        super().mousePressEvent(event)
-        self.selectAll()
-        self.setPlaceholderText("жми сочетание…")
+    def current_spec(self) -> str:
+        spec = _sequence_to_hotkey_spec(self.keySequence())
+        if not spec:
+            return self._default
+        if _parse_hotkey(spec, allow_repeat=True) is None and _parse_hotkey(spec) is None:
+            return self._default
+        return spec
 
 
 class PulseVisual(QWidget):
@@ -796,40 +803,47 @@ class OverlaySettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Настр. — Фон")
         self.setModal(True)
-        self.resize(480, 560)
-        self.setMinimumSize(420, 400)
+        self.resize(540, 640)
+        self.setMinimumSize(480, 480)
         layout = QVBoxLayout(self)
+        layout.setSpacing(10)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        inner = QWidget()
-        form = QFormLayout(inner)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-
+        top = QFormLayout()
         self.play_hidden = QCheckBox("Играть при скрытом фоне / сквозь")
         self.play_hidden.setChecked(bool(prefs.get("play_when_hidden", True)))
-        form.addRow(self.play_hidden)
+        top.addRow(self.play_hidden)
         self.catalog_preview = QCheckBox("Клик в каталоге сразу играет")
         self.catalog_preview.setChecked(bool(prefs.get("catalog_preview", True)))
-        form.addRow(self.catalog_preview)
+        top.addRow(self.catalog_preview)
         self.preview_sound = QCheckBox("Звук превью в каталоге")
         self.preview_sound.setToolTip(
             "Выкл = картинка/ролик в каталоге без звука; в fullscreen звук как обычно"
         )
         self.preview_sound.setChecked(bool(prefs.get("preview_sound", True)))
-        form.addRow(self.preview_sound)
+        top.addRow(self.preview_sound)
         self.volume_spin = QSpinBox()
         self.volume_spin.setRange(0, 100)
         self.volume_spin.setSuffix(" %")
         self.volume_spin.setValue(max(0, min(100, int(prefs.get("volume", 10)))))
         self.volume_spin.setToolTip("Стартовая громкость плеера (каталог и fullscreen)")
-        form.addRow("Громкость по умолчанию", self.volume_spin)
+        top.addRow("Громкость по умолчанию", self.volume_spin)
+        layout.addLayout(top)
 
-        hk_title = QLabel("Горячие клавиши — клик по полю, потом жми сочетание")
-        hk_title.setStyleSheet("color:#94a3b8;font-size:11px;margin-top:6px;")
-        form.addRow(hk_title)
+        hk_title = QLabel("Горячие клавиши — клик по полю, потом жми сочетание (скролл ↓)")
+        hk_title.setStyleSheet("color:#94a3b8;font-size:12px;")
+        layout.addWidget(hk_title)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setMinimumHeight(320)
+        scroll.setFrameShape(QScrollArea.Shape.StyledPanel)
+        inner = QWidget()
+        form = QFormLayout(inner)
+        form.setSpacing(8)
+        form.setContentsMargins(8, 8, 12, 8)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
         self.hk_edits: dict[str, HotkeyCaptureEdit] = {}
         labels = {
@@ -858,8 +872,8 @@ class OverlaySettingsDialog(QDialog):
         layout.addWidget(scroll, stretch=1)
 
         hint = QLabel(
-            "Backspace в поле — сброс на дефолт. "
-            "Глоб.: Ctrl+←/→ seek · Ctrl+↑/↓ громкость · Ctrl+Shift+1/2 трек · Ctrl+Shift+O скрыть"
+            "Пока это окно открыто — глобальные хоткеи Фон выключены, чтобы можно было записать комбо.\n"
+            "Backspace в поле — сброс на дефолт."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#94a3b8;font-size:11px;")
@@ -872,12 +886,7 @@ class OverlaySettingsDialog(QDialog):
         layout.addWidget(buttons)
 
     def result_prefs(self) -> dict:
-        hotkeys: dict[str, str] = {}
-        for k, e in self.hk_edits.items():
-            raw = e.text().strip() or _DEFAULT_HOTKEYS[k]
-            if _parse_hotkey(raw, allow_repeat=True) is None and _parse_hotkey(raw) is None:
-                raw = _DEFAULT_HOTKEYS[k]
-            hotkeys[k] = raw
+        hotkeys = {k: e.current_spec() for k, e in self.hk_edits.items()}
         return {
             "play_when_hidden": self.play_hidden.isChecked(),
             "catalog_preview": self.catalog_preview.isChecked(),
@@ -1358,9 +1367,19 @@ class OverlayPlayerWindow(QWidget):
             # Не перехватывать набор в диалогах/полях
             fw = QApplication.focusWidget()
             if fw is not None:
-                from PySide6.QtWidgets import QComboBox, QLineEdit, QPlainTextEdit, QSpinBox, QTextEdit
+                from PySide6.QtWidgets import (
+                    QComboBox,
+                    QKeySequenceEdit,
+                    QLineEdit,
+                    QPlainTextEdit,
+                    QSpinBox,
+                    QTextEdit,
+                )
 
-                if isinstance(fw, (QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox)):
+                if isinstance(
+                    fw,
+                    (QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox, QKeySequenceEdit),
+                ):
                     return super().eventFilter(watched, event)
                 if not (fw is self or self.isAncestorOf(fw) or self.isActiveWindow()):
                     return super().eventFilter(watched, event)
@@ -2184,20 +2203,24 @@ class OverlayPlayerWindow(QWidget):
             if was_playing:
                 self._player.pause()
         QApplication.processEvents()
-        dlg = OverlaySettingsDialog(self._prefs, self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            updates = dlg.result_prefs()
-            self._prefs = save_overlay_prefs(**updates)
-            if "volume" in updates:
-                self.volume_slider.blockSignals(True)
-                self.volume_slider.setValue(int(updates["volume"]))
-                self.volume_slider.blockSignals(False)
-            self._refresh_hint()
-            self._install_shortcuts()
-            self._unregister_hotkeys()
+        # Иначе RegisterHotKey съедает Ctrl+Shift+1 и поле не видит комбо
+        self._unregister_hotkeys()
+        try:
+            dlg = OverlaySettingsDialog(self._prefs, self)
+            accepted = dlg.exec() == QDialog.DialogCode.Accepted
+            if accepted:
+                updates = dlg.result_prefs()
+                self._prefs = save_overlay_prefs(**updates)
+                if "volume" in updates:
+                    self.volume_slider.blockSignals(True)
+                    self.volume_slider.setValue(int(updates["volume"]))
+                    self.volume_slider.blockSignals(False)
+                self._refresh_hint()
+                self._install_shortcuts()
+                self._apply_output_volume()
+                self.status.setText("Настройки сохранены")
+        finally:
             self._register_hotkeys()
-            self._apply_output_volume()
-            self.status.setText("Настройки сохранены")
         if was_playing and self._player is not None and self._prefs.get("play_when_hidden", True):
             # не авто-resume если юзер сам на паузе ради настроек — resume ок
             self._player.play()
