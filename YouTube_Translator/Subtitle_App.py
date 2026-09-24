@@ -15,6 +15,7 @@ YouTube Subtitle Ripper — GUI (CustomTkinter) + yt-dlp.
   2.  download_and_split           — весь пайплайн скачивания (мозг)
   2b. download_audio               — MP3 через yt-dlp (Music/YouTube_DL)
   2c. overlay_player (IDEA-022)    — фон: каталог mp3/mp4, opacity, click-through
+  2d. dist files (IDEA-021 F0)     — список dist/субтитры_* + открыть в проводнике
   3.  SubtitleApp                  — окно, кнопки, поток, буфер
   4.  __main__                     — GUI или CLI: python Subtitle_App.py URL lang
 
@@ -56,11 +57,15 @@ from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngin
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QPushButton,
     QScrollArea,
@@ -637,16 +642,54 @@ def find_output_folder(video_id: str, base_dir: str | None = None) -> str | None
 
 def find_latest_subtitle_folder(base_dir: str | None = None) -> str | None:
     """Самая свежая папка субтитры_* (cwd, рядом со скриптом, dist/)."""
+    folders = list_subtitle_folders(base_dir)
+    return folders[0] if folders else None
+
+
+def list_subtitle_folders(base_dir: str | None = None) -> list[str]:
+    """Все папки субтитры_* (корни поиска), свежие сверху, без дублей пути."""
     roots = [base_dir] if base_dir is not None else _subtitle_search_roots()
     folders: list[str] = []
+    seen: set[str] = set()
     for root in roots:
         try:
             for entry in os.scandir(root):
-                if entry.is_dir() and entry.name.startswith("субтитры_"):
-                    folders.append(entry.path)
+                if not (entry.is_dir() and entry.name.startswith("субтитры_")):
+                    continue
+                try:
+                    norm = os.path.normcase(os.path.abspath(entry.path))
+                except OSError:
+                    continue
+                if norm in seen:
+                    continue
+                seen.add(norm)
+                folders.append(entry.path)
         except OSError:
             continue
-    return max(folders, key=os.path.getmtime) if folders else None
+
+    def _mtime(path: str) -> float:
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0.0
+
+    folders.sort(key=_mtime, reverse=True)
+    return folders
+
+
+def open_path_in_explorer(path: str) -> None:
+    """Открыть папку/файл в проводнике ОС."""
+    path = os.path.abspath(path)
+    if not os.path.exists(path):
+        return
+    if sys.platform == "win32":
+        # explorer с папкой — открыть; /select,файл — выделить
+        if os.path.isdir(path):
+            subprocess.Popen(["explorer", path], close_fds=True)
+        else:
+            subprocess.Popen(["explorer", f"/select,{path}"], close_fds=True)
+        return
+    QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
 
 def app_install_dir() -> str:
@@ -2104,6 +2147,96 @@ def configure_qt_theme(app: QApplication) -> None:
     )
 
 
+class DistFilesDialog(QDialog):
+    """IDEA-021 F0: список папок dist/субтитры_* + открыть в проводнике."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Файлы dist — субтитры")
+        self.resize(640, 420)
+        root = QVBoxLayout(self)
+        root.setSpacing(8)
+
+        self.hint = QLabel(
+            "Папки субтитров YouTube (не музыка). Двойной клик или «Открыть» — проводник."
+        )
+        self.hint.setWordWrap(True)
+        self.hint.setStyleSheet("color:#94a3b8;")
+        root.addWidget(self.hint)
+
+        self.list = QListWidget()
+        self.list.setAlternatingRowColors(True)
+        self.list.itemDoubleClicked.connect(self._open_selected)
+        root.addWidget(self.list, stretch=1)
+
+        self.status = QLabel("")
+        self.status.setStyleSheet("color:#64748b;font-size:12px;")
+        root.addWidget(self.status)
+
+        row = QHBoxLayout()
+        self.refresh_btn = QPushButton("Обновить")
+        self.refresh_btn.setProperty("fallback", True)
+        self.refresh_btn.clicked.connect(self.reload)
+        row.addWidget(self.refresh_btn)
+
+        self.open_btn = QPushButton("Открыть в проводнике")
+        self.open_btn.clicked.connect(self._open_selected)
+        row.addWidget(self.open_btn)
+
+        self.open_root_btn = QPushButton("Папка dist…")
+        self.open_root_btn.setProperty("fallback", True)
+        self.open_root_btn.setToolTip("Открыть корень, куда пишутся новые прогоны")
+        self.open_root_btn.clicked.connect(self._open_output_root)
+        row.addWidget(self.open_root_btn)
+        row.addStretch()
+        root.addLayout(row)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        close_btn = buttons.button(QDialogButtonBox.StandardButton.Close)
+        if close_btn is not None:
+            close_btn.clicked.connect(self.reject)
+        root.addWidget(buttons)
+
+        self.reload()
+
+    def reload(self) -> None:
+        self.list.clear()
+        folders = list_subtitle_folders()
+        for path in folders:
+            item = QListWidgetItem(os.path.basename(path))
+            item.setData(Qt.ItemDataRole.UserRole, path)
+            item.setToolTip(path)
+            self.list.addItem(item)
+        if folders:
+            self.list.setCurrentRow(0)
+            self.status.setText(f"{len(folders)} папок · корень записи: {default_output_root()}")
+        else:
+            self.status.setText(f"Пусто · ищем в: {', '.join(_subtitle_search_roots())}")
+
+    def _selected_path(self) -> str | None:
+        item = self.list.currentItem()
+        if item is None:
+            return None
+        path = item.data(Qt.ItemDataRole.UserRole)
+        return str(path) if path else None
+
+    def _open_selected(self, *_args) -> None:
+        path = self._selected_path()
+        if not path:
+            self.status.setText("Выбери папку в списке")
+            return
+        open_path_in_explorer(path)
+        self.status.setText(f"Открыто: {os.path.basename(path)}")
+
+    def _open_output_root(self) -> None:
+        root = default_output_root()
+        os.makedirs(root, exist_ok=True)
+        open_path_in_explorer(root)
+        self.status.setText(f"Открыт корень: {root}")
+
+
 class SubtitleApp(QMainWindow):
     """Qt-окно: скачивание + плеер + закладки."""
 
@@ -2179,6 +2312,7 @@ class SubtitleApp(QMainWindow):
             self.download_btn,
             self.audio_btn,
             self.overlay_btn,
+            self.dist_files_btn,
             self.player_btn,
             self.bookmarks_btn,
             self.clear_btn,
@@ -2427,6 +2561,14 @@ class SubtitleApp(QMainWindow):
         self.overlay_btn.clicked.connect(self.on_open_overlay)
         btn_row.addWidget(self.overlay_btn)
 
+        self.dist_files_btn = QPushButton("📁 dist")
+        self.dist_files_btn.setProperty("fallback", True)
+        self.dist_files_btn.setToolTip(
+            "Список папок субтитров в dist/ — открыть в проводнике (IDEA-021)"
+        )
+        self.dist_files_btn.clicked.connect(self.on_open_dist_files)
+        btn_row.addWidget(self.dist_files_btn)
+
         self.player_btn = QPushButton("Плеер")
         self.player_btn.clicked.connect(self.on_open_player)
         apply_primary_glow(self.player_btn)
@@ -2451,6 +2593,7 @@ class SubtitleApp(QMainWindow):
             self.download_btn,
             self.audio_btn,
             self.overlay_btn,
+            self.dist_files_btn,
             self.player_btn,
             self.bookmarks_btn,
             self.clear_btn,
@@ -4070,6 +4213,11 @@ class SubtitleApp(QMainWindow):
         self._set_status(
             "Статус: overlay «Фон» открыт (← Назад / крестик — сюда; Ctrl+O — сквозь; Ctrl+Shift+O — скрыть Фон)"
         )
+
+    def on_open_dist_files(self) -> None:
+        """IDEA-021 F0: список dist/субтитры_* + открыть в проводнике."""
+        dlg = DistFilesDialog(self)
+        dlg.exec()
 
     def _on_overlay_hidden(self) -> None:
         """Раньше поднимал Translator при Ctrl+Shift+O — больше не вызывается."""

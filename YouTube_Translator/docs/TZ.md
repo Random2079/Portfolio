@@ -34,7 +34,7 @@
 | 6 | Split 📥 vs ✨ ИИ + Отмена | D6 | ✅ | 📥 = субы текущего URL без ИИ; ✨ = разбор текущего id; ✕ Отмена видна при busy |
 | 7 | Скачивание музыки (MP3) | M | ✅ | Кнопка на download и в плеере → `Music\YouTube_DL` |
 | 8 | ui_motion (микроанимации) | G | ✅ | Hover/press + BusyPulse на Скачать / ИИ |
-| 9 | Файлы `dist/` внутри приложения | IDEA-021 | ⬜ парковка | Список / копировать / переименовать / удалить — **не стартовать** без команды |
+| 9 | Файлы `dist/` внутри приложения | IDEA-021 | 🟡 F0 | Список + проводник ✅ · delete/rename ⬜ · [part 19](parts/19-dist-files.md) |
 | 10 | Overlay музыка/mp4 поверх окон | IDEA-022 | 🟡 MVP | Кнопка **🎞 Фон** → `overlay_player.py`: каталог, play+визуал, opacity, click-through |
 | **13** | Overlay: opacity каталога / Esc | 022p / P1 | ✅ | Каталог непрозрачный; opacity только в play · [part 16](parts/16-overlay-ux-polish.md) |
 | **14** | Overlay: обычные окна | 022p / P2 | ✅ | Без always-on-top у SR/Фона |
@@ -65,7 +65,7 @@
 | F — Закладки | ✅ | `bookmarks.json`, Chrome `--app=` fallback |
 | G — ui_motion | ✅ | `ui_motion.py` |
 | E — «Полный браузер-клон» | 🚫 | **не в scope** |
-| IDEA-021 | ⬜ | парковка в `IDEAS.md` |
+| IDEA-021 | 🟡 F0 | Список + проводник · [part 19](parts/19-dist-files.md) · [MAP](../MAP.md) |
 | IDEA-022 overlay | 🟡→polish ✅ | MVP + UX polish P1–P9 · [part 16](parts/16-overlay-ux-polish.md) |
 | **IDEA-025 авто-плотность** | **⬜** | A0 prefs → A1 idle+CT+% → A2 сброс · [part 18](parts/18-overlay-auto-density.md) · [MAP](../MAP.md) |
 | **U — UI backup / запас** | **🟡** | Копии UI перед крупными правками; контракт UX · [part 17](parts/17-ui-backup.md) |
@@ -186,6 +186,7 @@ python Subtitle_App.py
 | 16 | [16-overlay-ux-polish.md](parts/16-overlay-ux-polish.md) | `overlay_player.py`, `Subtitle_App.py` | №13–18 |
 | 17 | [17-ui-backup.md](parts/17-ui-backup.md) | `backups/ui/`, `overlay_player.py` | **№19 / U** |
 | 18 | [18-overlay-auto-density.md](parts/18-overlay-auto-density.md) | `overlay_player.py` | **№20 / IDEA-025** |
+| 19 | [19-dist-files.md](parts/19-dist-files.md) | `Subtitle_App.py` | **№9 / IDEA-021 F0** |
 
 ---
 
@@ -195,4 +196,4 @@ python Subtitle_App.py
 Вставь [`PROMPT_FOR_AGENT.md`](PROMPT_FOR_AGENT.md).  
 Карта part ↔ код: [`docs/README.md`](README.md).
 
-Новые слои — только после «делаем» (сейчас: **`делаем A0`**).
+Новые слои — только после «делаем».

@@ -17,6 +17,7 @@
 | 16 | [Overlay UX polish P1–P9](16-overlay-ux-polish.md) | `overlay_player.py`, `Subtitle_App.py` | №13–18 | ✅ |
 | 17 | [UI backup / запас интерфейса](17-ui-backup.md) | `backups/ui/`, `overlay_player.py` | **№19 / U** | 🟡 |
 | 18 | [Авто-плотность Фона](18-overlay-auto-density.md) | `overlay_player.py` | **№20 / IDEA-025** | ⬜ |
+| 19 | [Файлы dist](19-dist-files.md) | `Subtitle_App.py` | **№9 / IDEA-021** | 🟡 F0 |
 
 Очередь/план слоя: [`../../MAP.md`](../../MAP.md).
 
