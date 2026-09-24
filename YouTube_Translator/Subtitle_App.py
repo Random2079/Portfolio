@@ -2374,8 +2374,6 @@ class SubtitleApp(QMainWindow):
 
     _DOWNLOAD_SIZE = (640, 400)
     _PLAYER_SIZE = (1120, 760)
-    # Низкий min — чтобы Win+стрелки / snap к краю работали без борьбы с Qt
-    _PLAYER_MIN_SIZE = (360, 280)
 
     _status_signal: Signal = Signal(str)  # thread-safe статус из фонового потока
     _player_status_signal: Signal = Signal(str)  # статус на экране плеера из фонового потока
@@ -2385,9 +2383,16 @@ class SubtitleApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("Subtitle Ripper Pro")
         self.setWindowIcon(make_app_icon())
-        # До любых resize/move: атрибуты + stack ещё нет → guard в _is_download_view_active
-        self._window_mode = "download"  # download = fixed · free = плеер/закладки
-        self._ignore_size_relock = False
+        # Оболочка: фиксированный размер + только «Закрыть» (без min/max/ресайза)
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowSystemMenuHint
+            | Qt.WindowType.WindowCloseButtonHint
+        )
+        self._window_mode = "download"  # download | player — какой fixed size
+        self.setFixedSize(*self._DOWNLOAD_SIZE)
 
         self._busy = False
         self._lang_code = "ru"
@@ -2468,8 +2473,8 @@ class SubtitleApp(QMainWindow):
         self._pulse_download = BusyPulse(self.download_btn, self)
         self._pulse_ai = BusyPulse(self.ai_btn, self)
 
-        # После stack: иначе resize в lock бьёт AttributeError в move/resizeEvent
-        self._lock_download_window_size()
+        # После stack: fixed size экрана скачивания
+        self._apply_fixed_shell_size(self._DOWNLOAD_SIZE, mode="download")
 
         self._status_core = "Статус: ожидание ссылки…"
         self._busy_t0: float | None = None
@@ -2490,12 +2495,7 @@ class SubtitleApp(QMainWindow):
         return super().eventFilter(obj, event)
 
     def _ensure_window_on_screen(self) -> None:
-        """После программного resize/showNormal — frame не вылезает за монитор.
-
-        Qt resize растёт от текущего top-left: у края экрана низ/право
-        уходят за availableGeometry. Сдвигаем move; при необходимости
-        уменьшаем client size. Не трогаем maximized/fullscreen.
-        """
+        """Сдвинуть окно в availableGeometry. Fixed shell — размер не ужимаем."""
         if self.isMaximized() or self.isFullScreen():
             return
         screen = self.screen()
@@ -2506,16 +2506,6 @@ class SubtitleApp(QMainWindow):
             return
         avail = screen.availableGeometry()
         frame = self.frameGeometry()
-        # Рамка (title bar / borders) — в client size её нет
-        chrome_w = max(0, frame.width() - self.width())
-        chrome_h = max(0, frame.height() - self.height())
-        max_w = max(1, avail.width() - chrome_w)
-        max_h = max(1, avail.height() - chrome_h)
-        tw = min(self.width(), max_w)
-        th = min(self.height(), max_h)
-        if tw != self.width() or th != self.height():
-            self.resize(tw, th)
-            frame = self.frameGeometry()
         x = frame.x()
         y = frame.y()
         if frame.width() <= avail.width():
@@ -2529,44 +2519,34 @@ class SubtitleApp(QMainWindow):
         if x != frame.x() or y != frame.y():
             self.move(x, y)
 
-    def _lock_download_window_size(self) -> None:
-        """Экран скачивания: soft-lock ~640×400 (не min==max — иначе убивает Aero Snap)."""
-        self._window_mode = "download"
-        if self.isMaximized() or self.isFullScreen():
+    def _apply_fixed_shell_size(self, size: tuple[int, int], *, mode: str) -> None:
+        """Жёсткий размер окна + оболочка только с «Закрыть» (без max/ресайза)."""
+        self._window_mode = mode
+        if self.isFullScreen() or self.isMaximized():
             self.showNormal()
-        w, h = self._DOWNLOAD_SIZE
-        if self.size() != QSize(w, h):
-            self.resize(w, h)
+        w, h = size
+        # setFixedSize снимает thick-frame — тянуть края нельзя
+        if self.size() != QSize(w, h) or self.minimumSize() != QSize(w, h):
+            self.setFixedSize(w, h)
         self._ensure_window_on_screen()
+
+    def _lock_download_window_size(self) -> None:
+        """Экран скачивания: фиксированный 640×400."""
+        self._apply_fixed_shell_size(self._DOWNLOAD_SIZE, mode="download")
 
     def _is_download_view_active(self) -> bool:
         if not hasattr(self, "stack") or not hasattr(self, "download_view"):
             return False
         return self.stack.currentWidget() is self.download_view
 
-    def _should_lock_download_size(self) -> bool:
-        if self._ignore_size_relock:
-            return False
-        if self._window_mode != "download":
-            return False
-        return self._is_download_view_active() and not self.isFullScreen()
-
-    def _maybe_relock_download_window_size(self) -> None:
-        if self._should_lock_download_size():
-            QTimer.singleShot(0, self._lock_download_window_size)
-
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 — Qt API
         super().changeEvent(event)
-        if event.type() == QEvent.Type.WindowStateChange:
-            self._maybe_relock_download_window_size()
 
     def moveEvent(self, event) -> None:  # noqa: N802 — Qt API
         super().moveEvent(event)
-        self._maybe_relock_download_window_size()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 — Qt API
         super().resizeEvent(event)
-        self._maybe_relock_download_window_size()
         if hasattr(self, "player_title"):
             self._refresh_player_title_elide()
 
@@ -2586,39 +2566,10 @@ class SubtitleApp(QMainWindow):
         )
         self.player_title.setText(elided)
 
-    def _window_looks_like_download_size(self) -> bool:
-        """Если плеер открыли, а окно всё ещё «карточка» скачивания — надо раздуть."""
-        dw, dh = self._DOWNLOAD_SIZE
-        return self.width() <= dw + 48 and self.height() <= dh + 48
-
-    def _apply_player_default_size(self) -> None:
-        if self._window_mode != "free":
-            return
-        if self.isMaximized() or self.isFullScreen():
-            return
-        w, h = self._PLAYER_SIZE
-        if self.size() != QSize(w, h):
-            self.resize(w, h)
-        self._ensure_window_on_screen()
-
     def _unlock_player_window_size(self, *, reset_geometry: bool = True) -> None:
-        """Плеер/закладки: снять фиксацию — Win-snap и ресайз работают.
-
-        Дефолт плеера: **1120×760** (не размер экрана скачивания).
-        """
-        self._window_mode = "free"
-        self._ignore_size_relock = True
-        self.setMinimumSize(*self._PLAYER_MIN_SIZE)
-        if reset_geometry or self._window_looks_like_download_size():
-            self.resize(*self._PLAYER_SIZE)
-            QTimer.singleShot(0, self._apply_player_default_size)
-        self._ensure_window_on_screen()
-        # отложенно: после WM-рамки frameGeometry точнее; resize/move без lock
-        QTimer.singleShot(0, self._ensure_window_on_screen)
-        QTimer.singleShot(50, self._clear_size_relock_guard)
-
-    def _clear_size_relock_guard(self) -> None:
-        self._ignore_size_relock = False
+        """Плеер/закладки: фиксированный 1120×760 (не ресайз, не max)."""
+        del reset_geometry  # размер всегда один для плеера
+        self._apply_fixed_shell_size(self._PLAYER_SIZE, mode="player")
 
     def _disable_space_button_activate(self, *buttons) -> None:
         """Пробел не должен жать кнопки. ClickFocus мало: после клика мышью
@@ -2956,9 +2907,8 @@ class SubtitleApp(QMainWindow):
         self._theater_f = QShortcut(QKeySequence(Qt.Key.Key_F), page)
         self._theater_f.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._theater_f.activated.connect(self._on_theater_hotkey)
-        self._theater_f11 = QShortcut(QKeySequence(Qt.Key.Key_F11), self)
-        self._theater_f11.activated.connect(self._toggle_os_fullscreen)
-        # R = свернуть/показать правую панель (в окне, не fullscreen)
+        # F11 / OS fullscreen убраны — оболочка без max, фиксированный размер
+        # R = свернуть/показать правую панель (в окне)
         self._sidebar_r = QShortcut(QKeySequence(Qt.Key.Key_R), page)
         self._sidebar_r.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._sidebar_r.activated.connect(self._on_sidebar_hotkey)
@@ -3370,13 +3320,10 @@ class SubtitleApp(QMainWindow):
         self.sidebar_toggle_btn.setText("")
 
     def _theater_btn_tooltip_idle(self) -> str:
-        return (
-            "Полный экран (F / ⛶) — видео на весь монитор · Esc — выход · "
-            "F11 — то же"
-        )
+        return "Кинорежим (F / ⛶) — спрятать панели в том же окне · Esc — выход"
 
     def _set_immersive_chrome(self, on: bool) -> None:
-        """Убрать/вернуть отступы и панели — чтобы WebView был edge-to-edge."""
+        """Убрать/вернуть отступы и панели — WebView шире, без OS fullscreen."""
         root_layout = self.centralWidget().layout() if self.centralWidget() else None
         if on:
             if root_layout is not None:
@@ -3406,44 +3353,24 @@ class SubtitleApp(QMainWindow):
                 self._player_video_card.style().polish(self._player_video_card)
 
     def _enter_immersive_playback(self) -> None:
-        if self._player_theater and self.isFullScreen():
+        """Кинорежим: только спрятать chrome. Без showFullScreen / F11."""
+        if self._player_theater:
             return
         if self.stack.currentWidget() is not self.player_view:
             return
-        if not self._player_theater:
-            # Сохранить ширины до theater; не затирать «с сайдбаром», если уже свёрнут
-            sizes = self.player_splitter.sizes()
-            self._splitter_sizes_normal = sizes
-            if not self._sidebar_collapsed and len(sizes) >= 2 and sizes[1] > 40:
-                self._splitter_sizes_with_sidebar = sizes
-            self.player_sidebar.setVisible(False)
-            for widget in self._theater_hide_widgets:
-                widget.setVisible(False)
-            self._player_theater = True
+        sizes = self.player_splitter.sizes()
+        self._splitter_sizes_normal = sizes
+        if not self._sidebar_collapsed and len(sizes) >= 2 and sizes[1] > 40:
+            self._splitter_sizes_with_sidebar = sizes
+        self.player_sidebar.setVisible(False)
+        for widget in self._theater_hide_widgets:
+            widget.setVisible(False)
+        self._player_theater = True
         self._set_immersive_chrome(True)
-        self.theater_btn.setToolTip("Выйти из полного экрана (Esc / F / F11)")
-        if not self.isFullScreen():
-            self.showFullScreen()
-        # Best-effort: HTML5 video fullscreen внутри Chromium
-        QTimer.singleShot(200, self._try_html_video_fullscreen)
+        self.theater_btn.setToolTip("Вернуть панели (Esc / F / ⛶)")
 
     def _try_html_video_fullscreen(self) -> None:
-        if not self._player_theater or not hasattr(self, "web_view"):
-            return
-        self.web_view.page().runJavaScript(
-            """
-            (function(){
-              try {
-                var v = document.querySelector('video');
-                if (!v) return 'no-video';
-                if (document.fullscreenElement) return 'already';
-                var req = v.requestFullscreen || v.webkitRequestFullscreen;
-                if (req) { req.call(v); return 'ok'; }
-                return 'no-api';
-              } catch (e) { return 'err:' + e; }
-            })();
-            """
-        )
+        return  # OS/HTML fullscreen отключены — оболочка fixed + только close
 
     def _exit_html_video_fullscreen(self) -> None:
         if not hasattr(self, "web_view"):
@@ -3462,17 +3389,20 @@ class SubtitleApp(QMainWindow):
         )
 
     def _enter_player_theater(self) -> None:
-        """Совместимость: театр = immersive fullscreen."""
+        """Совместимость: театр = кинорежим без OS fullscreen."""
         self._enter_immersive_playback()
 
     def _exit_player_theater(self, *, force: bool = False) -> None:
         if not self._player_theater and not force:
             return
         self._exit_html_video_fullscreen()
-        if self.isFullScreen():
+        if self.isFullScreen() or self.isMaximized():
             self.showNormal()
-            self._ensure_window_on_screen()
-            QTimer.singleShot(0, self._ensure_window_on_screen)
+            # вернуть fixed size текущего режима
+            if self._window_mode == "player":
+                self._apply_fixed_shell_size(self._PLAYER_SIZE, mode="player")
+            else:
+                self._apply_fixed_shell_size(self._DOWNLOAD_SIZE, mode="download")
         self._set_immersive_chrome(False)
         for widget in self._theater_hide_widgets:
             widget.setVisible(True)
@@ -3507,10 +3437,8 @@ class SubtitleApp(QMainWindow):
             self._exit_immersive_playback()
 
     def _toggle_os_fullscreen(self) -> None:
-        """F11 — тот же полномасштабный режим, что ⛶ / F."""
-        if self.stack.currentWidget() is not self.player_view:
-            return
-        self._toggle_player_theater()
+        """Устарело: OS fullscreen отключён."""
+        return
 
     def _build_ai_summary_html(self, analysis: dict) -> str:
         """HTML разбора для сайдбара плеера."""

@@ -16,14 +16,12 @@
 
 ## Решение (важно)
 
-**Не** фиксировать через `setMaximumSize` / `min==max` навсегда: это снимает `WS_THICKFRAME` / `WS_MAXIMIZEBOX`, и Snap умирает даже после «разблокировки».
+**Оболочка (2026-09-24):** только кнопка **Закрыть** (без min/max), размер **фиксированный** (`setFixedSize`):
+- скачивание **640×400**
+- плеер/закладки **1120×760**
 
-Вместо этого: **мягкий** возврат размера download в `resizeEvent` (`_maybe_relock_download_window_size`).
-
-| Режим | Поведение |
-|-------|-----------|
-| download | ~580×380 soft-lock |
-| player / bookmarks | free resize, min ~360×280, clamp on-screen |
+Без Aero Snap / тянутия краёв — так и задумано (конфликт max+ресайз убран).
+F11 / OS fullscreen / `showFullScreen` — выключены; ⛶ = спрятать панели в том же окне.
 
 ## 🔍 Проверка
 
