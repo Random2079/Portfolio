@@ -2221,11 +2221,6 @@ class DistFilesDialog(QDialog):
         root.addWidget(self.status)
 
         row = QHBoxLayout()
-        self.refresh_btn = QPushButton("Обновить")
-        self.refresh_btn.setProperty("fallback", True)
-        self.refresh_btn.clicked.connect(self.reload)
-        row.addWidget(self.refresh_btn)
-
         self.copy_btn = QPushButton("Копировать всё")
         self.copy_btn.setToolTip("Весь текст файла в буфер")
         self.copy_btn.clicked.connect(self._copy_all)
