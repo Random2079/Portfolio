@@ -140,8 +140,45 @@ class TestPathAndChunkPrep(unittest.TestCase):
         self.assertFalse(any(t.strip().lower().startswith("мд") for t, _ in units))
 
 
-class TestTeraEnHybrid(unittest.TestCase):
-    def test_dict_and_en_routes_english(self) -> None:
+class TestListChunking(unittest.TestCase):
+    def test_short_numbered_list_is_one_tera_unit(self) -> None:
+        import tts_daemon as daemon
+
+        source = (
+            "1. После слоя — explain.\n"
+            "2. Запомнить цепочку из 5–8 блоков.\n"
+            "3. Самому ответить на три вопроса:\n"
+            "   ◦ зачем этот блок;\n"
+            "   ◦ что сломается без него;\n"
+            "4. На следующий день — exam.\n"
+            "Это 10–15 минут, не вторая работа."
+        )
+        with patch("text_prep.normalize_tts", side_effect=lambda text: text):
+            units = daemon._speech_units(
+                source, {"engine": "tera", "hybrid_mode": "dict_only"}
+            )
+        self.assertEqual(len(units), 1, units)
+
+    def test_slash_command_and_range(self) -> None:
+        out = finalize_speech_text(
+            "После слоя — `/explain-my-project`. Цепочка 5–8 блоков.",
+            apply_dict=False,
+        )
+        low = out.lower()
+        self.assertIn("команда", low)
+        self.assertTrue("до" in low and ("5" in out or "пят" in low))
+        self.assertNotIn("пяти, восемь", low)
+
+
+class TestRuOnlyHybrid(unittest.TestCase):
+    def test_dict_and_en_collapses_to_dict_only(self) -> None:
+        import tts_daemon as daemon
+
+        for engine in ("tera", "edge", "local"):
+            cfg = {"engine": engine, "hybrid_mode": "dict_and_en"}
+            self.assertEqual(daemon._effective_hybrid(cfg), "dict_only")
+
+    def test_english_phrase_stays_ru_units(self) -> None:
         import tts_daemon as daemon
 
         source = "Check the network connection and restart."
@@ -150,14 +187,10 @@ class TestTeraEnHybrid(unittest.TestCase):
                 source, {"engine": "tera", "hybrid_mode": "dict_and_en"}
             )
         self.assertTrue(units)
-        self.assertTrue(any(lang == "en" for _, lang in units))
-        self.assertIn("network", " ".join(t for t, lang in units if lang == "en").lower())
-
-    def test_dict_and_en_falls_back_on_edge(self) -> None:
-        import tts_daemon as daemon
-
-        cfg = {"engine": "edge", "hybrid_mode": "dict_and_en"}
-        self.assertEqual(daemon._effective_hybrid(cfg), "dict_only")
+        self.assertTrue(all(lang == "ru" for _, lang in units))
+        joined = " ".join(t for t, _ in units).lower()
+        self.assertIn("нэтворк", joined)
+        self.assertIn("рестарт", joined)
 
 
 class TestMissingEnModel(unittest.TestCase):

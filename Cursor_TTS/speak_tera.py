@@ -92,13 +92,14 @@ def synthesize_wav(
     duration_scale: float | None = None,
     lang: str = "ru",
 ) -> None:
+    del lang  # один RU-голос; EN только через словарь в text_prep, не через <en>
     text = (text or "").strip()
     if len(text) < 1:
         raise ValueError("empty text")
-    # Tera требует теги: <ru>…</ru> или <en>…</en> (можно миксовать в одном вызове).
-    if "<ru>" not in text and "<en>" not in text:
-        tag = "en" if str(lang).strip().lower() == "en" else "ru"
-        text = f"<{tag}>{text}</{tag}>"
+    # Смена <en> меняет тембр и даёт фризы — всегда русский тег.
+    text = text.replace("<en>", "<ru>").replace("</en>", "</ru>")
+    if "<ru>" not in text:
+        text = f"<ru>{text}</ru>"
 
     tts = _get_tts()
     voice_id = normalize_voice(voice)

@@ -253,6 +253,19 @@ def soften_symbols(text: str) -> str:
     text = text.replace("„", "").replace("“", "").replace("”", "")
     text = text.replace('"', "").replace("'", "").replace("`", "")
 
+    # 5–8 / 10-15 → «5 до 8» (не «5, 8» → «пяти, восемь»).
+    text = re.sub(
+        r"(?<!\d)(\d+)\s*[–−-]\s*(\d+)(?!\d)",
+        r"\1 до \2",
+        text,
+    )
+    # /explain-my-project → «команда explain my project» (не «слэш эгзплайн»).
+    text = re.sub(
+        r"(^|[\s,(])\/([A-Za-z][\w-]+)",
+        lambda m: f"{m.group(1)}команда {m.group(2).replace('-', ' ')}",
+        text,
+    )
+
     text = text.replace("—", ", ").replace("–", ", ").replace("−", ", ")
     # «A / B» → «или»; путь docs/parts → пробел (не «дакс или партс»).
     text = re.sub(r"\s+/\s+", " или ", text)

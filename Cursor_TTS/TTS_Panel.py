@@ -63,8 +63,7 @@ _DEAD_ENGINES = {"kokoro", "piper"}
 _HYBRID_MODES = {"off", "dict_only", "dict_and_en"}
 HYBRID_ITEMS = [
     ("off", "Как написано (без словаря)"),
-    ("dict_only", "Словарь IT (fallback → фэлбэк)"),
-    ("dict_and_en", "Словарь + EN (Tera <en>)"),
+    ("dict_only", "Словарь IT (один RU-голос)"),
 ]
 VOICES_QWEN = [
     ("micro_wife/designs/06_work_male_neutral.txt", "6 · рабочий мужской (ровный)"),
@@ -157,6 +156,8 @@ def load_config() -> dict:
     data["tera_duration_scale"] = max(0.6, min(1.5, scale))
 
     hybrid = str(data.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
+    if hybrid == "dict_and_en":
+        hybrid = "dict_only"
     data["hybrid_mode"] = hybrid if hybrid in _HYBRID_MODES else DEFAULT_HYBRID_MODE
 
     design = str(data.get("micro_wife_design_file", DEFAULT_QWEN_DESIGN)).strip()

@@ -328,6 +328,9 @@ def load_config() -> dict:
             except Exception:
                 data["tera_duration_scale"] = DEFAULT_TERA_DURATION_SCALE
             hybrid = str(raw.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
+            # EN-теги Tera меняют тембр и дают фризы — только словарь под RU-голос.
+            if hybrid == "dict_and_en":
+                hybrid = "dict_only"
             data["hybrid_mode"] = hybrid if hybrid in _HYBRID_MODES else DEFAULT_HYBRID_MODE
             data["qwen_model"] = (
                 str(raw.get("qwen_model", DEFAULT_QWEN_MODEL)).strip() or DEFAULT_QWEN_MODEL
@@ -893,12 +896,28 @@ def render_audio(part: str, cfg: dict, out_path: Path, lang: str = "ru") -> None
 
 
 def _looks_like_table_speech(text: str) -> bool:
-    head = text.lstrip()[:120]
-    if head.startswith("Столбцы:"):
-        return True
-    # Много коротких предложений подряд — типичные строки таблицы
-    dots = text.count(". ")
-    return dots >= 4 and (len(text) / max(dots, 1)) < 90
+    """Только явный вывод tables_to_speech. Иначе списки/абзацы ложно режутся → пауза+synth."""
+    return text.lstrip().startswith("Столбцы:")
+
+
+# Пока играет кусок N — заранее синтезировать N+1 (не Qwen: VRAM/lock).
+_PREFETCH_ENGINES = frozenset({"tera", "edge", "local", "openai"})
+
+
+def _render_chunk_file(
+    part: str, cfg: dict, lang: str, suffix: str
+) -> Path | None:
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        path = Path(tmp.name)
+    try:
+        render_audio(part, cfg, path, lang)
+        if path.stat().st_size < 64:
+            _safe_unlink(path)
+            return None
+        return path
+    except Exception:
+        _safe_unlink(path)
+        return None
 
 
 def _parts_for_engine(text: str, engine: str) -> list[str]:
@@ -910,8 +929,8 @@ def _parts_for_engine(text: str, engine: str) -> list[str]:
         # Сеть: крупнее куски = меньше round-trip; Edge держит длинные фразы.
         return split_into_chunks(text, target=500 if table_like else 900)
     if engine == "tera":
-        # Локальный ONNX: умеренные куски, без микронарезок.
-        return split_into_chunks(text, target=220 if table_like else 420)
+        # Локальный ONNX: крупные куски; ложный table_like раньше давал дыры на списках.
+        return split_into_chunks(text, target=220 if table_like else 520)
     if engine == "qwen":
         # Короткие куски на Qwen дают хуже RTF (фиксированный overhead generate).
         # table_like раньше резал до 120 — это усугубляло; держим крупные куски.
@@ -923,22 +942,19 @@ def _parts_for_engine(text: str, engine: str) -> list[str]:
 
 
 def _effective_hybrid(cfg: dict) -> str:
-    """dict_and_en только у Tera (нативные <en>/<ru>). Иначе → dict_only."""
+    """Только off / dict_only. Смена голоса через <en> отключена."""
     mode = str(cfg.get("hybrid_mode", DEFAULT_HYBRID_MODE)).strip().lower()
+    if mode == "dict_and_en":
+        mode = "dict_only"
     if mode not in _HYBRID_MODES:
         mode = DEFAULT_HYBRID_MODE
     if mode == "off":
         return "off"
-    if mode == "dict_and_en":
-        engine = str(cfg.get("engine", DEFAULT_ENGINE)).strip().lower()
-        if engine == "tera":
-            return "dict_and_en"
-        return "dict_only"
     return "dict_only"
 
 
 def _speech_units(text: str, cfg: dict) -> list[tuple[str, str]]:
-    """Куски [(текст, lang)]. dict_and_en+Tera → RU/EN сегменты; иначе всё ru."""
+    """Куски [(текст, lang)]. Всегда ru: один голос Tera, EN через словарь."""
     hybrid = _effective_hybrid(cfg)
     engine = str(cfg.get("engine", DEFAULT_ENGINE))
     try:
@@ -1011,9 +1027,27 @@ def speak_text(item: SpeechItem) -> None:
         suffix = _audio_suffix(cfg["engine"])
         pause_ms = int(cfg.get("pause_ms", DEFAULT_PAUSE_MS))
         switch_ms = int(cfg.get("lang_switch_pause_ms", DEFAULT_LANG_SWITCH_PAUSE_MS))
-        # Без prefetch: Kokoro/Qwen делят lock/VRAM; сирота после Stop вешала следующий Speak.
+        do_prefetch = str(cfg["engine"]) in _PREFETCH_ENGINES
         _prepare_engine(str(cfg["engine"]))
         current_path: Path | None = None
+        ready_path: Path | None = None
+        ready_index = -1
+        prefetch_thread: threading.Thread | None = None
+        prefetch_box: dict = {}
+
+        def _clear_prefetch() -> None:
+            nonlocal ready_path, ready_index, prefetch_thread, prefetch_box
+            if prefetch_thread is not None and prefetch_thread.is_alive():
+                prefetch_thread.join(timeout=1.0)
+            prefetch_thread = None
+            path = prefetch_box.pop("path", None)
+            if path is not None:
+                _safe_unlink(path)
+            prefetch_box.clear()
+            if ready_path is not None:
+                _safe_unlink(ready_path)
+            ready_path = None
+            ready_index = -1
 
         try:
             index = 0
@@ -1043,30 +1077,57 @@ def speak_text(item: SpeechItem) -> None:
                     generation_id=item.generation_id,
                 )
 
-                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                    current_path = Path(tmp.name)
-                try:
-                    render_audio(part, cfg, current_path, lang)
-                except Exception as error:
-                    fail_parts += 1
-                    log_chunk_fail(index + 1, len(units), part, error)
-                    _safe_unlink(current_path)
-                    current_path = None
-                    index += 1
-                    continue
+                if ready_index == index and ready_path is not None:
+                    current_path = ready_path
+                    ready_path = None
+                    ready_index = -1
+                else:
+                    if ready_path is not None:
+                        _safe_unlink(ready_path)
+                        ready_path = None
+                        ready_index = -1
+                    current_path = _render_chunk_file(part, cfg, lang, suffix)
+                    if current_path is None:
+                        fail_parts += 1
+                        log_chunk_fail(
+                            index + 1,
+                            len(units),
+                            part,
+                            RuntimeError("synth failed or empty audio"),
+                        )
+                        index += 1
+                        continue
 
-                if current_path.stat().st_size < 64:
-                    fail_parts += 1
-                    log_chunk_fail(
-                        index + 1,
-                        len(units),
-                        part,
-                        RuntimeError("empty audio"),
+                # Пока играет текущий — синтез следующего (без дыры «стоп и грузит»).
+                prefetch_thread = None
+                prefetch_box = {}
+                if (
+                    do_prefetch
+                    and index + 1 < len(units)
+                    and len(units[index + 1][0]) >= 2
+                    and not _stop_event.is_set()
+                ):
+                    n_part, n_lang = units[index + 1]
+                    n_index = index + 1
+
+                    def _prefetch_job(
+                        text: str = n_part,
+                        chunk_lang: str = n_lang,
+                        chunk_index: int = n_index,
+                    ) -> None:
+                        if _stop_event.is_set():
+                            return
+                        path = _render_chunk_file(text, cfg, chunk_lang, suffix)
+                        if path is not None and not _stop_event.is_set():
+                            prefetch_box["path"] = path
+                            prefetch_box["index"] = chunk_index
+                        elif path is not None:
+                            _safe_unlink(path)
+
+                    prefetch_thread = threading.Thread(
+                        target=_prefetch_job, name="tts-prefetch", daemon=True
                     )
-                    _safe_unlink(current_path)
-                    current_path = None
-                    index += 1
-                    continue
+                    prefetch_thread.start()
 
                 set_progress(
                     "playing",
@@ -1080,6 +1141,21 @@ def speak_text(item: SpeechItem) -> None:
                 finished = play_file(current_path, cfg["volume"])
                 _safe_unlink(current_path)
                 current_path = None
+
+                if prefetch_thread is not None:
+                    prefetch_thread.join(timeout=180.0)
+                    prefetch_thread = None
+                    if (
+                        not _stop_event.is_set()
+                        and prefetch_box.get("index") == index + 1
+                        and prefetch_box.get("path") is not None
+                    ):
+                        ready_path = prefetch_box["path"]
+                        ready_index = int(prefetch_box["index"])
+                    elif prefetch_box.get("path") is not None:
+                        _safe_unlink(prefetch_box["path"])
+                    prefetch_box = {}
+
                 if not finished or _stop_event.is_set():
                     break
                 ok_parts += 1
@@ -1099,6 +1175,7 @@ def speak_text(item: SpeechItem) -> None:
         finally:
             if current_path is not None:
                 _safe_unlink(current_path)
+            _clear_prefetch()
             set_progress(
                 "idle",
                 engine=engine,
