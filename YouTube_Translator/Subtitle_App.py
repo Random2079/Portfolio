@@ -67,6 +67,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -2148,26 +2149,72 @@ def configure_qt_theme(app: QApplication) -> None:
 
 
 class DistFilesDialog(QDialog):
-    """IDEA-021 F0: список папок dist/субтитры_* + открыть в проводнике."""
+    """IDEA-021: папки dist/субтитры_* → txt внутри приложения → копировать."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    _TXT_PRIORITY = (
+        "0_весь_текст_для_буфера.txt",
+        "1_текст_с_таймкодами.txt",
+    )
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        prefer_folder: str | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Файлы dist — субтитры")
-        self.resize(640, 420)
+        self.resize(900, 560)
+        self._prefer_folder = prefer_folder
+        self._folder_path: str | None = None
+        self._file_path: str | None = None
+
         root = QVBoxLayout(self)
         root.setSpacing(8)
 
         self.hint = QLabel(
-            "Папки субтитров YouTube (не музыка). Двойной клик или «Открыть» — проводник."
+            "Субтитры YouTube в dist/ (не музыка). Выбери папку → txt → копируй. "
+            "Проводник не обязателен."
         )
         self.hint.setWordWrap(True)
         self.hint.setStyleSheet("color:#94a3b8;")
         root.addWidget(self.hint)
 
-        self.list = QListWidget()
-        self.list.setAlternatingRowColors(True)
-        self.list.itemDoubleClicked.connect(self._open_selected)
-        root.addWidget(self.list, stretch=1)
+        split = QSplitter(Qt.Orientation.Horizontal)
+
+        left = QWidget()
+        left_l = QVBoxLayout(left)
+        left_l.setContentsMargins(0, 0, 0, 0)
+        left_l.addWidget(QLabel("Папки"))
+        self.folder_list = QListWidget()
+        self.folder_list.currentItemChanged.connect(self._on_folder_changed)
+        left_l.addWidget(self.folder_list, stretch=1)
+        split.addWidget(left)
+
+        mid = QWidget()
+        mid_l = QVBoxLayout(mid)
+        mid_l.setContentsMargins(0, 0, 0, 0)
+        mid_l.addWidget(QLabel("Файлы .txt"))
+        self.file_list = QListWidget()
+        self.file_list.currentItemChanged.connect(self._on_file_changed)
+        mid_l.addWidget(self.file_list, stretch=1)
+        split.addWidget(mid)
+
+        right = QWidget()
+        right_l = QVBoxLayout(right)
+        right_l.setContentsMargins(0, 0, 0, 0)
+        right_l.addWidget(QLabel("Текст"))
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setPlaceholderText("Выбери txt слева…")
+        right_l.addWidget(self.text, stretch=1)
+        split.addWidget(right)
+
+        split.setStretchFactor(0, 2)
+        split.setStretchFactor(1, 1)
+        split.setStretchFactor(2, 3)
+        split.setSizes([260, 160, 480])
+        root.addWidget(split, stretch=1)
 
         self.status = QLabel("")
         self.status.setStyleSheet("color:#64748b;font-size:12px;")
@@ -2179,21 +2226,26 @@ class DistFilesDialog(QDialog):
         self.refresh_btn.clicked.connect(self.reload)
         row.addWidget(self.refresh_btn)
 
-        self.open_btn = QPushButton("Открыть в проводнике")
-        self.open_btn.clicked.connect(self._open_selected)
-        row.addWidget(self.open_btn)
+        self.copy_btn = QPushButton("Копировать всё")
+        self.copy_btn.setToolTip("Весь текст файла в буфер")
+        self.copy_btn.clicked.connect(self._copy_all)
+        row.addWidget(self.copy_btn)
 
-        self.open_root_btn = QPushButton("Папка dist…")
-        self.open_root_btn.setProperty("fallback", True)
-        self.open_root_btn.setToolTip("Открыть корень, куда пишутся новые прогоны")
-        self.open_root_btn.clicked.connect(self._open_output_root)
-        row.addWidget(self.open_root_btn)
+        self.copy_sel_btn = QPushButton("Копировать выделенное")
+        self.copy_sel_btn.setProperty("fallback", True)
+        self.copy_sel_btn.clicked.connect(self._copy_selection)
+        row.addWidget(self.copy_sel_btn)
+
+        self.explorer_btn = QPushButton("В проводнике…")
+        self.explorer_btn.setProperty("fallback", True)
+        self.explorer_btn.setToolTip("На всякий случай — открыть папку снаружи")
+        self.explorer_btn.clicked.connect(self._open_folder_explorer)
+        row.addWidget(self.explorer_btn)
         row.addStretch()
         root.addLayout(row)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
-        buttons.accepted.connect(self.accept)
         close_btn = buttons.button(QDialogButtonBox.StandardButton.Close)
         if close_btn is not None:
             close_btn.clicked.connect(self.reject)
@@ -2202,39 +2254,124 @@ class DistFilesDialog(QDialog):
         self.reload()
 
     def reload(self) -> None:
-        self.list.clear()
+        self.folder_list.clear()
+        self.file_list.clear()
+        self.text.clear()
+        self._folder_path = None
+        self._file_path = None
         folders = list_subtitle_folders()
-        for path in folders:
+        prefer_norm = None
+        if self._prefer_folder:
+            try:
+                prefer_norm = os.path.normcase(os.path.abspath(self._prefer_folder))
+            except OSError:
+                prefer_norm = None
+        select_row = 0
+        for i, path in enumerate(folders):
             item = QListWidgetItem(os.path.basename(path))
             item.setData(Qt.ItemDataRole.UserRole, path)
             item.setToolTip(path)
-            self.list.addItem(item)
+            self.folder_list.addItem(item)
+            if prefer_norm:
+                try:
+                    if os.path.normcase(os.path.abspath(path)) == prefer_norm:
+                        select_row = i
+                except OSError:
+                    pass
         if folders:
-            self.list.setCurrentRow(0)
-            self.status.setText(f"{len(folders)} папок · корень записи: {default_output_root()}")
+            self.folder_list.setCurrentRow(select_row)
+            self.status.setText(f"{len(folders)} папок · корень: {default_output_root()}")
         else:
             self.status.setText(f"Пусто · ищем в: {', '.join(_subtitle_search_roots())}")
 
-    def _selected_path(self) -> str | None:
-        item = self.list.currentItem()
-        if item is None:
-            return None
-        path = item.data(Qt.ItemDataRole.UserRole)
-        return str(path) if path else None
-
-    def _open_selected(self, *_args) -> None:
-        path = self._selected_path()
-        if not path:
-            self.status.setText("Выбери папку в списке")
+    def _on_folder_changed(
+        self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
+    ) -> None:
+        self.file_list.clear()
+        self.text.clear()
+        self._file_path = None
+        if current is None:
+            self._folder_path = None
             return
-        open_path_in_explorer(path)
-        self.status.setText(f"Открыто: {os.path.basename(path)}")
+        path = current.data(Qt.ItemDataRole.UserRole)
+        self._folder_path = str(path) if path else None
+        if not self._folder_path or not os.path.isdir(self._folder_path):
+            return
+        names: list[str] = []
+        try:
+            for entry in os.scandir(self._folder_path):
+                if entry.is_file() and entry.name.lower().endswith(".txt"):
+                    names.append(entry.name)
+        except OSError as exc:
+            self.status.setText(f"Не читается папка: {exc}")
+            return
+        # Приоритетные файлы сверху, остальные по имени
+        prio = {n: i for i, n in enumerate(self._TXT_PRIORITY)}
 
-    def _open_output_root(self) -> None:
-        root = default_output_root()
-        os.makedirs(root, exist_ok=True)
-        open_path_in_explorer(root)
-        self.status.setText(f"Открыт корень: {root}")
+        def _key(name: str) -> tuple[int, str]:
+            return (prio.get(name, 100), name.lower())
+
+        names.sort(key=_key)
+        for name in names:
+            item = QListWidgetItem(name)
+            item.setData(Qt.ItemDataRole.UserRole, os.path.join(self._folder_path, name))
+            self.file_list.addItem(item)
+        if names:
+            # По умолчанию — буферный текст, иначе первый
+            prefer = self._TXT_PRIORITY[0]
+            row = next((i for i, n in enumerate(names) if n == prefer), 0)
+            self.file_list.setCurrentRow(row)
+            self.status.setText(f"{os.path.basename(self._folder_path)} · {len(names)} txt")
+        else:
+            self.status.setText(f"{os.path.basename(self._folder_path)} · нет .txt")
+
+    def _on_file_changed(
+        self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
+    ) -> None:
+        if current is None:
+            self._file_path = None
+            self.text.clear()
+            return
+        path = current.data(Qt.ItemDataRole.UserRole)
+        self._file_path = str(path) if path else None
+        if not self._file_path or not os.path.isfile(self._file_path):
+            self.text.clear()
+            return
+        try:
+            with open(self._file_path, encoding="utf-8", errors="replace") as f:
+                body = f.read()
+        except OSError as exc:
+            self.text.setPlainText(f"Не удалось прочитать:\n{exc}")
+            self.status.setText("Ошибка чтения")
+            return
+        self.text.setPlainText(body)
+        self.status.setText(
+            f"{os.path.basename(self._file_path)} · {len(body)} символов"
+        )
+
+    def _copy_all(self) -> None:
+        body = self.text.toPlainText()
+        if not body:
+            self.status.setText("Нечего копировать")
+            return
+        QApplication.clipboard().setText(body)
+        self.status.setText(f"Скопировано {len(body)} символов")
+
+    def _copy_selection(self) -> None:
+        cursor = self.text.textCursor()
+        sel = cursor.selectedText().replace("\u2029", "\n")
+        if not sel:
+            self.status.setText("Выдели фрагмент или жми «Копировать всё»")
+            return
+        QApplication.clipboard().setText(sel)
+        self.status.setText(f"Скопировано выделение ({len(sel)} символов)")
+
+    def _open_folder_explorer(self) -> None:
+        path = self._folder_path or default_output_root()
+        if self._folder_path is None:
+            os.makedirs(path, exist_ok=True)
+        open_path_in_explorer(path)
+        self.status.setText(f"Проводник: {os.path.basename(path) or path}")
 
 
 class SubtitleApp(QMainWindow):
@@ -2312,7 +2449,6 @@ class SubtitleApp(QMainWindow):
             self.download_btn,
             self.audio_btn,
             self.overlay_btn,
-            self.dist_files_btn,
             self.player_btn,
             self.bookmarks_btn,
             self.clear_btn,
@@ -2322,6 +2458,7 @@ class SubtitleApp(QMainWindow):
             self.ai_btn,
             self.load_video_btn,
             self.player_audio_btn,
+            self.dist_files_btn,
             self.login_btn,
             self.ai_invest_btn,
             self.ai_general_btn,
@@ -2398,13 +2535,7 @@ class SubtitleApp(QMainWindow):
             self.move(x, y)
 
     def _lock_download_window_size(self) -> None:
-        """Экран скачивания: держим 580×380.
-
-        ВАЖНО: НЕ через setMaximumSize/min==max — это снимает у окна
-        WS_THICKFRAME/WS_MAXIMIZEBOX, и Windows Aero Snap перестаёт работать
-        даже после «разблокировки». Вместо этого мягкий возврат размера
-        в resizeEvent (_maybe_relock_download_window_size).
-        """
+        """Экран скачивания: soft-lock ~640×400 (не min==max — иначе убивает Aero Snap)."""
         self._window_mode = "download"
         if self.isMaximized() or self.isFullScreen():
             self.showNormal()
@@ -2460,13 +2591,32 @@ class SubtitleApp(QMainWindow):
         )
         self.player_title.setText(elided)
 
+    def _window_looks_like_download_size(self) -> bool:
+        """Если плеер открыли, а окно всё ещё «карточка» скачивания — надо раздуть."""
+        dw, dh = self._DOWNLOAD_SIZE
+        return self.width() <= dw + 48 and self.height() <= dh + 48
+
+    def _apply_player_default_size(self) -> None:
+        if self._window_mode != "free":
+            return
+        if self.isMaximized() or self.isFullScreen():
+            return
+        w, h = self._PLAYER_SIZE
+        if self.size() != QSize(w, h):
+            self.resize(w, h)
+        self._ensure_window_on_screen()
+
     def _unlock_player_window_size(self, *, reset_geometry: bool = True) -> None:
-        """Плеер/закладки: снять фиксацию — Win-snap и ресайз работают."""
+        """Плеер/закладки: снять фиксацию — Win-snap и ресайз работают.
+
+        Дефолт плеера: **1120×760** (не размер экрана скачивания).
+        """
         self._window_mode = "free"
         self._ignore_size_relock = True
         self.setMinimumSize(*self._PLAYER_MIN_SIZE)
-        if reset_geometry:
+        if reset_geometry or self._window_looks_like_download_size():
             self.resize(*self._PLAYER_SIZE)
+            QTimer.singleShot(0, self._apply_player_default_size)
         self._ensure_window_on_screen()
         # отложенно: после WM-рамки frameGeometry точнее; resize/move без lock
         QTimer.singleShot(0, self._ensure_window_on_screen)
@@ -2561,14 +2711,6 @@ class SubtitleApp(QMainWindow):
         self.overlay_btn.clicked.connect(self.on_open_overlay)
         btn_row.addWidget(self.overlay_btn)
 
-        self.dist_files_btn = QPushButton("📁 dist")
-        self.dist_files_btn.setProperty("fallback", True)
-        self.dist_files_btn.setToolTip(
-            "Список папок субтитров в dist/ — открыть в проводнике (IDEA-021)"
-        )
-        self.dist_files_btn.clicked.connect(self.on_open_dist_files)
-        btn_row.addWidget(self.dist_files_btn)
-
         self.player_btn = QPushButton("Плеер")
         self.player_btn.clicked.connect(self.on_open_player)
         apply_primary_glow(self.player_btn)
@@ -2593,7 +2735,6 @@ class SubtitleApp(QMainWindow):
             self.download_btn,
             self.audio_btn,
             self.overlay_btn,
-            self.dist_files_btn,
             self.player_btn,
             self.bookmarks_btn,
             self.clear_btn,
@@ -2655,6 +2796,14 @@ class SubtitleApp(QMainWindow):
         self.player_audio_btn.setToolTip("Скачать аудио текущего видео (MP3)")
         self.player_audio_btn.clicked.connect(self.on_download_audio_from_player)
         row1.addWidget(self.player_audio_btn)
+
+        self.dist_files_btn = QPushButton("📁")
+        self.dist_files_btn.setProperty("fallback", True)
+        self.dist_files_btn.setToolTip(
+            "Субтитры в dist/: смотреть txt и копировать (без проводника)"
+        )
+        self.dist_files_btn.clicked.connect(self.on_open_dist_files)
+        row1.addWidget(self.dist_files_btn)
 
         self.player_cancel_btn = QPushButton("✕ Отмена")
         self.player_cancel_btn.setProperty("fallback", True)
@@ -2797,6 +2946,7 @@ class SubtitleApp(QMainWindow):
             self.ai_btn,
             self.load_video_btn,
             self.player_audio_btn,
+            self.dist_files_btn,
             self.player_cancel_btn,
             self.login_btn,
             self.ai_invest_btn,
@@ -4215,8 +4365,9 @@ class SubtitleApp(QMainWindow):
         )
 
     def on_open_dist_files(self) -> None:
-        """IDEA-021 F0: список dist/субтитры_* + открыть в проводнике."""
-        dlg = DistFilesDialog(self)
+        """IDEA-021: txt из dist/ внутри приложения + копировать."""
+        prefer = self._current_player_folder
+        dlg = DistFilesDialog(self, prefer_folder=prefer)
         dlg.exec()
 
     def _on_overlay_hidden(self) -> None:
