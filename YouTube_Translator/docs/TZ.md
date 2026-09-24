@@ -4,8 +4,9 @@
 |---|---|
 | **Код** | `YouTube_Translator/` — `Subtitle_App.py`, `ai_analyze.py`, `ui_motion.py`, `timecode_player.py`, `overlay_player.py` |
 | **ТЗ** | `YouTube_Translator/docs/TZ.md` ← этот файл |
-| **Bootstrap** | IDEA-020 (docs отдельно от `.py`) · дата актуализации 2026-08-26 |
-| **Связь** | IDEA-010/011 ✅ · IDEA-016 ✅ · IDEA-021 ⬜ парковка · IDEA-022 🟡 MVP (в Translator) |
+| **MAP** | `YouTube_Translator/MAP.md` ← статус / очередь / план слоя |
+| **Bootstrap** | IDEA-020 (docs отдельно от `.py`) · дата актуализации 2026-09-24 |
+| **Связь** | IDEA-010/011 ✅ · IDEA-016 ✅ · IDEA-021 ⬜ · IDEA-022 🟡 · **IDEA-025** ⬜ авто-плотность |
 
 > Боевой GUI: **PySide6 + QWebEngine** (не CustomTkinter).  
 > Скачивание субтитров + встроенный YouTube + сайдбар ИИ уже в бою.  
@@ -42,6 +43,7 @@
 | **17** | Overlay: Levan Polka | 022p / P5 | ✅ | Удалён трек из Music/YouTube_DL |
 | **18** | Overlay: Настр. + хоткеи + фон | 022p / P6–P9 | ✅ | Антизависание, плеер-клавиши, play when hidden, remap |
 | **19** | UI backup / запас интерфейса | U | 🟡 | Перед ломкой UI — копия в `backups/ui/`; не переписывать логику с нуля · [part 17](parts/17-ui-backup.md) |
+| **20** | Overlay: авто-плотность (авто-фон) | IDEA-025 / A0–A2 | ⬜ | Stage+play → idle → сквозь + % · только `overlay_player.py` · [part 18](parts/18-overlay-auto-density.md) · очередь в [MAP](../MAP.md) |
 
 Легенда: ✅ сделано в коде · 🟡 частично / есть gap · ⬜ не начато / парковка.
 
@@ -65,6 +67,7 @@
 | E — «Полный браузер-клон» | 🚫 | **не в scope** |
 | IDEA-021 | ⬜ | парковка в `IDEAS.md` |
 | IDEA-022 overlay | 🟡→polish ✅ | MVP + UX polish P1–P9 · [part 16](parts/16-overlay-ux-polish.md) |
+| **IDEA-025 авто-плотность** | **⬜** | A0 prefs → A1 idle+CT+% → A2 сброс · [part 18](parts/18-overlay-auto-density.md) · [MAP](../MAP.md) |
 | **U — UI backup / запас** | **🟡** | Копии UI перед крупными правками; контракт UX · [part 17](parts/17-ui-backup.md) |
 
 ---
@@ -108,7 +111,8 @@
 - Авто-ИИ при каждом открытии плеера / смене URL без клика.
 - Переписывание GUI с нуля / возврат на CustomTkinter как боевой UI.
 - Крупные UI-правки overlay/хоткеев/кликов **без** копии в `backups/ui/` (см. карточку №19 / [part 17](parts/17-ui-backup.md)) — иначе снова настраивать всю логику интерфейса с нуля.
-- Реализация IDEA-021 без явной команды; IDEA-022 MVP уже в коде (`overlay_player.py`) — не раздувать без запроса.
+- Реализация IDEA-021 без явной команды; IDEA-022 MVP уже в коде — не раздувать без запроса.
+- IDEA-025 / авто-плотность — только по `делаем A0|A1|A2` / `делаем part 18`; код только `overlay_player.py`; не ломать контракт «% только со сквозь».
 - Торговые сигналы buy/sell «с ролика» (запрет уже в промпте invest).
 - Коммит/пуш без просьбы пользователя.
 - Вынос API-ключа в env — можно позже, не блокер карточки №1.
@@ -181,12 +185,14 @@ python Subtitle_App.py
 | 12 | [12-overlay-music.md](parts/12-overlay-music.md) | `overlay_player.py`, `Subtitle_App.py` | №10 / IDEA-022 |
 | 16 | [16-overlay-ux-polish.md](parts/16-overlay-ux-polish.md) | `overlay_player.py`, `Subtitle_App.py` | №13–18 |
 | 17 | [17-ui-backup.md](parts/17-ui-backup.md) | `backups/ui/`, `overlay_player.py` | **№19 / U** |
+| 18 | [18-overlay-auto-density.md](parts/18-overlay-auto-density.md) | `overlay_player.py` | **№20 / IDEA-025** |
 
 ---
 
 ## 🤖 Новый чат
 
+Сначала [`MAP.md`](../MAP.md) (очередь).  
 Вставь [`PROMPT_FOR_AGENT.md`](PROMPT_FOR_AGENT.md).  
 Карта part ↔ код: [`docs/README.md`](README.md).
 
-Карточка №1 закрыта в коде (2026-08-26). Новые слои — только после «делаем».
+Новые слои — только после «делаем» (сейчас: **`делаем A0`**).

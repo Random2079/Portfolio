@@ -5,7 +5,7 @@
 **Статус:** рабочий pet-проект.  
 **Стек:** Python · **PySide6 + QtWebEngine** · yt-dlp · (опц.) faster-whisper.
 
-Подробное ТЗ и карточки для агента → **[docs/TZ.md](docs/TZ.md)** · промпт → [docs/PROMPT_FOR_AGENT.md](docs/PROMPT_FOR_AGENT.md).
+Подробное ТЗ и карточки → **[docs/TZ.md](docs/TZ.md)** · очередь/план → **[MAP.md](MAP.md)** · промпт → [docs/PROMPT_FOR_AGENT.md](docs/PROMPT_FOR_AGENT.md).
 
 ---
 

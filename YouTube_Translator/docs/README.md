@@ -4,7 +4,8 @@
 
 | Файл | Роль |
 |------|------|
-| [TZ.md](TZ.md) | Цель, карточки №1–19, слои, «не делаем», проверка |
+| [../MAP.md](../MAP.md) | **Канон:** статус, очередь, план следующего слоя |
+| [TZ.md](TZ.md) | Цель, карточки, слои, «не делаем», проверка |
 | [PROMPT_FOR_AGENT.md](PROMPT_FOR_AGENT.md) | Блок для нового чата |
 | [parts/INDEX.md](parts/INDEX.md) | Список parts |
 
@@ -26,5 +27,6 @@
 | 12 Overlay (IDEA-022) | `overlay_player.py`, кнопка «Фон» в `Subtitle_App.py` |
 | 16 Overlay UX polish | `overlay_player.py` (P1–P9) |
 | 17 UI backup / запас | `backups/ui/`, контракт UX · карточка №19 |
+| 18 Авто-плотность (IDEA-025) | `overlay_player.py` · карточка №20 · A0–A2 |
 
-Вход для человека (быстрый старт): [../README.md](../README.md).
+Вход для человека (быстрый старт): [../README.md](../README.md). Очередь — [MAP](../MAP.md).
