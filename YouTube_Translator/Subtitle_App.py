@@ -2499,7 +2499,7 @@ class SubtitleApp(QMainWindow):
         return super().eventFilter(obj, event)
 
     def _ensure_window_on_screen(self) -> None:
-        """Сдвинуть окно в availableGeometry. Fixed shell — размер не ужимаем."""
+        """Сдвинуть окно в availableGeometry. Если окно больше экрана — сначала ужать."""
         if self.isMaximized() or self.isFullScreen():
             return
         screen = self.screen()
@@ -2509,6 +2509,13 @@ class SubtitleApp(QMainWindow):
         if screen is None:
             return
         avail = screen.availableGeometry()
+        # Рамка Win ~ заголовок — запас, иначе «вылезает» за низ/бок
+        max_w = max(480, avail.width() - 16)
+        max_h = max(360, avail.height() - 16)
+        if self.width() > max_w or self.height() > max_h:
+            w = min(self.width(), max_w)
+            h = min(self.height(), max_h)
+            self.setFixedSize(w, h)
         frame = self.frameGeometry()
         x = frame.x()
         y = frame.y()
@@ -2523,13 +2530,26 @@ class SubtitleApp(QMainWindow):
         if x != frame.x() or y != frame.y():
             self.move(x, y)
 
+    def _fitted_shell_size(self, preferred: tuple[int, int]) -> tuple[int, int]:
+        """Желаемый размер, но не больше рабочего стола (DPI / маленький монитор)."""
+        pw, ph = int(preferred[0]), int(preferred[1])
+        screen = self.screen()
+        if screen is None:
+            app = QApplication.instance()
+            screen = app.primaryScreen() if app is not None else None
+        if screen is None:
+            return (pw, ph)
+        avail = screen.availableGeometry()
+        max_w = max(480, avail.width() - 16)
+        max_h = max(360, avail.height() - 16)
+        return (min(pw, max_w), min(ph, max_h))
+
     def _apply_fixed_shell_size(self, size: tuple[int, int], *, mode: str) -> None:
-        """Жёсткий размер окна + оболочка только с «Закрыть» (без max/ресайза)."""
+        """Жёсткий размер окна (с clamp под экран) + оболочка без max/ресайза."""
         self._window_mode = mode
         if self.isFullScreen() or self.isMaximized():
             self.showNormal()
-        w, h = size
-        # setFixedSize снимает thick-frame — тянуть края нельзя
+        w, h = self._fitted_shell_size(size)
         if self.size() != QSize(w, h) or self.minimumSize() != QSize(w, h):
             self.setFixedSize(w, h)
         self._ensure_window_on_screen()
@@ -2780,6 +2800,7 @@ class SubtitleApp(QMainWindow):
 
         video_card = QFrame()
         video_card.setProperty("card", True)
+        video_card.setStyleSheet("QFrame[card=\"true\"] { background: #0c0e12; }")
         self._player_video_card = video_card
         video_layout = QVBoxLayout(video_card)
         self._player_video_layout = video_layout
@@ -2801,6 +2822,12 @@ class SubtitleApp(QMainWindow):
         _SafePage = _make_safe_page_class(_YT_NAV_HOSTS)
         self._yt_page = _SafePage(self._yt_profile, self.web_view)
         self.web_view.setPage(self._yt_page)
+        # Без белой вспышки до кадра YouTube
+        self.web_view.setStyleSheet("background: #0c0e12; border: none;")
+        try:
+            self._yt_page.setBackgroundColor(QColor("#0c0e12"))
+        except Exception:  # noqa: BLE001
+            pass
         self.web_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.web_view.loadFinished.connect(self._on_webview_loaded)
         video_layout.addWidget(self.web_view)
@@ -3556,6 +3583,10 @@ class SubtitleApp(QMainWindow):
         except Exception:
             pass
         self.web_view.setUrl(QUrl("about:blank"))
+        try:
+            self.web_view.page().setBackgroundColor(QColor("#0c0e12"))
+        except Exception:  # noqa: BLE001
+            pass
         self._player_video_loaded = False
         self._pending_seek_seconds = None
         self._login_mode = False
@@ -3571,19 +3602,20 @@ class SubtitleApp(QMainWindow):
         mode: str,
         on_finished=None,
     ) -> None:
-        """Плавный ресайз+сдвиг (640↔1120). У края экрана едет вместе с ростом — без телепорта."""
-        end = QSize(*size)
+        """Плавный ресайз+сдвиг (640↔плеер). Размер всегда clamp под экран."""
+        fitted = self._fitted_shell_size(size)
+        end = QSize(*fitted)
         same = self.size() == end and self.minimumSize() == end
 
         def _finish() -> None:
             self._view_trans_running = False
             self._window_mode = mode
-            # Не звать _ensure_window_on_screen: morph уже целится в fitted pos.
+            self._ensure_window_on_screen()
             if on_finished is not None:
                 on_finished()
 
         if same or self._view_trans_running:
-            self._apply_fixed_shell_size(size, mode=mode)
+            self._apply_fixed_shell_size(fitted, mode=mode)
             self._view_trans_running = False
             if on_finished is not None:
                 on_finished()
@@ -3939,7 +3971,13 @@ class SubtitleApp(QMainWindow):
             self._set_player_status("Статус: нет video ID — открой плеер из папки с субами")
             return
         self._set_player_status("Статус: загружаю YouTube…")
-        self.web_view.setUrl(QUrl(f"https://www.youtube.com/watch?v={vid}"))
+        # embed: без белой шапки сайта, сразу кадр; autoplay=0 → старт на паузе
+        self.web_view.setUrl(
+            QUrl(
+                f"https://www.youtube.com/embed/{vid}"
+                f"?autoplay=0&rel=0&modestbranding=1&playsinline=1"
+            )
+        )
 
     def _unload_player_page_only(self) -> None:
         """Сбросить WebView без сноса папки/меток."""
@@ -4272,7 +4310,11 @@ class SubtitleApp(QMainWindow):
             url = self.web_view.url().toString()
         except Exception:  # noqa: BLE001
             url = ""
-        is_yt = "youtube.com" in url or "youtu.be" in url
+        is_yt = (
+            "youtube.com" in url
+            or "youtu.be" in url
+            or "youtube-nocookie.com" in url
+        )
         if ok and is_yt:
             self._player_video_loaded = True
             # Пауза по умолчанию (YT любит сам стартовать)

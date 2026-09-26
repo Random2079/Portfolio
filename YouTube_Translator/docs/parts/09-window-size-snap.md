@@ -20,7 +20,7 @@
 - `CustomizeWindowHint` + `WindowTitleHint` + `WindowSystemMenuHint` + `WindowMinimizeButtonHint` + `WindowCloseButtonHint`
 - `setFixedSize` — края не тянутся; Snap/ресайз не нужны
 - скачивание **640×400**
-- плеер/закладки **1120×760**
+- плеер/закладки **до 1120×760**, но **clamp** под `availableGeometry` (не вылезает за экран)
 
 Без Aero Snap / тянутия краёв — так и задумано (конфликт max+ресайз убран).
 F11 / OS fullscreen / `showFullScreen` — выключены; ⛶ = спрятать панели в том же окне.
