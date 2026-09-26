@@ -505,29 +505,46 @@ def default_music_dirs() -> list[str]:
 
 
 def scan_media(folder: str) -> list[Path]:
-    """Список треков без дублей mp3+mp4: один stem → предпочитаем видео."""
+    """Список треков без дублей: один stem → видео важнее; тот же YouTube [id] → одна запись."""
     root = Path(folder)
     if not root.is_dir():
         return []
-    by_stem: dict[str, Path] = {}
+    by_key: dict[str, Path] = {}
     try:
         entries = sorted(root.iterdir(), key=lambda p: p.name.lower())
     except OSError:
         return []
+
+    def _prefer(prev: Path, cur: Path) -> Path:
+        prev_vid = prev.suffix.lower() in VIDEO_EXTS
+        cur_vid = cur.suffix.lower() in VIDEO_EXTS
+        if cur_vid and not prev_vid:
+            return cur
+        if prev_vid and not cur_vid:
+            return prev
+        # оба видео или оба аудио — более длинное имя часто «полное» (Gojo x Miku),
+        # но для id предпочитаем уже выбранное видео; иначе больший файл
+        try:
+            if cur.stat().st_size > prev.stat().st_size:
+                return cur
+        except OSError:
+            pass
+        return prev
+
     for entry in entries:
         if not entry.is_file() or entry.suffix.lower() not in MEDIA_EXTS:
             continue
-        stem = entry.stem.lower()
-        prev = by_stem.get(stem)
+        ytid = None
+        m = re.search(r"\[([A-Za-z0-9_-]{11})\]", entry.name)
+        if m:
+            ytid = m.group(1)
+        key = f"id:{ytid}" if ytid else f"stem:{entry.stem.lower()}"
+        prev = by_key.get(key)
         if prev is None:
-            by_stem[stem] = entry
-            continue
-        # mp4/webm важнее mp3 с тем же именем
-        prev_vid = prev.suffix.lower() in VIDEO_EXTS
-        cur_vid = entry.suffix.lower() in VIDEO_EXTS
-        if cur_vid and not prev_vid:
-            by_stem[stem] = entry
-    return sorted(by_stem.values(), key=lambda p: p.name.lower())
+            by_key[key] = entry
+        else:
+            by_key[key] = _prefer(prev, entry)
+    return sorted(by_key.values(), key=lambda p: p.name.lower())
 
 
 def resolve_play_path(path: Path) -> Path:
@@ -927,7 +944,8 @@ class OverlaySettingsDialog(QDialog):
         top.addRow(self.catalog_preview)
         self.preview_sound = QCheckBox("Звук превью в каталоге")
         self.preview_sound.setToolTip(
-            "Выкл = картинка/ролик в каталоге без звука; в fullscreen звук как обычно"
+            "Выкл = авто-клик по треку без звука (только картинка). "
+            "Кнопка ▶ / Enter / 2× в списке — всегда со звуком. В полном окне звук как обычно."
         )
         self.preview_sound.setChecked(bool(prefs.get("preview_sound", True)))
         top.addRow(self.preview_sound)
@@ -1068,6 +1086,7 @@ class OverlayPlayerWindow(QWidget):
         self._normal_geometry = None
         self._splitter_sizes: list[int] | None = None
         self._last_play_path: str | None = None
+        self._force_catalog_sound = False  # ▶ / Enter — звук даже если «превью без звука»
         self._hold_stage_opacity = False  # смена трека: не мигать 100% на StoppedState
         # Клик по кадру: single = play/pause, dbl = stage/каталог (таймер гасит гонку с dblclick)
         self._video_click_timer = QTimer(self)
@@ -1137,9 +1156,9 @@ class OverlayPlayerWindow(QWidget):
         self.list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.setWordWrap(False)
-        # 1-й клик — play в каталоге; 2-й по тому же — fullscreen (без рестарта)
-        self.list.itemClicked.connect(self._on_list_chosen)
-        self.list.itemActivated.connect(self._on_list_chosen)
+        # 1-й клик — выбор; Enter/2× — play (если превью выкл); превью вкл — сразу play
+        self.list.itemClicked.connect(self._on_list_clicked)
+        self.list.itemActivated.connect(self._on_list_activated)
         self._splitter.addWidget(self.list)
 
         self.media_stack = QStackedWidget()
@@ -1411,10 +1430,15 @@ class OverlayPlayerWindow(QWidget):
         self.play_btn.setIcon(_svg_icon("pause" if playing else "play", 20))
 
     def _apply_output_volume(self) -> None:
-        """В каталоге без «звука превью» — mute; в fullscreen — громкость слайдера."""
+        """Каталог: mute только тихое превью; ▶/Enter — со звуком. Stage — слайдер."""
         if self._audio is None:
             return
-        if not self._stage_mode and not self._prefs.get("preview_sound", True):
+        silent_preview = (
+            not self._stage_mode
+            and not self._prefs.get("preview_sound", True)
+            and not self._force_catalog_sound
+        )
+        if silent_preview:
             self._audio.setVolume(0.0)
         else:
             self._audio.setVolume(max(0.0, min(1.0, self.volume_slider.value() / 100.0)))
@@ -1436,7 +1460,7 @@ class OverlayPlayerWindow(QWidget):
         self._refresh_playing_highlight()
         n = len(files)
         if n:
-            self.status.setText(f"{n} трек(ов) (без дублей mp3+mp4)")
+            self.status.setText(f"{n} трек(ов) (без дублей stem/YouTube id)")
         else:
             self.status.setText(
                 "Пусто — Папка… → выбери любой .mp3/.mp4 в нужной папке "
@@ -1475,8 +1499,8 @@ class OverlayPlayerWindow(QWidget):
                 item.setFont(font_normal)
                 item.setData(_ROLE_PLAYING, False)
 
-    def _on_list_chosen(self, item: QListWidgetItem | None = None) -> None:
-        """1-й клик: play в каталоге (если превью вкл). 2-й по тому же — fullscreen."""
+    def _on_list_clicked(self, item: QListWidgetItem | None = None) -> None:
+        """Клик: превью вкл → play; выкл → только выбор."""
         if not _HAS_MULTIMEDIA or self._player is None:
             return
         item = item or self.list.currentItem()
@@ -1486,18 +1510,39 @@ class OverlayPlayerWindow(QWidget):
         play = resolve_play_path(raw)
         play_key = str(play.resolve())
         preview_on = bool(self._prefs.get("catalog_preview", True))
-        # Тот же трек уже выбран → второй клик = fullscreen (без рестарта)
         if self._last_play_path == play_key:
             if not self._stage_mode and self._playing:
                 self._enter_stage()
-            elif preview_on and not self._playing:
-                self._play_path(play)
+                return
+            if preview_on and not self._playing:
+                self._play_path(play, force_sound=False)
+                return
+            if not preview_on:
+                self.status.setText(
+                    f"Выбрано: {play.name} · ▶ / Enter / 2× в списке — play"
+                )
             return
-        # Новый трек
         if preview_on:
-            self._play_path(play)
+            self._play_path(play, force_sound=False)
         else:
-            self.status.setText(f"Выбрано: {play.name} · ▶ play (Настр. → клик сразу играет)")
+            self.status.setText(
+                f"Выбрано: {play.name} · ▶ / Enter / 2× в списке — play"
+            )
+
+    def _on_list_activated(self, item: QListWidgetItem | None = None) -> None:
+        """Enter / двойной клик по строке — всегда play (со звуком)."""
+        if not _HAS_MULTIMEDIA or self._player is None:
+            return
+        item = item or self.list.currentItem()
+        if item is None:
+            return
+        raw = Path(item.data(Qt.ItemDataRole.UserRole))
+        play = resolve_play_path(raw)
+        play_key = str(play.resolve())
+        if self._last_play_path == play_key and self._playing and not self._stage_mode:
+            self._enter_stage()
+            return
+        self._play_path(play, force_sound=True)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         """Кадр: клик play/pause, 2× stage↔каталог; Space/стрелки при фокусе на видео."""
@@ -1698,14 +1743,15 @@ class OverlayPlayerWindow(QWidget):
         if item is None:
             return
         raw = Path(item.data(Qt.ItemDataRole.UserRole))
-        self._play_path(resolve_play_path(raw))
+        self._play_path(resolve_play_path(raw), force_sound=True)
 
-    def _play_path(self, path: Path) -> None:
+    def _play_path(self, path: Path, *, force_sound: bool = False) -> None:
         assert self._player is not None
         path = path.resolve()
         if not path.is_file():
             self.status.setText(f"Нет файла: {path.name}")
             return
+        self._force_catalog_sound = bool(force_sound) or self._stage_mode
         # setSource → StoppedState → раньше мигал opacity 100%. Держим плотность.
         if self._stage_mode:
             self._hold_stage_opacity = True
@@ -1766,7 +1812,7 @@ class OverlayPlayerWindow(QWidget):
             return
         self.list.setCurrentRow(index)
         path = resolve_play_path(Path(item.data(Qt.ItemDataRole.UserRole)))
-        self._play_path(path)
+        self._play_path(path, force_sound=True)
         if self._stage_mode:
             self._apply_stage_opacity()
         else:
@@ -1876,6 +1922,7 @@ class OverlayPlayerWindow(QWidget):
 
     def _stop(self) -> None:
         self._hold_stage_opacity = False
+        self._force_catalog_sound = False
         if self._player is not None:
             self._player.stop()
         self._set_play_icon(False)
@@ -2003,10 +2050,15 @@ class OverlayPlayerWindow(QWidget):
     def _on_volume(self, value: int) -> None:
         if self._audio is not None:
             # слайдер = желаемая громкость; mute превью учитывается отдельно
-            if self._stage_mode or self._prefs.get("preview_sound", True):
-                self._audio.setVolume(max(0.0, min(1.0, value / 100.0)))
-            else:
+            silent_preview = (
+                not self._stage_mode
+                and not self._prefs.get("preview_sound", True)
+                and not self._force_catalog_sound
+            )
+            if silent_preview:
                 self._audio.setVolume(0.0)
+            else:
+                self._audio.setVolume(max(0.0, min(1.0, value / 100.0)))
 
     def _on_opacity(self, value: int) -> None:
         """Живой preview; prefs на диск — debounce / отпускание (иначе лаг на каждом тике)."""
