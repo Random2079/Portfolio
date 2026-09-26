@@ -1010,6 +1010,10 @@ class OverlaySettingsDialog(QDialog):
         self.play_hidden.setChecked(bool(prefs.get("play_when_hidden", True)))
         top.addRow(self.play_hidden)
         self.catalog_preview = QCheckBox("Клик в каталоге сразу играет")
+        self.catalog_preview.setToolTip(
+            "Вкл: клик = play.\n"
+            "Выкл: клик = открыть трек (картинка/фон, пауза), ▶ / Enter — играть."
+        )
         self.catalog_preview.setChecked(bool(prefs.get("catalog_preview", True)))
         top.addRow(self.catalog_preview)
         self.preview_sound = QCheckBox("Звук превью в каталоге")
@@ -1216,6 +1220,7 @@ class OverlayPlayerWindow(QWidget):
         self._splitter_sizes: list[int] | None = None
         self._last_play_path: str | None = None
         self._force_catalog_sound = False  # ▶ / Enter — звук даже если «превью без звука»
+        self._pause_after_open = False  # клик без «сразу играет» → кадр/фон, потом pause
         self._hold_stage_opacity = False  # смена трека: не мигать 100% на StoppedState
         # Клик по кадру: single = play/pause, dbl = stage/каталог (таймер гасит гонку с dblclick)
         self._video_click_timer = QTimer(self)
@@ -1564,8 +1569,13 @@ class OverlayPlayerWindow(QWidget):
             return
         silent_preview = (
             not self._stage_mode
-            and not self._prefs.get("preview_sound", True)
-            and not self._force_catalog_sound
+            and (
+                self._pause_after_open
+                or (
+                    not self._prefs.get("preview_sound", True)
+                    and not self._force_catalog_sound
+                )
+            )
         )
         if silent_preview:
             self._audio.setVolume(0.0)
@@ -1597,10 +1607,10 @@ class OverlayPlayerWindow(QWidget):
             )
 
     def _refresh_playing_highlight(self) -> None:
-        """Цвет + ▶ у трека, который играет — иначе в каталоге не видно «какой»."""
+        """Подсветка текущего трека (играет или просто открыт в кадре)."""
         if not hasattr(self, "list"):
             return
-        playing_key = self._last_play_path if self._playing else None
+        current_key = self._last_play_path
         font_normal = self.list.font()
         font_play = QFont(font_normal)
         font_play.setBold(True)
@@ -1610,12 +1620,13 @@ class OverlayPlayerWindow(QWidget):
                 continue
             raw = Path(item.data(Qt.ItemDataRole.UserRole))
             key = str(resolve_play_path(raw).resolve())
-            is_now = bool(playing_key and key == playing_key)
+            is_now = bool(current_key and key == current_key)
             base = item.text()
-            if base.startswith("▶ "):
+            if base.startswith("▶ ") or base.startswith("· "):
                 base = base[2:]
             if is_now:
-                item.setText(f"▶ {base}")
+                mark = "▶ " if self._playing else "· "
+                item.setText(f"{mark}{base}")
                 item.setBackground(QBrush(QColor("#0e3a4a")))
                 item.setForeground(QBrush(QColor("#7dd3fc")))
                 item.setFont(font_play)
@@ -1629,7 +1640,7 @@ class OverlayPlayerWindow(QWidget):
                 item.setData(_ROLE_PLAYING, False)
 
     def _on_list_clicked(self, item: QListWidgetItem | None = None) -> None:
-        """Клик: превью вкл → play; выкл → только выбор."""
+        """Клик: всегда открыть кадр/фон; галка «сразу играет» — play или пауза."""
         if not _HAS_MULTIMEDIA or self._player is None:
             return
         item = item or self.list.currentItem()
@@ -1644,19 +1655,16 @@ class OverlayPlayerWindow(QWidget):
                 self._enter_stage()
                 return
             if preview_on and not self._playing:
-                self._play_path(play, force_sound=False)
+                self._play_path(play, force_sound=False, autoplay=True)
                 return
             if not preview_on:
+                # Уже открыт на паузе — не дёргать; статус подсказка
                 self.status.setText(
-                    f"Выбрано: {play.name} · ▶ / Enter / 2× в списке — play"
+                    f"Открыто: {play.name} · ▶ / Enter — play"
                 )
             return
-        if preview_on:
-            self._play_path(play, force_sound=False)
-        else:
-            self.status.setText(
-                f"Выбрано: {play.name} · ▶ / Enter / 2× в списке — play"
-            )
+        # Новый трек: открыть всегда (фон/кадр); play только если галка
+        self._play_path(play, force_sound=False, autoplay=preview_on)
 
     def _on_list_activated(self, item: QListWidgetItem | None = None) -> None:
         """Enter / двойной клик по строке — всегда play (со звуком)."""
@@ -1874,13 +1882,16 @@ class OverlayPlayerWindow(QWidget):
         raw = Path(item.data(Qt.ItemDataRole.UserRole))
         self._play_path(resolve_play_path(raw), force_sound=True)
 
-    def _play_path(self, path: Path, *, force_sound: bool = False) -> None:
+    def _play_path(
+        self, path: Path, *, force_sound: bool = False, autoplay: bool = True
+    ) -> None:
         assert self._player is not None
         path = path.resolve()
         if not path.is_file():
             self.status.setText(f"Нет файла: {path.name}")
             return
         self._force_catalog_sound = bool(force_sound) or self._stage_mode
+        self._pause_after_open = not autoplay
         # setSource → StoppedState → раньше мигал opacity 100%. Держим плотность.
         if self._stage_mode:
             self._hold_stage_opacity = True
@@ -1893,18 +1904,31 @@ class OverlayPlayerWindow(QWidget):
         else:
             self._player.setVideoOutput(None)
             self.media_stack.setCurrentWidget(self.pulse)
-            self.pulse.start()
+            if autoplay:
+                self.pulse.start()
+            else:
+                self.pulse.stop()
         self._player.setSource(QUrl.fromLocalFile(str(path)))
+        # Даже «только открыть»: короткий play нужен, чтобы mp4 показал кадр
         self._player.play()
-        self._set_play_icon(True)
-        self._playing = True
         self._last_play_path = str(path)
+        if autoplay:
+            self._set_play_icon(True)
+            self._playing = True
+            self.status.setText(f"▶ {_clean_media_title(path.stem)}{path.suffix.lower()}")
+        else:
+            self._set_play_icon(False)
+            self._playing = False
+            self.status.setText(
+                f"Открыто: {_clean_media_title(path.stem)}{path.suffix.lower()} · ▶ play"
+            )
+            # страховка, если mediaStatus не придёт сразу
+            QTimer.singleShot(120, self._finish_open_pause)
         if self._stage_mode:
             self._apply_stage_opacity()
         else:
             self._apply_catalog_opacity()
         self._apply_output_volume()
-        self.status.setText(f"▶ {_clean_media_title(path.stem)}{path.suffix.lower()}")
         self._refresh_playing_highlight()
         QTimer.singleShot(1000, self._clear_opacity_hold)
         if self._stage_mode and self._playing:
@@ -1916,6 +1940,18 @@ class OverlayPlayerWindow(QWidget):
             if str(resolve_play_path(raw).resolve()) == key:
                 self.list.setCurrentRow(i)
                 break
+
+    def _finish_open_pause(self) -> None:
+        """После открытия без autoplay — пауза, кадр остаётся на экране."""
+        if not self._pause_after_open or self._player is None:
+            return
+        self._pause_after_open = False
+        if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self._player.pause()
+        self._playing = False
+        self._set_play_icon(False)
+        self.pulse.stop()
+        self._refresh_playing_highlight()
 
     def _clear_opacity_hold(self) -> None:
         self._hold_stage_opacity = False
@@ -2043,6 +2079,9 @@ class OverlayPlayerWindow(QWidget):
         if state == QMediaPlayer.PlaybackState.PlayingState:
             self._player.pause()
         elif state == QMediaPlayer.PlaybackState.PausedState:
+            self._pause_after_open = False
+            self._force_catalog_sound = True
+            self._apply_output_volume()
             self._player.play()
             if self.media_stack.currentWidget() is self.pulse:
                 self.pulse.start()
@@ -2052,6 +2091,7 @@ class OverlayPlayerWindow(QWidget):
     def _stop(self) -> None:
         self._hold_stage_opacity = False
         self._force_catalog_sound = False
+        self._pause_after_open = False
         if self._player is not None:
             self._player.stop()
         self._set_play_icon(False)
@@ -2157,9 +2197,20 @@ class OverlayPlayerWindow(QWidget):
     def _on_media_status(self, status) -> None:
         if not _HAS_MULTIMEDIA or self._player is None:
             return
+        if self._pause_after_open and status in (
+            QMediaPlayer.MediaStatus.BufferedMedia,
+            QMediaPlayer.MediaStatus.LoadedMedia,
+            QMediaPlayer.MediaStatus.BufferingMedia,
+        ):
+            self._finish_open_pause()
+            return
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            if self._pause_after_open:
+                self._pause_after_open = False
+                return
             self._play_next()
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
+            self._pause_after_open = False
             self.status.setText("InvalidMedia — кодек/файл не открылся")
             self.pulse.stop()
             self._playing = False
