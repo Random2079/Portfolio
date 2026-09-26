@@ -2383,12 +2383,13 @@ class SubtitleApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("Subtitle Ripper Pro")
         self.setWindowIcon(make_app_icon())
-        # Оболочка: фиксированный размер + только «Закрыть» (без min/max/ресайза)
+        # Оболочка: фиксированный размер; свернуть + закрыть (без max/ресайза)
         self.setWindowFlags(
             Qt.WindowType.Window
             | Qt.WindowType.CustomizeWindowHint
             | Qt.WindowType.WindowTitleHint
             | Qt.WindowType.WindowSystemMenuHint
+            | Qt.WindowType.WindowMinimizeButtonHint
             | Qt.WindowType.WindowCloseButtonHint
         )
         self._window_mode = "download"  # download | player — какой fixed size

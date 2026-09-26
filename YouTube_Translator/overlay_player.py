@@ -1286,13 +1286,6 @@ class OverlayPlayerWindow(QWidget):
         self.settings_btn.setIconSize(QSize(16, 16))
         self.settings_btn.clicked.connect(self._open_settings)
         top.addWidget(self.settings_btn)
-        self.minimize_btn = QPushButton("Свернуть")
-        self.minimize_btn.setObjectName("ghostBtn")
-        self.minimize_btn.setIcon(_svg_icon("hide", 14))
-        self.minimize_btn.setIconSize(QSize(14, 14))
-        self.minimize_btn.setToolTip("Свернуть в панель задач (как кнопка ▢−). Музыка не стопается.")
-        self.minimize_btn.clicked.connect(self._minimize_to_taskbar)
-        top.addWidget(self.minimize_btn)
         root.addWidget(self.chrome_top)
 
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1446,10 +1439,7 @@ class OverlayPlayerWindow(QWidget):
         self.hide_btn.setObjectName("ghostBtn")
         self.hide_btn.setIcon(_svg_icon("hide", 14))
         self.hide_btn.setIconSize(QSize(14, 14))
-        self.hide_btn.setToolTip(
-            "Спрятать совсем (без иконки). Вернуть — «Фон» в Translator. "
-            "Чтобы свернуть в панель задач — «Свернуть» или кнопку − в заголовке."
-        )
+        self.hide_btn.setToolTip("Спрятать окно. Вернуть — кнопкой «Фон» в основном окне.")
         self.hide_btn.clicked.connect(self._hide_keep_music)
         self.hide_btn.hide()  # в каталоге не нужен — только fullscreen / хоткей
         ctrl2.addWidget(self.hide_btn)
@@ -1471,7 +1461,6 @@ class OverlayPlayerWindow(QWidget):
             self.back_btn,
             self.pick_folder_btn,
             self.settings_btn,
-            self.minimize_btn,
             self.catalog_btn,
             self.prev_btn,
             self.play_btn,
@@ -2374,15 +2363,8 @@ class OverlayPlayerWindow(QWidget):
         want = bool(self._stage_mode)
         self._force_topmost_widget(self, topmost=want)
 
-    def _minimize_to_taskbar(self) -> None:
-        """Свернуть в панель задач; музыка продолжает играть."""
-        if self._click_through:
-            self._set_click_through(False)
-        self.showMinimized()
-
     def changeEvent(self, event) -> None:  # noqa: N802
         if event.type() == QEvent.Type.WindowStateChange:
-            # После свернуть/развернуть не даём таймерам topmost сразу показать окно
             if self.isMinimized():
                 self._stop_auto_density_timer(exit_ct_if_armed=False)
         super().changeEvent(event)
