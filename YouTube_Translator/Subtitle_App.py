@@ -79,7 +79,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui_motion import BusyPulse, attach_many
+from ui_motion import BusyPulse, attach_many, morph_widget_geometry
 
 from ai_analyze import (  # DeepSeek — без доп. зависимостей
     AnalyzeCancelled,
@@ -2422,6 +2422,10 @@ class SubtitleApp(QMainWindow):
         self._pending_ai_after_subs = False
         # IDEA-022: отдельное overlay-окно (не в stack)
         self._overlay_window = None
+        # Авто-плеер после субов: токен сбрасывает уход с главной / новый download
+        self._auto_player_token = 0
+        self._view_trans_anim = None
+        self._view_trans_running = False
 
         # подключаем сигналы: вызов из любого потока → обновление в UI-потоке
         self._status_signal.connect(self._set_status)
@@ -2452,7 +2456,6 @@ class SubtitleApp(QMainWindow):
             self.overlay_btn,
             self.player_btn,
             self.bookmarks_btn,
-            self.clear_btn,
             self.back_btn,
             self.theater_btn,
             self.analyze_btn,
@@ -2602,7 +2605,10 @@ class SubtitleApp(QMainWindow):
         brand_row.addStretch(1)
         layout.addLayout(brand_row)
 
-        hint = QLabel("Вставь ссылку, выбери язык, жми «Скачать». Текст уйдёт в буфер.")
+        hint = QLabel(
+            "Вставь ссылку, выбери язык, жми «Скачать». "
+            "Текст уйдёт в буфер, затем откроется плеер."
+        )
         hint.setProperty("muted", True)
         layout.addWidget(hint)
 
@@ -2644,7 +2650,7 @@ class SubtitleApp(QMainWindow):
         apply_primary_glow(self.download_btn)
         btn_row.addWidget(self.download_btn)
 
-        self.audio_btn = QPushButton("🎵 Музыка")
+        self.audio_btn = QPushButton("↓ MP3")
         self.audio_btn.setProperty("fallback", True)
         self.audio_btn.setToolTip("Скачать аудио (MP3) в Music\\YouTube_DL")
         self.audio_btn.clicked.connect(self.on_download_audio)
@@ -2668,11 +2674,6 @@ class SubtitleApp(QMainWindow):
         self.bookmarks_btn.setToolTip("Частые сайты (аниме и т.д.)")
         self.bookmarks_btn.clicked.connect(self.show_bookmarks_view)
         btn_row.addWidget(self.bookmarks_btn)
-
-        self.clear_btn = QPushButton("Очистить")
-        self.clear_btn.setProperty("fallback", True)
-        self.clear_btn.clicked.connect(self.on_clear)
-        btn_row.addWidget(self.clear_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
         self._disable_space_button_activate(
@@ -2684,7 +2685,6 @@ class SubtitleApp(QMainWindow):
             self.overlay_btn,
             self.player_btn,
             self.bookmarks_btn,
-            self.clear_btn,
         )
         return page
 
@@ -2792,9 +2792,9 @@ class SubtitleApp(QMainWindow):
             QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
         )
         settings = self._yt_profile.settings()
-        # Не автоплеить при загрузке страницы — только по жесту (▶ / seek / клик).
+        # Жест не блокируем: иначе кадр часто белый. Автоplay гасим через _force_pause_youtube.
         settings.setAttribute(
-            QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, True
+            QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False
         )
 
         self.web_view = QWebEngineView()
@@ -2805,13 +2805,10 @@ class SubtitleApp(QMainWindow):
         self.web_view.loadFinished.connect(self._on_webview_loaded)
         video_layout.addWidget(self.web_view)
 
+        # Кнопка «Загрузить» убрана: YouTube грузится сам при открытии плеера (на паузе).
         self.load_video_btn = QPushButton("▶ Загрузить видео")
-        self.load_video_btn.setProperty("fallback", True)
-        self.load_video_btn.setToolTip(
-            "YouTube не грузится сам при открытии плеера — только по кнопке"
-        )
-        self.load_video_btn.clicked.connect(self.on_load_player_video)
-        video_layout.addWidget(self.load_video_btn)
+        self.load_video_btn.hide()
+        self.load_video_btn.setEnabled(False)
 
         sidebar = QFrame()
         sidebar.setProperty("card", True)
@@ -3125,7 +3122,6 @@ class SubtitleApp(QMainWindow):
             self.audio_btn,
             self.player_btn,
             self.bookmarks_btn,
-            self.clear_btn,
             self.ru_btn,
             self.en_btn,
         ):
@@ -3535,7 +3531,12 @@ class SubtitleApp(QMainWindow):
         """Показывает вывод ИИ (после API)."""
         self._apply_ai_analysis(analysis)
 
+    def _cancel_auto_player(self) -> None:
+        """Сбросить отложенный авто-переход в плеер после скачивания."""
+        self._auto_player_token += 1
+
     def on_clear(self) -> None:
+        """Оставлено на случай хоткея/вызова; кнопки на главной больше нет."""
         if self._busy:
             return
         self.url_input.clear()
@@ -3557,38 +3558,85 @@ class SubtitleApp(QMainWindow):
         self.web_view.setUrl(QUrl("about:blank"))
         self._player_video_loaded = False
         self._pending_seek_seconds = None
-        if hasattr(self, "load_video_btn"):
-            self.load_video_btn.setVisible(True)
-            self.load_video_btn.setEnabled(True)
-            self.load_video_btn.setText("▶ Загрузить видео")
         self._login_mode = False
         if hasattr(self, "login_btn"):
             self.login_btn.setText("Войти")
             self.login_btn.setToolTip("Войти в YouTube")
             self._refresh_login_btn_visibility()
 
+    def _morph_shell_to(
+        self,
+        size: tuple[int, int],
+        *,
+        mode: str,
+        on_finished=None,
+    ) -> None:
+        """Плавный ресайз+сдвиг (640↔1120). У края экрана едет вместе с ростом — без телепорта."""
+        end = QSize(*size)
+        same = self.size() == end and self.minimumSize() == end
+
+        def _finish() -> None:
+            self._view_trans_running = False
+            self._window_mode = mode
+            # Не звать _ensure_window_on_screen: morph уже целится в fitted pos.
+            if on_finished is not None:
+                on_finished()
+
+        if same or self._view_trans_running:
+            self._apply_fixed_shell_size(size, mode=mode)
+            self._view_trans_running = False
+            if on_finished is not None:
+                on_finished()
+            return
+
+        self._view_trans_running = True
+        self._window_mode = mode
+        self._view_trans_anim = morph_widget_geometry(
+            self,
+            end,
+            duration_ms=300,
+            on_finished=_finish,
+        )
+
     def show_download_view(self) -> None:
+        self._cancel_auto_player()
         if self.isFullScreen():
             self.showNormal()
         self._exit_player_theater(force=True)
         self._unload_player()
+        from_large = (
+            hasattr(self, "stack")
+            and self.stack.currentWidget() is not self.download_view
+        )
         # Закладки не гасим — иначе каждый возврат = полная перезагрузка сайта
         self.stack.setCurrentWidget(self.download_view)
-        self._lock_download_window_size()
+        if from_large:
+            self._morph_shell_to(self._DOWNLOAD_SIZE, mode="download")
+        else:
+            self._lock_download_window_size()
 
-    def show_player_view(self) -> None:
+    def show_player_view(self, *, animate: bool = True) -> None:
         from_download = self._is_download_view_active()
+        self._cancel_auto_player()
+
+        def _finish_show() -> None:
+            self._refresh_login_btn_visibility()
+            QTimer.singleShot(0, lambda: self.web_view.setFocus())
+
         # Закладки не гасим: иначе Aniwaves каждый раз заново ловит Cloudflare
-        # Сначала переключить stack — иначе resize→moveEvent снова залочит download
         self.stack.setCurrentWidget(self.player_view)
-        self._unlock_player_window_size(reset_geometry=from_download)
-        self._refresh_login_btn_visibility()
-        # Фокус в WebView — пробел = play/pause YouTube, не клик по кнопкам
-        QTimer.singleShot(0, lambda: self.web_view.setFocus())
+        if animate and from_download:
+            self._morph_shell_to(
+                self._PLAYER_SIZE, mode="player", on_finished=_finish_show
+            )
+        else:
+            self._unlock_player_window_size(reset_geometry=from_download)
+            _finish_show()
 
     def show_bookmarks_view(self) -> None:
         if self._busy:
             return
+        self._cancel_auto_player()
         if self.isFullScreen():
             self.showNormal()
             self._ensure_window_on_screen()
@@ -3596,27 +3644,38 @@ class SubtitleApp(QMainWindow):
         self._exit_player_theater(force=True)
         self._unload_player()
         self.stack.setCurrentWidget(self.bookmarks_view)
-        self._unlock_player_window_size(reset_geometry=from_download)
-        if self.bookmarks_tabs.count() <= 1:
-            self.bookmarks_status.setText("Нет закладок — добавь URL в bookmarks.json")
-            return
-        idx = self.bookmarks_tabs.currentIndex()
-        if idx < 0:
-            self.bookmarks_tabs.setCurrentIndex(0)
-            idx = 0
-        if idx >= len(self._bookmarks):
-            self.bookmarks_content_stack.setCurrentWidget(self.history_panel)
-            self._refresh_history_list()
-            return
-        self.bookmarks_content_stack.setCurrentWidget(
-            self.bookmarks_content_stack.widget(0)
-        )
-        cur = self.bookmarks_web_view.url().toString()
-        if cur in ("", "about:blank"):
-            self._load_bookmark_at_index(idx)
+
+        def _after_size() -> None:
+            if self.bookmarks_tabs.count() <= 1:
+                self.bookmarks_status.setText(
+                    "Нет закладок — добавь URL в bookmarks.json"
+                )
+                return
+            idx = self.bookmarks_tabs.currentIndex()
+            if idx < 0:
+                self.bookmarks_tabs.setCurrentIndex(0)
+                idx = 0
+            if idx >= len(self._bookmarks):
+                self.bookmarks_content_stack.setCurrentWidget(self.history_panel)
+                self._refresh_history_list()
+                return
+            self.bookmarks_content_stack.setCurrentWidget(
+                self.bookmarks_content_stack.widget(0)
+            )
+            cur = self.bookmarks_web_view.url().toString()
+            if cur in ("", "about:blank"):
+                self._load_bookmark_at_index(idx)
+            else:
+                title = self._bookmarks[idx].get("title") or "закладку"
+                self.bookmarks_status.setText(f"Загружено: {title} (из кэша)")
+
+        if from_download:
+            self._morph_shell_to(
+                self._PLAYER_SIZE, mode="player", on_finished=_after_size
+            )
         else:
-            title = self._bookmarks[idx].get("title") or "закладку"
-            self.bookmarks_status.setText(f"Загружено: {title} (из кэша)")
+            self._unlock_player_window_size(reset_geometry=False)
+            _after_size()
 
     def _on_bookmark_tab_changed(self, index: int) -> None:
         if index >= len(self._bookmarks):
@@ -3846,6 +3905,7 @@ class SubtitleApp(QMainWindow):
     def on_open_player(self) -> None:
         if self._busy:
             return
+        self._cancel_auto_player()
         url = self.url_input.text().strip()
         folder_name, id_for_write = resolve_player_target(url)
         if not folder_name:
@@ -3855,24 +3915,22 @@ class SubtitleApp(QMainWindow):
         if self._apply_player_folder_state(folder_name, id_for_write) is None:
             return
 
-        # Не грузим YouTube сразу: пустой webview, ▶ по желанию.
+        # YouTube грузится сразу в webview, на паузе (не ждём кнопку).
         video_id = id_for_write or _extract_id_from_folder(folder_name)
         self._player_pending_video_id = video_id
         self._player_video_loaded = False
         self._unload_player_page_only()
-        if hasattr(self, "load_video_btn"):
-            self.load_video_btn.setVisible(True)
-            self.load_video_btn.setText("▶ Загрузить видео")
         if video_id:
-            self._set_player_status(
-                "Статус: плеер готов · видео не загружено — нажми ▶"
-            )
+            self._set_player_status("Статус: загружаю YouTube · будет на паузе")
         else:
             self._set_player_status("Статус: не удалось определить video ID")
-        self.show_player_view()
+        animate = self._is_download_view_active()
+        self.show_player_view(animate=animate)
+        if video_id:
+            QTimer.singleShot(0, self.on_load_player_video)
 
     def on_load_player_video(self) -> None:
-        """Явная загрузка YouTube (без автоплея при открытии плеера)."""
+        """Загрузка YouTube в webview; play гасим в _on_webview_loaded."""
         vid = self._player_pending_video_id
         if not vid and self._current_player_folder:
             vid = _extract_id_from_folder(self._current_player_folder)
@@ -3881,9 +3939,6 @@ class SubtitleApp(QMainWindow):
             self._set_player_status("Статус: нет video ID — открой плеер из папки с субами")
             return
         self._set_player_status("Статус: загружаю YouTube…")
-        if hasattr(self, "load_video_btn"):
-            self.load_video_btn.setText("⏳ Загрузка…")
-            self.load_video_btn.setEnabled(False)
         self.web_view.setUrl(QUrl(f"https://www.youtube.com/watch?v={vid}"))
 
     def _unload_player_page_only(self) -> None:
@@ -3903,9 +3958,18 @@ class SubtitleApp(QMainWindow):
     def _force_pause_youtube(self) -> None:
         """YouTube часто сам жмёт play — гасим несколько раз после load."""
         script = (
-            "(function(){try{var v=document.querySelector('video');"
-            "if(!v)return 'no';v.pause();v.autoplay=false;return 'ok';}"
-            "catch(e){return 'err';}})();"
+            "(function(){try{"
+            "window.__srForcePause=true;"
+            "var v=document.querySelector('video');"
+            "if(v){v.pause();v.autoplay=false;v.removeAttribute('autoplay');"
+            "if(!v._srPauseHook){v._srPauseHook=true;"
+            "v.addEventListener('play',function(){"
+            "if(window.__srForcePause){try{v.pause();}catch(e){}}});}}"
+            "var b=document.querySelector('button.ytp-play-button');"
+            "if(b){var t=(b.getAttribute('data-title-no-tooltip')||b.title||"
+            "b.getAttribute('aria-label')||'');"
+            "if(/pause|пауз/i.test(t))b.click();}"
+            "return v?'ok':'no';}catch(e){return 'err';}})();"
         )
 
         def _done(result) -> None:
@@ -3916,6 +3980,14 @@ class SubtitleApp(QMainWindow):
                 QTimer.singleShot(350, self._force_pause_youtube)
 
         self.web_view.page().runJavaScript(script, _done)
+
+    def _release_force_pause_youtube(self) -> None:
+        if not hasattr(self, "web_view"):
+            return
+        try:
+            self.web_view.page().runJavaScript("window.__srForcePause=false;")
+        except Exception:  # noqa: BLE001
+            pass
 
     def _apply_player_folder_state(
         self, folder_name: str, id_for_write: str | None
@@ -4203,15 +4275,12 @@ class SubtitleApp(QMainWindow):
         is_yt = "youtube.com" in url or "youtu.be" in url
         if ok and is_yt:
             self._player_video_loaded = True
-            if hasattr(self, "load_video_btn"):
-                self.load_video_btn.setVisible(False)
-                self.load_video_btn.setEnabled(True)
-                self.load_video_btn.setText("▶ Загрузить видео")
             # Пауза по умолчанию (YT любит сам стартовать)
-            self._pause_retries_left = 8
+            self._pause_retries_left = 12
             QTimer.singleShot(200, self._force_pause_youtube)
-            QTimer.singleShot(800, self._force_pause_youtube)
-            QTimer.singleShot(1600, self._force_pause_youtube)
+            QTimer.singleShot(600, self._force_pause_youtube)
+            QTimer.singleShot(1200, self._force_pause_youtube)
+            QTimer.singleShot(2000, self._force_pause_youtube)
             pending = getattr(self, "_pending_seek_seconds", None)
             if pending is not None:
                 self._pending_seek_seconds = None
@@ -4225,10 +4294,6 @@ class SubtitleApp(QMainWindow):
         if ok:
             self._set_player_status("Статус: встроенный плеер готов")
         else:
-            if hasattr(self, "load_video_btn"):
-                self.load_video_btn.setEnabled(True)
-                self.load_video_btn.setText("▶ Загрузить видео")
-                self.load_video_btn.setVisible(True)
             self._set_player_status(
                 "Статус: встроенный плеер не загрузился — проверь VPN/сеть или Войти."
             )
@@ -4247,6 +4312,7 @@ class SubtitleApp(QMainWindow):
             return
 
         self._set_status(f"Статус: старт ({self._lang_code.upper()})…")
+        self._cancel_auto_player()
         self._begin_download_task("download")
         self._set_busy(True)
         # на экране скачивания плеер не должен жить в фоне
@@ -4262,6 +4328,7 @@ class SubtitleApp(QMainWindow):
     def on_download_audio(self) -> None:
         if self._busy:
             return
+        self._cancel_auto_player()
         url = self.url_input.text().strip()
         if not url:
             self._set_status("Статус: вставь ссылку")
@@ -4273,6 +4340,7 @@ class SubtitleApp(QMainWindow):
 
     def on_open_overlay(self) -> None:
         """IDEA-022: overlay с каталогом Music/YouTube_DL (обычное окно)."""
+        self._cancel_auto_player()
         win = open_overlay_player(start_dir=default_audio_output_dir(), parent=self)
         if win is None:
             return
@@ -4607,9 +4675,49 @@ class SubtitleApp(QMainWindow):
             timed_note = "\n+ файл с таймкодами: 1_текст_с_таймкодами.txt"
         if folder_name and os.path.exists(os.path.join(folder_name, PLAYER_FILENAME)):
             timed_note += f"\n+ плеер: {PLAYER_FILENAME}"
-        self._set_status(
-            f"Готово! Папка: {shown}{clipboard_msg}{timed_note}\n{timing_hint}"
-        )
+
+        # Авто-плеер (сценарий B): мост ~1с → soft zoom. Только главный download субов.
+        can_auto_player = bool(folder_name) and self._is_download_view_active()
+        if can_auto_player:
+            self._set_status(
+                f"Готово · текст в буфере · открываю плеер…\n"
+                f"Папка: {shown}{timed_note}\n{timing_hint}"
+            )
+            self._auto_player_token += 1
+            token = self._auto_player_token
+            QTimer.singleShot(
+                1000, lambda t=token, u=url: self._auto_open_player_after_download(t, u)
+            )
+        else:
+            self._set_status(
+                f"Готово! Папка: {shown}{clipboard_msg}{timed_note}\n{timing_hint}"
+            )
+
+    def _auto_open_player_after_download(self, token: int, url: str) -> None:
+        """После моста B: подготовить папку и soft-zoom в плеер."""
+        if token != self._auto_player_token:
+            return
+        if self._busy or self._view_trans_running:
+            return
+        if not self._is_download_view_active():
+            return
+        folder_name, id_for_write = resolve_player_target(url)
+        if not folder_name:
+            self._set_status("Статус: нет папки субтитров — сначала скачай")
+            return
+        if self._apply_player_folder_state(folder_name, id_for_write) is None:
+            return
+        video_id = id_for_write or _extract_id_from_folder(folder_name)
+        self._player_pending_video_id = video_id
+        self._player_video_loaded = False
+        self._unload_player_page_only()
+        if video_id:
+            self._set_player_status("Статус: загружаю YouTube · будет на паузе")
+        else:
+            self._set_player_status("Статус: не удалось определить video ID")
+        self.show_player_view(animate=True)
+        if video_id:
+            QTimer.singleShot(0, self.on_load_player_video)
 
 
 # =====================================================================
