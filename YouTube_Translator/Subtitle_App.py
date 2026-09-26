@@ -4281,6 +4281,7 @@ class SubtitleApp(QMainWindow):
             QTimer.singleShot(600, self._force_pause_youtube)
             QTimer.singleShot(1200, self._force_pause_youtube)
             QTimer.singleShot(2000, self._force_pause_youtube)
+            QTimer.singleShot(3500, self._release_force_pause_youtube)
             pending = getattr(self, "_pending_seek_seconds", None)
             if pending is not None:
                 self._pending_seek_seconds = None
