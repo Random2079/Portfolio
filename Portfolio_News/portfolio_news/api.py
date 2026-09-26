@@ -902,8 +902,9 @@ def list_metrics(
             items.append((t.id, t.kind, t.name, t.isin or ""))
         elif id_list is not None:
             items.append((tid, kind or "equity", tid, ""))
-    if limit:
-        items = items[:limit]
+    # eff already folds explicit limit / default portfolio cap (0 = single-ticker uncapped)
+    if eff:
+        items = items[:eff]
     metrics = fetch_metrics_for(items)
     return [metric_to_dict(m) for m in metrics]
 
