@@ -41,7 +41,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QKeySequenceEdit,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -383,6 +382,9 @@ _DEFAULT_PREFS = {
     "play_when_hidden": True,
     "catalog_preview": True,
     "preview_sound": True,
+    "auto_density": False,
+    "auto_density_pct": 45,
+    "auto_density_idle_sec": 4,
     "hotkeys": dict(_DEFAULT_HOTKEYS),
 }
 
@@ -436,6 +438,14 @@ def load_overlay_prefs() -> dict:
             data["catalog_preview"] = bool(raw["catalog_preview"])
         if "preview_sound" in raw:
             data["preview_sound"] = bool(raw["preview_sound"])
+        if "auto_density" in raw:
+            data["auto_density"] = bool(raw["auto_density"])
+        if "auto_density_pct" in raw:
+            data["auto_density_pct"] = max(
+                _OPACITY_MIN, min(_OPACITY_MAX, int(raw["auto_density_pct"]))
+            )
+        if "auto_density_idle_sec" in raw:
+            data["auto_density_idle_sec"] = max(1, min(120, int(raw["auto_density_idle_sec"])))
         hk = raw.get("hotkeys")
         if isinstance(hk, dict):
             for key, default in _DEFAULT_HOTKEYS.items():
@@ -692,23 +702,96 @@ def _sequence_to_hotkey_spec(seq: QKeySequence) -> str:
     if seq.isEmpty():
         return ""
     raw = seq.toString(QKeySequence.SequenceFormat.PortableText)
-    # Берём только первую комбинацию, если Qt склеил несколько
     return raw.split(", ")[0].strip()
 
 
-class HotkeyCaptureEdit(QKeySequenceEdit):
-    """Клик → жми сочетание. QKeySequenceEdit, не свободный текст."""
+def _normalize_hotkey_spec(spec: str) -> str:
+    s = (spec or "").strip()
+    low = s.lower().replace(" ", "")
+    aliases = {
+        "xbutton1": "Mouse4",
+        "mouse4": "Mouse4",
+        "back": "Mouse4",
+        "xbutton2": "Mouse5",
+        "mouse5": "Mouse5",
+        "forward": "Mouse5",
+        "mouse3": "Mouse3",
+        "middle": "Mouse3",
+        "mid": "Mouse3",
+    }
+    return aliases.get(low, s)
+
+
+def _is_mouse_hotkey_spec(spec: str) -> bool:
+    return _normalize_hotkey_spec(spec).lower() in ("mouse3", "mouse4", "mouse5")
+
+
+def _mouse_button_to_spec(button) -> str | None:
+    if button == Qt.MouseButton.MiddleButton:
+        return "Mouse3"
+    if button == Qt.MouseButton.XButton1:
+        return "Mouse4"
+    if button == Qt.MouseButton.XButton2:
+        return "Mouse5"
+    return None
+
+
+def _is_valid_hotkey_spec(spec: str) -> bool:
+    n = _normalize_hotkey_spec(spec)
+    if not n:
+        return False
+    if _is_mouse_hotkey_spec(n):
+        return True
+    return _parse_hotkey(n, allow_repeat=True) is not None or _parse_hotkey(n) is not None
+
+
+class HotkeyCaptureEdit(QLineEdit):
+    """Клик → жми клавиши или боковую кнопку мыши. Не свободный текст."""
 
     def __init__(self, initial: str, default: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._default = default
-        self.setMaximumSequenceLength(1)
-        self.setKeySequence(_hotkey_spec_to_sequence(initial or default))
-        self.setToolTip(
-            "Кликни поле, затем нажми сочетание (Ctrl+Shift+1 и т.п.).\n"
-            "Backspace — сброс на значение по умолчанию."
+        self._default = _normalize_hotkey_spec(default) or default
+        self.setReadOnly(True)
+        self.setText(_normalize_hotkey_spec(initial) or self._default)
+        self.setMinimumHeight(32)
+        self.setMinimumWidth(150)
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.setStyleSheet(
+            "QLineEdit {"
+            "  padding: 6px 12px 6px 12px;"
+            "  background: #1a2230;"
+            "  color: #e2e8f0;"
+            "  border: 1px solid #334155;"
+            "  border-radius: 6px;"
+            "  font-size: 13px;"
+            "}"
+            "QLineEdit:focus {"
+            "  border: 1px solid #38bdf8;"
+            "  background: #0f172a;"
+            "}"
         )
-        self.setMinimumHeight(28)
+        self.setToolTip(
+            "Кликни поле → жми сочетание (Ctrl+Shift+1) или боковую кнопку мыши (Mouse4/5).\n"
+            "Backspace — сброс на дефолт. Боковые работают, когда Фон в фокусе (не в «сквозь»)."
+        )
+        self._listening = False
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        self._listening = True
+        self.selectAll()
+        try:
+            self.grabMouse()
+        except Exception:
+            pass
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        self._listening = False
+        try:
+            self.releaseMouse()
+        except Exception:
+            pass
+        super().focusOutEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.isAutoRepeat():
@@ -723,18 +806,34 @@ class HotkeyCaptureEdit(QKeySequenceEdit):
                 | Qt.KeyboardModifier.MetaModifier
             )
         ):
-            self.setKeySequence(_hotkey_spec_to_sequence(self._default))
+            self.setText(self._default)
             event.accept()
             return
-        super().keyPressEvent(event)
+        spec = _key_event_to_hotkey_spec(event)
+        if spec is None:
+            event.accept()
+            return
+        if not _is_valid_hotkey_spec(spec):
+            event.accept()
+            return
+        self.setText(_normalize_hotkey_spec(spec))
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if self._listening or self.hasFocus():
+            mspec = _mouse_button_to_spec(event.button())
+            if mspec:
+                self.setText(mspec)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
 
     def current_spec(self) -> str:
-        spec = _sequence_to_hotkey_spec(self.keySequence())
-        if not spec:
+        raw = _normalize_hotkey_spec(self.text())
+        if not raw or not _is_valid_hotkey_spec(raw):
             return self._default
-        if _parse_hotkey(spec, allow_repeat=True) is None and _parse_hotkey(spec) is None:
-            return self._default
-        return spec
+        return raw
 
 
 class PulseVisual(QWidget):
@@ -827,9 +926,30 @@ class OverlaySettingsDialog(QDialog):
         self.volume_spin.setValue(max(0, min(100, int(prefs.get("volume", 10)))))
         self.volume_spin.setToolTip("Стартовая громкость плеера (каталог и fullscreen)")
         top.addRow("Громкость по умолчанию", self.volume_spin)
+
+        self.auto_density = QCheckBox("Авто-плотность (полный экран + play → idle → сквозь)")
+        self.auto_density.setChecked(bool(prefs.get("auto_density", False)))
+        self.auto_density.setToolTip(
+            "Через N сек без мыши по кадру: сам включает сквозь и ставит плотность %"
+        )
+        top.addRow(self.auto_density)
+        self.auto_density_pct = QSpinBox()
+        self.auto_density_pct.setRange(_OPACITY_MIN, _OPACITY_MAX)
+        self.auto_density_pct.setSuffix(" %")
+        self.auto_density_pct.setValue(
+            max(_OPACITY_MIN, min(_OPACITY_MAX, int(prefs.get("auto_density_pct", 45))))
+        )
+        top.addRow("Авто: целевая плотность", self.auto_density_pct)
+        self.auto_density_idle = QSpinBox()
+        self.auto_density_idle.setRange(1, 120)
+        self.auto_density_idle.setSuffix(" с")
+        self.auto_density_idle.setValue(max(1, min(120, int(prefs.get("auto_density_idle_sec", 4)))))
+        top.addRow("Авто: пауза до сквозь", self.auto_density_idle)
         layout.addLayout(top)
 
-        hk_title = QLabel("Горячие клавиши — клик по полю, потом жми сочетание (скролл ↓)")
+        hk_title = QLabel(
+            "Горячие клавиши — клик по полю, потом жми сочетание или Mouse4/5 (скролл ↓)"
+        )
         hk_title.setStyleSheet("color:#94a3b8;font-size:12px;")
         layout.addWidget(hk_title)
 
@@ -872,8 +992,8 @@ class OverlaySettingsDialog(QDialog):
         layout.addWidget(scroll, stretch=1)
 
         hint = QLabel(
-            "Пока это окно открыто — глобальные хоткеи Фон выключены, чтобы можно было записать комбо.\n"
-            "Backspace в поле — сброс на дефолт."
+            "Пока окно открыто — глобальные хоткеи Фон выкл (можно записать комбо).\n"
+            "Backspace — сброс. Боковые кнопки мыши: клик в поле → Mouse4/Mouse5."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#94a3b8;font-size:11px;")
@@ -892,6 +1012,9 @@ class OverlaySettingsDialog(QDialog):
             "catalog_preview": self.catalog_preview.isChecked(),
             "preview_sound": self.preview_sound.isChecked(),
             "volume": int(self.volume_spin.value()),
+            "auto_density": self.auto_density.isChecked(),
+            "auto_density_pct": int(self.auto_density_pct.value()),
+            "auto_density_idle_sec": int(self.auto_density_idle.value()),
             "hotkeys": hotkeys,
         }
 
@@ -940,6 +1063,10 @@ class OverlayPlayerWindow(QWidget):
         self._video_click_timer.setSingleShot(True)
         self._video_click_timer.timeout.connect(self._on_video_single_click)
         self._suppress_video_click = False  # Release сразу после DblClick
+        self._auto_density_timer = QTimer(self)
+        self._auto_density_timer.setSingleShot(True)
+        self._auto_density_timer.timeout.connect(self._on_auto_density_fire)
+        self._auto_density_armed = False  # сквозь включили мы сами
         self._hk_retry_pending = False
         self._hotkeys_registered: set[int] = set()
         self._base_exstyle: int | None = None
@@ -1021,6 +1148,9 @@ class OverlayPlayerWindow(QWidget):
         self.video.installEventFilter(self)
         self.pulse.installEventFilter(self)
         self.media_stack.installEventFilter(self)
+        self.video.setMouseTracking(True)
+        self.pulse.setMouseTracking(True)
+        self.media_stack.setMouseTracking(True)
 
         # Превью: одна карточка — видео сверху, transport вплотную снизу (0 gap).
         # Не оверлей на QVideoWidget: нативный HWND часто «отрывает» слой.
@@ -1369,7 +1499,6 @@ class OverlayPlayerWindow(QWidget):
             if fw is not None:
                 from PySide6.QtWidgets import (
                     QComboBox,
-                    QKeySequenceEdit,
                     QLineEdit,
                     QPlainTextEdit,
                     QSpinBox,
@@ -1378,7 +1507,7 @@ class OverlayPlayerWindow(QWidget):
 
                 if isinstance(
                     fw,
-                    (QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox, QKeySequenceEdit),
+                    (QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox),
                 ):
                     return super().eventFilter(watched, event)
                 if not (fw is self or self.isAncestorOf(fw) or self.isActiveWindow()):
@@ -1410,7 +1539,22 @@ class OverlayPlayerWindow(QWidget):
             if _qt_match(hk.get("back_esc", "Esc"), event):
                 self._on_escape()
                 return True
+        # Боковые кнопки мыши (Mouse4/5) — только когда Фон активен и не сквозь
+        if (
+            et == QEvent.Type.MouseButtonPress
+            and not self._click_through
+            and self.isVisible()
+            and self.isActiveWindow()
+        ):
+            try:
+                btn = event.button()
+            except Exception:
+                btn = None
+            if btn is not None and self._dispatch_mouse_hotkey(btn):
+                return True
         if watched in (self.video, self.pulse, self.media_stack) and not self._click_through:
+            if et == QEvent.Type.MouseMove and self._stage_mode and self._playing:
+                self._bump_auto_density_idle()
             try:
                 btn = event.button()
             except Exception:
@@ -1435,8 +1579,100 @@ class OverlayPlayerWindow(QWidget):
                     # Ждём doubleClickInterval: один клик = play/pause (каталог и stage)
                     interval = QApplication.doubleClickInterval()
                     self._video_click_timer.start(max(200, int(interval)))
+                    self._bump_auto_density_idle()
                     return True
         return super().eventFilter(watched, event)
+
+    def _dispatch_mouse_hotkey(self, button) -> bool:
+        """Mouse3/4/5 из prefs → то же, что глобальные хоткеи (пока Фон в фокусе)."""
+        want = _mouse_button_to_spec(button)
+        if not want:
+            return False
+        hk = self._prefs.get("hotkeys") or _DEFAULT_HOTKEYS
+        want_l = want.lower()
+        action = None
+        for key, spec in hk.items():
+            if _normalize_hotkey_spec(str(spec)).lower() == want_l:
+                action = key
+                break
+        if action is None:
+            return False
+        if action == "play_pause" or action == "stop_track":
+            self._toggle_play()
+        elif action == "next_track":
+            self._play_next()
+        elif action == "prev_track":
+            self._play_prev()
+        elif action == "seek_back":
+            self._seek_by(-_SEEK_MS)
+        elif action == "seek_fwd":
+            self._seek_by(_SEEK_MS)
+        elif action == "vol_up":
+            self._nudge_volume(_VOLUME_STEP)
+        elif action == "vol_down":
+            self._nudge_volume(-_VOLUME_STEP)
+        elif action == "opacity_up":
+            self._nudge_opacity(_OPACITY_STEP)
+        elif action == "opacity_down":
+            self._nudge_opacity(-_OPACITY_STEP)
+        elif action == "click_through":
+            if self._stage_mode:
+                self._toggle_click_through()
+        elif action == "hide_show":
+            self._toggle_hide_or_show()
+        elif action == "back_esc":
+            self._on_escape()
+        else:
+            return False
+        return True
+
+    def _bump_auto_density_idle(self) -> None:
+        """Сброс idle-таймера авто-плотности (движение/клик по кадру)."""
+        if self._click_through or not self._prefs.get("auto_density"):
+            return
+        if self._stage_mode and self._playing:
+            self._arm_auto_density_timer()
+
+    def _arm_auto_density_timer(self) -> None:
+        self._auto_density_timer.stop()
+        if not self._prefs.get("auto_density"):
+            return
+        if not self._stage_mode or not self._playing or self._click_through:
+            return
+        sec = max(1, min(120, int(self._prefs.get("auto_density_idle_sec", 4))))
+        self._auto_density_timer.start(sec * 1000)
+
+    def _stop_auto_density_timer(self, *, exit_ct_if_armed: bool = False) -> None:
+        self._auto_density_timer.stop()
+        if exit_ct_if_armed and self._auto_density_armed and self._click_through:
+            self._auto_density_armed = False
+            self._set_click_through(False)
+        else:
+            if not self._click_through:
+                self._auto_density_armed = False
+
+    def _on_auto_density_fire(self) -> None:
+        """Idle истёк → сквозь + целевая плотность (не пишем prefs на диск)."""
+        if not self._prefs.get("auto_density"):
+            return
+        if not self._stage_mode or not self._playing or self._click_through:
+            return
+        pct = max(
+            _OPACITY_MIN,
+            min(_OPACITY_MAX, int(self._prefs.get("auto_density_pct", 45))),
+        )
+        self._auto_density_armed = True
+        self._set_click_through(True)
+        # После CT: выставить % (CT сам мог ужать >55→40)
+        self.opacity_slider.blockSignals(True)
+        self.opacity_slider.setValue(pct)
+        self.opacity_slider.blockSignals(False)
+        if hasattr(self, "opacity_value"):
+            self.opacity_value.setText(f"{pct}%")
+        self._apply_stage_opacity()
+        self.status.setText(
+            f"Авто-плотность {pct}% · сквозь · Ctrl+O / Esc — вернуть управление"
+        )
 
     def _on_video_single_click(self) -> None:
         """Один клик по кадру (после таймера) — play/pause."""
@@ -1485,6 +1721,8 @@ class OverlayPlayerWindow(QWidget):
         self.status.setText(f"▶ {_clean_media_title(path.stem)}{path.suffix.lower()}")
         self._refresh_playing_highlight()
         QTimer.singleShot(1000, self._clear_opacity_hold)
+        if self._stage_mode and self._playing:
+            self._arm_auto_density_timer()
         key = str(path)
         for i in range(self.list.count()):
             item = self.list.item(i)
@@ -1574,9 +1812,11 @@ class OverlayPlayerWindow(QWidget):
             self.status.setText(
                 "Полное окно · плотность снизу · Ctrl+O — сквозь · Ctrl+Shift+O — скрыть"
             )
+        self._arm_auto_density_timer()
 
     def _enter_catalog(self) -> None:
         """Вернуть каталог; воспроизведение не стопаем."""
+        self._stop_auto_density_timer(exit_ct_if_armed=True)
         if not self._stage_mode:
             self._apply_catalog_opacity()
             return
@@ -1705,11 +1945,13 @@ class OverlayPlayerWindow(QWidget):
             if not was:
                 # Подцепить VK_MEDIA_* пока играет
                 QTimer.singleShot(0, self._register_hotkeys)
+            self._arm_auto_density_timer()
         else:
             self._set_play_icon(False)
             if state == QMediaPlayer.PlaybackState.StoppedState:
                 self.pulse.stop()
                 self._playing = False
+                self._stop_auto_density_timer(exit_ct_if_armed=True)
                 # Смена трека: Stopped → Playing. Не вспыхивать 100%.
                 if self._hold_stage_opacity and self._stage_mode:
                     self._apply_stage_opacity()
@@ -1719,6 +1961,7 @@ class OverlayPlayerWindow(QWidget):
                     QTimer.singleShot(0, self._register_hotkeys)
             elif state == QMediaPlayer.PlaybackState.PausedState:
                 self._playing = True
+                self._stop_auto_density_timer(exit_ct_if_armed=False)
                 if not self._stage_mode:
                     self._apply_catalog_opacity()
                 self._set_play_icon(False)
@@ -1940,6 +2183,9 @@ class OverlayPlayerWindow(QWidget):
         if sys.platform != "win32":
             self.status.setText("Click-through только на Windows")
             return
+        if not enabled:
+            self._auto_density_armed = False
+            self._auto_density_timer.stop()
         self._click_through = bool(enabled)
         self._apply_exstyle()
         self._update_ct_label()
@@ -1952,6 +2198,7 @@ class OverlayPlayerWindow(QWidget):
                 st = int(get_long(hwnd, GWL_EXSTYLE))
                 if not (st & WS_EX_TRANSPARENT):
                     self._click_through = False
+                    self._auto_density_armed = False
                     self._apply_exstyle()
                     self._update_ct_label()
                     self._update_chrome_visibility()
@@ -1961,16 +2208,18 @@ class OverlayPlayerWindow(QWidget):
             except Exception:
                 pass
             if self._stage_mode:
-                if self.opacity_slider.value() > 55:
+                # Ручной сквозь: если плотность высокая — ужать; авто уже выставил %
+                if not self._auto_density_armed and self.opacity_slider.value() > 55:
                     self.opacity_slider.blockSignals(True)
                     self.opacity_slider.setValue(40)
                     self.opacity_slider.blockSignals(False)
                     if hasattr(self, "opacity_value"):
                         self.opacity_value.setText("40%")
                 self._apply_stage_opacity()
-                self.status.setText(
-                    "Сквозь · UI скрыт · Ctrl+O — вернуть · Ctrl+[ / ] плотность · Ctrl+Shift+O — скрыть"
-                )
+                if not self._auto_density_armed:
+                    self.status.setText(
+                        "Сквозь · UI скрыт · Ctrl+O — вернуть · Ctrl+[ / ] плотность · Ctrl+Shift+O — скрыть"
+                    )
                 self._register_hotkeys()
             self._sync_topmost_state()
             QTimer.singleShot(50, self._reapply_ct_children)
@@ -1980,6 +2229,7 @@ class OverlayPlayerWindow(QWidget):
                 self._apply_stage_opacity()
                 self.status.setText("Сквозь выкл · плотность после Ctrl+O · Ctrl+Shift+O — скрыть")
                 self._register_hotkeys()
+                self._arm_auto_density_timer()
             else:
                 self._apply_catalog_opacity()
                 self.status.setText("Сквозь выкл")
