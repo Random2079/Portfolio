@@ -771,33 +771,36 @@ class HotkeyCaptureEdit(QLineEdit):
             "}"
         )
         self.setToolTip(
-            "Кликни поле → жми сочетание (Ctrl+Shift+1) или боковую кнопку мыши (Mouse4/5).\n"
-            "Backspace — сброс на дефолт. Боковые работают, когда Фон в фокусе (не в «сквозь»)."
+            "Кликни поле → жми сочетание (Ctrl+Shift+1) или боковую кнопку мыши (Mouse4/5),\n"
+            "курсор над полем. Esc / клик мимо — выйти из редактирования. Backspace — дефолт."
         )
-        self._listening = False
+
+    def _finish_capture(self) -> None:
+        """Отпустить фокус — иначе «залипает» в поле."""
+        self.clearFocus()
 
     def focusInEvent(self, event) -> None:  # noqa: N802
         super().focusInEvent(event)
-        self._listening = True
         self.selectAll()
-        try:
-            self.grabMouse()
-        except Exception:
-            pass
-
-    def focusOutEvent(self, event) -> None:  # noqa: N802
-        self._listening = False
-        try:
-            self.releaseMouse()
-        except Exception:
-            pass
-        super().focusOutEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.isAutoRepeat():
             event.accept()
             return
         key = event.key()
+        # Esc — просто выйти из поля, не меняя значение
+        if key == Qt.Key.Key_Escape and not (
+            event.modifiers()
+            & (
+                Qt.KeyboardModifier.ControlModifier
+                | Qt.KeyboardModifier.AltModifier
+                | Qt.KeyboardModifier.MetaModifier
+                | Qt.KeyboardModifier.ShiftModifier
+            )
+        ):
+            self._finish_capture()
+            event.accept()
+            return
         if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete) and not (
             event.modifiers()
             & (
@@ -807,25 +810,33 @@ class HotkeyCaptureEdit(QLineEdit):
             )
         ):
             self.setText(self._default)
+            self._finish_capture()
+            event.accept()
+            return
+        # Enter/Return — принять текущее и выйти
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._finish_capture()
             event.accept()
             return
         spec = _key_event_to_hotkey_spec(event)
         if spec is None:
             event.accept()
             return
+        # Один Esc как хоткей (поле back_esc) — пишем и выходим
         if not _is_valid_hotkey_spec(spec):
             event.accept()
             return
         self.setText(_normalize_hotkey_spec(spec))
+        self._finish_capture()
         event.accept()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
-        if self._listening or self.hasFocus():
-            mspec = _mouse_button_to_spec(event.button())
-            if mspec:
-                self.setText(mspec)
-                event.accept()
-                return
+        mspec = _mouse_button_to_spec(event.button())
+        if mspec and self.hasFocus():
+            self.setText(mspec)
+            self._finish_capture()
+            event.accept()
+            return
         super().mousePressEvent(event)
         self.setFocus(Qt.FocusReason.MouseFocusReason)
 
