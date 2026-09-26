@@ -2232,8 +2232,13 @@ class OverlayPlayerWindow(QWidget):
             # слайдер = желаемая громкость; mute превью учитывается отдельно
             silent_preview = (
                 not self._stage_mode
-                and not self._prefs.get("preview_sound", True)
-                and not self._force_catalog_sound
+                and (
+                    self._pause_after_open
+                    or (
+                        not self._prefs.get("preview_sound", True)
+                        and not self._force_catalog_sound
+                    )
+                )
             )
             if silent_preview:
                 self._audio.setVolume(0.0)
