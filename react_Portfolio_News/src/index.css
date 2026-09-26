@@ -1,0 +1,49 @@
+:root {
+  --bg0: #0c1118;
+  --bg1: #121a24;
+  --bg2: #1a2533;
+  --line: rgba(232, 220, 196, 0.12);
+  --ink: #f2ebe0;
+  --muted: #9aa8b8;
+  --accent: #3dba9a;
+  --accent-dim: rgba(61, 186, 154, 0.16);
+  --warn: #e8a45a;
+  --down: #e07a6a;
+  --up: #3dba9a;
+  --radius: 14px;
+  --font: "Manrope", system-ui, sans-serif;
+  --display: "Fraunces", Georgia, serif;
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 12% -10%, rgba(61, 186, 154, 0.14), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, rgba(232, 164, 90, 0.1), transparent 50%),
+    linear-gradient(165deg, var(--bg0), var(--bg1) 45%, #0a1016);
+  background-attachment: fixed;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: var(--accent);
+}
