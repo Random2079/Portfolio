@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { API_BASE, getJson } from "./api";
 import "./App.css";
 
 function fmtRub(n) {
@@ -28,12 +29,6 @@ function pnlClass(n) {
   if (Number(n) > 0) return "up";
   if (Number(n) < 0) return "down";
   return "";
-}
-
-async function getJson(path) {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`${res.status} ${path}`);
-  return res.json();
 }
 
 export default function App() {
@@ -80,7 +75,10 @@ export default function App() {
           <p className="eyebrow">IDEA-003 · React R0</p>
           <h1 className="brand">Portfolio News</h1>
           <p className="tagline">
-            Утренний терминал · референс ваниль · API на :8765
+            Утренний терминал · API{" "}
+            <a href={API_BASE} target="_blank" rel="noreferrer">
+              {API_BASE}
+            </a>
           </p>
         </div>
         <div className="top-actions">
@@ -99,8 +97,8 @@ export default function App() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         >
-          Нет связи с ванильным serve. Запусти в{" "}
-          <code>Portfolio_News</code>:{" "}
+          Нет связи с API. В{" "}
+          <code>Portfolio_News</code> запусти:{" "}
           <code>python -m portfolio_news serve</code>
           <br />
           <span className="muted">{error}</span>
