@@ -67,7 +67,7 @@
 | H | ⬜ | Телефон (ntfy…) |
 | J | ⬜ | Docker — только по просьбе |
 | KV | ⏸ | Визуал ванили → трек React (`react_Portfolio_News`, §7R) |
-| **R0…** | ✅ R0 · дальше R1 |
+| **R0…** | ✅ R0 · дальше R1 | React UI в `react_Portfolio_News/` |
 
 ### Терминал БКС
 
