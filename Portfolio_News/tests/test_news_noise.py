@@ -28,6 +28,27 @@ class NoiseTitleTests(unittest.TestCase):
         self.assertTrue(is_noise_title(""))
         self.assertTrue(is_noise_title("   "))
 
+    def test_forum_and_quote_pages(self):
+        self.assertTrue(
+            is_noise_title("Форум акции Яндекс (YDEX), страница 681 - Smart-Lab")
+        )
+        self.assertTrue(
+            is_noise_title(
+                "Акции Яндекс (YDEX) - курс на сегодня, цена и котировки онлайн - Финансы Mail"
+            )
+        )
+        self.assertTrue(
+            is_noise_title("Татнефть (TATN) капитализация МСФО - Smart-Lab")
+        )
+        self.assertTrue(
+            is_noise_title(
+                "Татнефть (TATN) свободный денежный поток, FCF МСФО (годовые значения)"
+            )
+        )
+        self.assertFalse(
+            is_noise_title("СД Т-Технологии 30 сентября определит цену размещения допэмиссии")
+        )
+
 
 class QueryExclusionsTests(unittest.TestCase):
     def test_equity_has_minus(self):

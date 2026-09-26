@@ -1517,6 +1517,7 @@ def chart_ticker(
     db: Session = Depends(get_db),
 ):
     """K3: MOEX close series + BCS trade markers for one ticker."""
+    from portfolio_news.bcs_client import load_holdings_last_good
     from portfolio_news.chart_cache import resolve_chart_candles
     from portfolio_news.ops_cache import list_cached_operations
 
@@ -1531,16 +1532,50 @@ def chart_ticker(
             if str(t.id).upper() == tid:
                 row = t
                 break
+
+    def _kind_from_holdings() -> str:
+        snap = load_holdings_last_good()
+        if not snap or not getattr(snap, "holdings", None):
+            return ""
+        for h in snap.holdings:
+            ht = (h.ticker or h.sec_code or "").strip().upper()
+            hisin = (h.isin or "").strip().upper()
+            if ht != tid and hisin != tid:
+                continue
+            ac = (h.asset_class or "").strip().lower()
+            if ac == "fund":
+                return "fund"
+            if ac == "bond":
+                return "bond"
+            if ac == "stock":
+                return "equity"
+        return ""
+
+    holdings_kind = _kind_from_holdings()
     if resolved_kind not in ("equity", "bond", "fund"):
-        resolved_kind = (row.kind if row else "equity") or "equity"
-        if resolved_kind not in ("equity", "bond", "fund"):
-            resolved_kind = "equity"
+        if holdings_kind:
+            resolved_kind = holdings_kind
+        else:
+            resolved_kind = (row.kind if row else "equity") or "equity"
+            if resolved_kind not in ("equity", "bond", "fund"):
+                resolved_kind = "equity"
+    elif resolved_kind == "equity" and holdings_kind in ("fund", "bond"):
+        # tickers.json often stamps funds as equity — prefer BCS class
+        resolved_kind = holdings_kind
     # ISIN-as-ticker (RU000A…) — bond even if tickers DB empty / kind hint lost
     if resolved_kind != "bond" and tid.startswith("RU000"):
         resolved_kind = "bond"
     isin = ((row.isin if row else "") or "").strip()
     if not isin and tid.startswith("RU000"):
         isin = tid
+    if not isin and holdings_kind:
+        snap = load_holdings_last_good()
+        if snap:
+            for h in snap.holdings:
+                ht = (h.ticker or h.sec_code or "").strip().upper()
+                if ht == tid and (h.isin or "").strip():
+                    isin = (h.isin or "").strip()
+                    break
 
     from_date = ""
     if int(days) > 0:

@@ -67,6 +67,24 @@ class ComputeAttributionTests(unittest.TestCase):
         self.assertEqual(attr.missing, 1)
         self.assertAlmostEqual(attr.day_rub or 0, 10.0)
 
+    def test_intentional_bond_skip_not_missing(self):
+        holdings = [
+            Holding(ticker="SBER", quantity=1, market_value=100, market_price=100),
+            Holding(
+                ticker="RU000A107RZ0",
+                quantity=1,
+                market_value=1000,
+                market_price=1000,
+                asset_class="bond",
+            ),
+        ]
+        quotes = {"SBER": DayQuote(ticker="SBER", last=100, prevprice=90, changepct=11.11)}
+        attr = compute_day_attribution(
+            holdings, quotes, top_n=5, intentional_skip={"RU000A107RZ0"}
+        )
+        self.assertEqual(attr.missing, 0)
+        self.assertAlmostEqual(attr.day_rub or 0, 10.0)
+
     def test_cash_helper(self):
         self.assertTrue(is_cash_holding(Holding(ticker="USD")))
         self.assertFalse(is_cash_holding(Holding(ticker="SBER")))

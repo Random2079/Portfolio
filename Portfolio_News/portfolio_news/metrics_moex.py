@@ -411,18 +411,33 @@ def fetch_metrics_for(
     *,
     limit: int = 0,
 ) -> list[MetricRow]:
-    """items: (id, kind, name) or (id, kind, name, isin)."""
-    out: list[MetricRow] = []
-    for i, item in enumerate(items):
-        if limit and i >= limit:
-            break
-        if len(item) >= 4:
-            tid, kind, name, isin = item[0], item[1], item[2], item[3]
+    """items: (id, kind, name) or (id, kind, name, isin). Parallel ISS fan-out."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    sliced = list(items)
+    if limit and limit > 0:
+        sliced = sliced[:limit]
+    if not sliced:
+        return []
+
+    def _one(item: tuple) -> tuple[int, MetricRow]:
+        idx, row = item
+        if len(row) >= 4:
+            tid, kind, name, isin = row[0], row[1], row[2], row[3]
         else:
-            tid, kind, name = item[0], item[1], item[2]
+            tid, kind, name = row[0], row[1], row[2]
             isin = ""
-        out.append(fetch_metric(tid, kind, name, isin=isin))
-    return out
+        return idx, fetch_metric(tid, kind, name, isin=isin)
+
+    indexed = list(enumerate(sliced))
+    out: list[Optional[MetricRow]] = [None] * len(sliced)
+    workers = max(1, min(8, len(sliced)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_one, it) for it in indexed]
+        for fut in as_completed(futs):
+            idx, row = fut.result()
+            out[idx] = row
+    return [r for r in out if r is not None]
 
 
 def parse_dividend_rows(
@@ -760,8 +775,8 @@ def fetch_candles(
         return [], "", "", str(exc)
 
 
-# Default ticker fan-out when client sends limit=0 (matches UI "whole portfolio" cap)
-MOEX_DEFAULT_TICKER_LIMIT = 15
+# Default ticker fan-out when client sends limit=0 (keeps /api/metrics snappy)
+MOEX_DEFAULT_TICKER_LIMIT = 8
 
 
 def effective_moex_limit(*, ticker_id: Optional[str], limit: int) -> int:

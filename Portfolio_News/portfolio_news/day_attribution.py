@@ -126,8 +126,14 @@ def compute_day_attribution(
     quotes: dict[str, DayQuote] | dict[str, _HasQuote],
     *,
     top_n: int = _TOP_N,
+    intentional_skip: Optional[set[str]] = None,
 ) -> DayAttribution:
-    """Pure attribution from BCS holdings + day quotes (no I/O)."""
+    """Pure attribution from BCS holdings + day quotes (no I/O).
+
+    ``intentional_skip`` — tickers we never asked MOEX for (bonds, etc.);
+    they do not inflate ``missing``.
+    """
+    skip = {t.strip().upper() for t in (intentional_skip or set()) if t}
     papers = [h for h in holdings if not is_cash_holding(h)]
     total = 0.0
     total_ok = False
@@ -144,13 +150,15 @@ def compute_day_attribution(
 
     for h in papers:
         tid = (h.ticker or h.sec_code or "").strip().upper()
+        alt = (h.sec_code or "").strip().upper()
         if not tid:
             missing += 1
+            continue
+        if tid in skip or (alt and alt in skip):
             continue
         q = quotes.get(tid)
         if q is None:
             # try sec_code alias
-            alt = (h.sec_code or "").strip().upper()
             q = quotes.get(alt) if alt else None
         if q is None:
             missing += 1
@@ -271,7 +279,9 @@ def fetch_quotes_for_holdings(
 ) -> dict[str, DayQuote]:
     """MOEX day quotes for paper holdings (parallel, no live BCS).
 
-    Skips cash + bonds (slow / empty day fields) — they still count as missing.
+    Skips cash + bonds (slow / empty day fields). Callers should pass the
+    same skip set into ``compute_day_attribution(..., intentional_skip=…)``
+    so bonds do not inflate ``missing``.
     """
     kinds = kind_by_ticker or {}
     papers = [h for h in holdings if not is_cash_holding(h)]
@@ -310,6 +320,27 @@ def fetch_quotes_for_holdings(
     return out
 
 
+def intentional_day_skips(
+    holdings: list[Holding],
+    kind_by_ticker: Optional[dict[str, str]] = None,
+) -> set[str]:
+    """Tickers skipped for MOEX day quotes (bonds / cash handled elsewhere)."""
+    kinds = kind_by_ticker or {}
+    out: set[str] = set()
+    for h in holdings:
+        if is_cash_holding(h):
+            continue
+        if not _skip_day_moex_fetch(h, kinds):
+            continue
+        tid = (h.ticker or h.sec_code or "").strip().upper()
+        if tid:
+            out.add(tid)
+        alt = (h.sec_code or "").strip().upper()
+        if alt:
+            out.add(alt)
+    return out
+
+
 def _compute_and_store(
     holdings: list[Holding],
     *,
@@ -318,16 +349,27 @@ def _compute_and_store(
 ) -> DayAttribution:
     global _cache, _cache_at
     papers = [h for h in holdings if not is_cash_holding(h)]
+    skip = intentional_day_skips(holdings, kind_by_ticker)
+    expected = [
+        h
+        for h in papers
+        if (h.ticker or h.sec_code or "").strip().upper() not in skip
+    ]
     quotes = fetch_quotes_for_holdings(holdings, kind_by_ticker=kind_by_ticker)
-    attr = compute_day_attribution(holdings, quotes, top_n=top_n)
+    attr = compute_day_attribution(
+        holdings, quotes, top_n=top_n, intentional_skip=skip
+    )
     if attr.day_rub is None and not attr.error:
         if not papers:
             attr.error = "Нет бумаг в holdings (только валюта / пусто)"
             attr.ok = False
+        elif not expected:
+            attr.error = "Нет акций/фондов для дневного Δ (только облигации?)"
+            attr.ok = False
         elif not quotes:
             attr.error = "Нет котировок MOEX для позиций"
             attr.ok = False
-        elif attr.missing >= len(papers):
+        elif attr.missing >= len(expected):
             attr.error = "Нет дневных цен MOEX по позициям"
             attr.ok = False
         else:

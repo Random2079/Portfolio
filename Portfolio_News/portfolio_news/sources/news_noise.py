@@ -1,4 +1,4 @@
-"""Drop sports/betting/esports junk from ticker news feeds."""
+"""Drop sports/betting/esports junk and non-news quote pages from feeds."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ import re
 # Appended to Google News equity search (minus-operators). Bonds: lighter set.
 _GOOGLE_MINUS_EQUITY = (
     "-ставки -ставка -кэф -коэффициент -букмекер -киберспорт "
-    "-dota -cs2 -esports -прогноз"
+    "-dota -cs2 -esports -прогноз "
+    "-форум -котировки -\"курс на сегодня\""
 )
 
 # Title denylist: if any pattern matches → drop (case-insensitive).
@@ -30,6 +31,16 @@ _TITLE_NOISE = re.compile(
       | live[\s-]*ставк
       | прогноз\s*\(\s*кэф
       | \bб\.?\s*к\.?\b.{0,40}ставк
+      # Smart-Lab forum threads / quote terminals / fundamental dump pages
+      | форум\s+акци
+      | страница\s+\d+
+      | курс\s+на\s+сегодня
+      | цена\s+и\s+котировки
+      | котировки\s+онлайн
+      | капитализация\s+мсфо
+      | свободный\s+денежный\s+поток
+      | \bfcf\s+мсфо\b
+      | цена\s+акции\s+ап\s+мсфо
     )
     """,
     re.IGNORECASE | re.VERBOSE,

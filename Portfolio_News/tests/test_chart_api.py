@@ -75,8 +75,8 @@ class ChartApiTests(unittest.TestCase):
             ],
         )
         fake = [
-            CandlePoint(begin="2026-01-15 00:00:00", close=251.0),
-            CandlePoint(begin="2026-01-20 00:00:00", close=259.0),
+            CandlePoint(begin="2026-08-15 00:00:00", close=251.0),
+            CandlePoint(begin="2026-09-20 00:00:00", close=259.0),
         ]
         with patch(
             "portfolio_news.ops_history.journal_rows",
@@ -119,7 +119,7 @@ class ChartApiTests(unittest.TestCase):
             )
         )
         self.session.commit()
-        fake = [CandlePoint(begin="2026-01-15 00:00:00", close=10.0)]
+        fake = [CandlePoint(begin="2026-08-15 00:00:00", close=10.0)]
         with patch(
             "portfolio_news.chart_cache.fetch_candles",
             return_value=(fake, "BCSR", "TQBR", ""),
@@ -131,11 +131,48 @@ class ChartApiTests(unittest.TestCase):
         self.assertEqual(fc.call_args.kwargs.get("isin"), "RU000A10A0N6")
         self.assertEqual(fc.call_args.args[1], "fund")
 
+    def test_chart_fund_kind_from_holdings_over_equity_db(self):
+        """tickers row may say equity; BCS asset_class=fund wins."""
+        from portfolio_news.bcs_client import Holding, HoldingsSnapshot
+        from portfolio_news.db import Ticker
+
+        self.session.add(
+            Ticker(id="BCSR", name="Индекс Мосбиржи", isin="", kind="equity")
+        )
+        self.session.commit()
+        snap = HoldingsSnapshot(
+            configured=True,
+            ok=True,
+            holdings=[
+                Holding(
+                    ticker="BCSR",
+                    name="БПИФ",
+                    isin="RU000A10A0N6",
+                    asset_class="fund",
+                    quantity=1,
+                    market_value=100,
+                )
+            ],
+        )
+        fake = [CandlePoint(begin="2026-08-15 00:00:00", close=10.0)]
+        with patch(
+            "portfolio_news.bcs_client.load_holdings_last_good",
+            return_value=snap,
+        ), patch(
+            "portfolio_news.chart_cache.fetch_candles",
+            return_value=(fake, "BCSR", "TQBR", ""),
+        ) as fc:
+            r = self.client.get("/api/chart/BCSR?days=90")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["kind"], "fund")
+        self.assertEqual(fc.call_args.args[1], "fund")
+        self.assertEqual(fc.call_args.kwargs.get("isin"), "RU000A10A0N6")
+
     def test_chart_bond_candles_scaled_to_rub(self):
         """MOEX % of par → ₽/шт so LWC scale matches avg/markers."""
         fake = [
             CandlePoint(
-                begin="2026-01-15 00:00:00",
+                begin="2026-08-15 00:00:00",
                 open=87.0,
                 high=89.0,
                 low=86.5,

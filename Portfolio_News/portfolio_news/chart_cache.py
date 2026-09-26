@@ -108,6 +108,7 @@ def save_chart_cache(
     board: str = "",
     kind: str = "equity",
     interval: int = 24,
+    complete: bool = True,
 ) -> None:
     tid = (ticker or "").strip().upper()
     if not tid or not candles:
@@ -121,6 +122,8 @@ def save_chart_cache(
         "candles": [candle_to_dict(p) for p in candles],
         "n_candles": len(candles),
         "last_day": _day_key(candles[-1].begin) if candles else "",
+        # True = fetched without from_date lookback (safe as full-history base)
+        "complete": bool(complete),
     }
     row = session.get(ChartCandleCache, tid)
     if row is None:
@@ -154,6 +157,65 @@ def cache_is_fresh(updated_at: float, last_day: str) -> bool:
     return False
 
 
+def slice_candles_since(
+    points: list[CandlePoint], from_date: str
+) -> list[CandlePoint]:
+    """Keep candles on/after YYYY-MM-DD. Empty from_date → all points."""
+    fd = (from_date or "").strip()[:10]
+    if not fd:
+        return list(points)
+    return [p for p in points if _day_key(p.begin) >= fd]
+
+
+def cache_covers_from(
+    points: list[CandlePoint],
+    from_date: str,
+    *,
+    complete: Optional[bool] = None,
+) -> bool:
+    """True if cache can answer this lookback without a full refetch."""
+    fd = (from_date or "").strip()[:10]
+    if not points:
+        return False
+    if not fd:
+        # days=0: need a complete (non-truncated) series
+        if complete is False:
+            return False
+        if complete is True:
+            return True
+        # Legacy rows without flag: short recent span ⇒ likely truncated
+        first = _day_key(points[0].begin)
+        try:
+            d0 = datetime.strptime(first, "%Y-%m-%d").date()
+            age = (datetime.now(_TZ).date() - d0).days
+            if age < 180 and len(points) < 120:
+                return False
+        except ValueError:
+            return False
+        return True
+    first = _day_key(points[0].begin)
+    return bool(first) and first <= fd
+
+
+def _return_sliced(
+    points: list[CandlePoint],
+    secid: str,
+    board: str,
+    err: str,
+    from_cache: bool,
+    stale: bool,
+    from_date: str,
+) -> tuple[list[CandlePoint], str, str, str, bool, bool]:
+    return (
+        slice_candles_since(points, from_date),
+        secid,
+        board,
+        err,
+        from_cache,
+        stale,
+    )
+
+
 def resolve_chart_candles(
     session: Session,
     ticker: str,
@@ -164,7 +226,12 @@ def resolve_chart_candles(
     interval: int = 24,
     force: bool = False,
 ) -> tuple[list[CandlePoint], str, str, str, bool, bool]:
-    """Returns (points, secid, board, error, from_cache, stale)."""
+    """Returns (points, secid, board, error, from_cache, stale).
+
+    Cache always stores the longest known series (merge, never shrink).
+    ``days`` only slices the response; short lookbacks must not overwrite
+    a full-history cache.
+    """
     from datetime import date, timedelta
 
     tid = (ticker or "").strip().upper()
@@ -172,23 +239,35 @@ def resolve_chart_candles(
     from_date = ""
     if int(days) > 0:
         from_date = (date.today() - timedelta(days=int(days))).isoformat()
-    candle_limit = 0 if int(days) == 0 else min(4000, max(int(days) + 50, 100))
-    full_timeout = 45.0 if int(days) == 0 else 12.0
+    full_timeout = 45.0
 
     cached = load_chart_cache(session, tid)
     cached_pts = points_from_dicts((cached or {}).get("candles") or [])
     cached_secid = str((cached or {}).get("secid") or "")
     cached_board = str((cached or {}).get("board") or "")
+    cached_complete = (cached or {}).get("complete")
+    if cached_complete is not None:
+        cached_complete = bool(cached_complete)
     last_day = str((cached or {}).get("last_day") or "")
     if not last_day and cached_pts:
         last_day = _day_key(cached_pts[-1].begin)
     updated_at = float((cached or {}).get("_updated_at") or 0.0)
+    covers = cache_covers_from(
+        cached_pts, from_date, complete=cached_complete
+    )
 
-    if cached_pts and not force and cache_is_fresh(updated_at, last_day):
-        return cached_pts, cached_secid, cached_board, "", True, False
+    if (
+        cached_pts
+        and not force
+        and cache_is_fresh(updated_at, last_day)
+        and covers
+    ):
+        return _return_sliced(
+            cached_pts, cached_secid, cached_board, "", True, False, from_date
+        )
 
-    # Stale cache → incremental tail (cheap) instead of full history.
-    if cached_pts and not force and last_day:
+    # Stale (or needs tail) → incremental append; keep full merged series.
+    if cached_pts and not force and last_day and covers:
         new_pts, secid, board, err = fetch_candles(
             tid,
             resolved_kind,
@@ -209,45 +288,73 @@ def resolve_chart_candles(
                     board=board or cached_board,
                     kind=resolved_kind,
                     interval=int(interval) or 24,
+                    complete=True if cached_complete is None else bool(cached_complete),
                 )
             except Exception:  # noqa: BLE001
                 log.warning("chart cache save failed for %s", tid, exc_info=True)
-            return merged, secid or cached_secid, board or cached_board, "", False, False
-        # MOEX down → stale cache better than empty
+            return _return_sliced(
+                merged,
+                secid or cached_secid,
+                board or cached_board,
+                "",
+                False,
+                False,
+                from_date,
+            )
         if cached_pts:
-            return (
+            return _return_sliced(
                 cached_pts,
                 cached_secid,
                 cached_board,
                 err or "",
                 True,
                 True,
+                from_date,
             )
 
+    # Cold / force / truncated cache: fetch full history, merge into any remnant.
     points, secid, board, err = fetch_candles(
         tid,
         resolved_kind,
         interval=int(interval) or 24,
-        from_date=from_date,
-        limit=candle_limit,
+        from_date="",
+        limit=0,
         isin=isin,
         timeout=full_timeout,
     )
     if points:
+        merged = merge_candle_points(cached_pts, points) if cached_pts else points
         try:
             save_chart_cache(
                 session,
                 ticker=tid,
-                candles=points,
-                secid=secid,
-                board=board,
+                candles=merged,
+                secid=secid or cached_secid,
+                board=board or cached_board,
                 kind=resolved_kind,
                 interval=int(interval) or 24,
+                complete=True,
             )
         except Exception:  # noqa: BLE001
             log.warning("chart cache save failed for %s", tid, exc_info=True)
-        return points, secid, board, err or "", False, False
+        return _return_sliced(
+            merged,
+            secid or cached_secid,
+            board or cached_board,
+            err or "",
+            False,
+            False,
+            from_date,
+        )
 
     if cached_pts:
-        return cached_pts, cached_secid, cached_board, err or "", True, True
+        return _return_sliced(
+            cached_pts,
+            cached_secid,
+            cached_board,
+            err or "",
+            True,
+            True,
+            from_date,
+        )
     return [], secid, board, err or "", False, False
