@@ -137,10 +137,21 @@ def compute_day_attribution(
     papers = [h for h in holdings if not is_cash_holding(h)]
     total = 0.0
     total_ok = False
+    # Value of papers that participate in day Δ (exclude intentional bond skips)
+    active_total = 0.0
+    active_ok = False
     for h in papers:
-        if h.market_value is not None:
-            total += float(h.market_value)
-            total_ok = True
+        if h.market_value is None:
+            continue
+        mv = float(h.market_value)
+        total += mv
+        total_ok = True
+        tid = (h.ticker or h.sec_code or "").strip().upper()
+        alt = (h.sec_code or "").strip().upper()
+        if tid in skip or (alt and alt in skip):
+            continue
+        active_total += mv
+        active_ok = True
 
     rows: list[DayContributor] = []
     day_sum = 0.0
@@ -199,10 +210,12 @@ def compute_day_attribution(
         )
 
     day_pct_port: Optional[float] = None
-    base = (total - day_sum) if (total_ok and day_ok) else None
+    # % of the moving sleeve (stocks/funds), not diluted by skipped bonds
+    pct_base_value = covered if covered > 0 else (active_total if active_ok else None)
+    base = (pct_base_value - day_sum) if (day_ok and pct_base_value is not None) else None
     if base is not None and abs(base) > 1e-9:
         day_pct_port = (day_sum / base) * 100.0
-    elif total_ok and day_ok and total > 0 and abs(day_sum) < 1e-9:
+    elif day_ok and pct_base_value is not None and pct_base_value > 0 and abs(day_sum) < 1e-9:
         day_pct_port = 0.0
 
     # Rank by absolute ₽ contribution; keep sign

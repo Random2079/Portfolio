@@ -280,6 +280,7 @@ def resolve_chart_candles(
         if new_pts:
             merged = merge_candle_points(cached_pts, new_pts)
             try:
+                # Never promote None/False → True on tail refresh; only full fetch may.
                 save_chart_cache(
                     session,
                     ticker=tid,
@@ -288,7 +289,7 @@ def resolve_chart_candles(
                     board=board or cached_board,
                     kind=resolved_kind,
                     interval=int(interval) or 24,
-                    complete=True if cached_complete is None else bool(cached_complete),
+                    complete=bool(cached_complete) if cached_complete is not None else False,
                 )
             except Exception:  # noqa: BLE001
                 log.warning("chart cache save failed for %s", tid, exc_info=True)

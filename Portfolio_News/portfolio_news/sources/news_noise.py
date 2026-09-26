@@ -13,6 +13,7 @@ _GOOGLE_MINUS_EQUITY = (
 
 # Title denylist: if any pattern matches → drop (case-insensitive).
 # Avoid bare «ставка/прогноз» — ловят ЦБ и отчёты.
+# FCF/капитализация — только dump-страницы SmartLab, не новости про отчёт.
 _TITLE_NOISE = re.compile(
     r"""
     (?:
@@ -31,16 +32,16 @@ _TITLE_NOISE = re.compile(
       | live[\s-]*ставк
       | прогноз\s*\(\s*кэф
       | \bб\.?\s*к\.?\b.{0,40}ставк
-      # Smart-Lab forum threads / quote terminals / fundamental dump pages
+      # Smart-Lab forum / quote terminals / fundamental dump pages
       | форум\s+акци
       | страница\s+\d+
       | курс\s+на\s+сегодня
       | цена\s+и\s+котировки
       | котировки\s+онлайн
       | капитализация\s+мсфо
-      | свободный\s+денежный\s+поток
-      | \bfcf\s+мсфо\b
       | цена\s+акции\s+ап\s+мсфо
+      | свободный\s+денежный\s+поток.{0,40}(?:годов|мсфо|значения)
+      | \bfcf\s+мсфо\b
     )
     """,
     re.IGNORECASE | re.VERBOSE,

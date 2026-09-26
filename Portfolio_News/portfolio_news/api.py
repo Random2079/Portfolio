@@ -941,8 +941,8 @@ def list_dividends(
             items.append((t.id, t.kind, t.name))
         elif id_list is not None:
             items.append((tid, kind or "equity", tid))
-    if limit:
-        items = items[:limit]
+    if eff:
+        items = items[:eff]
     return [
         DividendOut(
             ticker_id=d.ticker_id,
@@ -991,8 +991,8 @@ def list_coupons(
             items.append((t.id, t.kind, t.name))
         elif id_list is not None:
             items.append((tid, kind or "bond", tid))
-    if limit:
-        items = items[:limit]
+    if eff:
+        items = items[:eff]
     return [
         CouponOut(
             ticker_id=c.ticker_id,

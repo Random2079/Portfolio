@@ -110,6 +110,30 @@ class ResolveChartCacheTests(unittest.TestCase):
         self.assertGreaterEqual(n, 3)  # merged, not replaced by 1
         self.assertTrue((cached or {}).get("complete"))
 
+    def test_incremental_does_not_promote_complete_flag(self):
+        """Legacy truncated cache (complete missing/False) must stay incomplete."""
+        short = _pts("2026-08-27", "2026-09-01", "2026-09-20")
+        save_chart_cache(
+            self.session,
+            ticker="BELU",
+            candles=short,
+            complete=False,
+        )
+        tail = _pts("2026-09-20", "2026-09-26")
+        with patch(
+            "portfolio_news.chart_cache.fetch_candles",
+            return_value=(tail, "BELU", "TQBR", ""),
+        ), patch(
+            "portfolio_news.chart_cache.cache_is_fresh",
+            return_value=False,
+        ), patch(
+            "portfolio_news.chart_cache.cache_covers_from",
+            return_value=True,
+        ):
+            resolve_chart_candles(self.session, "BELU", "equity", days=30)
+        cached = load_chart_cache(self.session, "BELU")
+        self.assertIs(cached.get("complete"), False)
+
 
 class MergeTests(unittest.TestCase):
     def test_merge_keeps_union(self):

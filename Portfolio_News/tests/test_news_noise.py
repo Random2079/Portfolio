@@ -48,6 +48,9 @@ class NoiseTitleTests(unittest.TestCase):
         self.assertFalse(
             is_noise_title("СД Т-Технологии 30 сентября определит цену размещения допэмиссии")
         )
+        self.assertFalse(
+            is_noise_title("Сбербанк увеличил свободный денежный поток во втором квартале")
+        )
 
 
 class QueryExclusionsTests(unittest.TestCase):

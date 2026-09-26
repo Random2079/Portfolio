@@ -84,6 +84,10 @@ class ComputeAttributionTests(unittest.TestCase):
         )
         self.assertEqual(attr.missing, 0)
         self.assertAlmostEqual(attr.day_rub or 0, 10.0)
+        # day % vs stock sleeve (~90 prev), not diluted by 1000₽ bond
+        self.assertAlmostEqual(attr.day_pct or 0, 10.0 / 90.0 * 100.0, places=4)
+        # total_value still includes bonds
+        self.assertAlmostEqual(attr.total_value or 0, 1100.0)
 
     def test_cash_helper(self):
         self.assertTrue(is_cash_holding(Holding(ticker="USD")))
