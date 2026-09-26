@@ -17,7 +17,7 @@
 
 | Сайт | Решение |
 |------|---------|
-| aniwaves.ru | ✅ MVP |
+| yomi.to | ✅ текущий (было aniwaves.ru) |
 | YouTube | уже слой B |
 | Gmail | ❌ skip (пользователь + WebView login) |
 | Свой муз. плеер | ❌ skip (AIMP) |
@@ -31,7 +31,7 @@
 
 ## 🔍 Проверка
 
-1. 🔖 → Aniwaves грузится или понятный fallback.  
+1. 🔖 → Yomi (yomi.to) грузится или понятный fallback.  
 2. «Открыть в Chrome» → отдельное app-окно.  
 3. «Назад» → download/player; плеер не орёт в фоне.
 
