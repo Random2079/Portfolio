@@ -849,7 +849,8 @@ class HotkeyCaptureEdit(QLineEdit):
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         mspec = _mouse_button_to_spec(event.button())
-        if mspec and self.hasFocus():
+        # Mouse3/4/5: пишем сразу (даже если фокус ещё не был — иначе «не ставится»)
+        if mspec:
             self.setText(mspec)
             self._finish_capture()
             event.accept()
