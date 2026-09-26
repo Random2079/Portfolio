@@ -467,7 +467,7 @@ def list_tickers(db: Session = Depends(get_db)):
 
 @app.get("/api/news", response_model=list[NewsOut])
 def list_news(
-    ticker: Optional[str] = Query(None, description="Ticker id or company name substring"),
+    ticker: Optional[str] = Query(None),
     focus: bool = Query(False, description="KB: only Focus tickers when set is non-empty"),
     limit: int = Query(50, ge=1, le=200),
     ai: Optional[str] = Query(None, description="hide_noise = drop label=noise"),
