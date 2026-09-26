@@ -102,6 +102,26 @@ def test_filter_rows_by_kind_and_window():
     assert filter_rows(rows, ticker="lkoh")[0]["ticker"] == "LKOH"
 
 
+def test_filter_rows_by_company_name():
+    rows = [
+        _jrn("SBER", "2024-05-05"),
+        _jrn("LKOH", "2024-06-01"),
+        _jrn("OZON", "2024-07-01"),
+    ]
+    annotate_kinds(rows, {})
+    names = {
+        "SBER": "Сбербанк России",
+        "LKOH": "ЛУКОЙЛ",
+        "OZON": "Озон",
+    }
+    hit = filter_rows(rows, ticker="сбер", names=names)
+    assert [r["ticker"] for r in hit] == ["SBER"]
+    hit2 = filter_rows(rows, ticker="лукой", names=names)
+    assert [r["ticker"] for r in hit2] == ["LKOH"]
+    # ticker substring still works
+    assert filter_rows(rows, ticker="oz", names=names)[0]["ticker"] == "OZON"
+
+
 def test_filter_rows_empty_kinds_means_no_filter():
     rows = [_jrn("SBER", "2024-05-05")]
     annotate_kinds(rows, {})

@@ -467,7 +467,7 @@ def list_tickers(db: Session = Depends(get_db)):
 
 @app.get("/api/news", response_model=list[NewsOut])
 def list_news(
-    ticker: Optional[str] = Query(None),
+    ticker: Optional[str] = Query(None, description="Ticker id or company name substring"),
     focus: bool = Query(False, description="KB: only Focus tickers when set is non-empty"),
     limit: int = Query(50, ge=1, le=200),
     ai: Optional[str] = Query(None, description="hide_noise = drop label=noise"),
@@ -1116,7 +1116,7 @@ def _refresh_bcs_ops(db: Session, *, force: bool) -> str:
 @app.get("/api/operations")
 def list_operations(
     force: bool = Query(False),
-    ticker: Optional[str] = Query(None),
+    ticker: Optional[str] = Query(None, description="Ticker id or company name substring"),
     kind: Optional[str] = Query(None, description="equity|bond|fund (comma-separated)"),
     year: Optional[str] = Query(None, description="YYYY shorthand for a full year"),
     date_from: Optional[str] = Query(None),
@@ -1157,7 +1157,7 @@ def list_operations(
 
 @app.get("/api/operations.csv")
 def operations_csv(
-    ticker: Optional[str] = Query(None),
+    ticker: Optional[str] = Query(None, description="Ticker id or company name substring"),
     kind: Optional[str] = Query(None),
     year: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),

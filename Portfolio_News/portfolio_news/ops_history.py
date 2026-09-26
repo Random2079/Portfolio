@@ -33,6 +33,15 @@ def kind_map(session: Session) -> dict[str, str]:
     }
 
 
+def name_map(session: Session) -> dict[str, str]:
+    """ticker → display name from tickers DB (ops search by company)."""
+    return {
+        str(t.id).strip().upper(): (t.name or "").strip()
+        for t in session.scalars(select(Ticker))
+        if str(t.id).strip()
+    }
+
+
 def resolve_kind(ticker: str, class_code: str = "", db_kind: str = "") -> str:
     from portfolio_news.capital_replay import moex_kind
 
@@ -185,17 +194,29 @@ def filter_rows(
     date_from: str = "",
     date_to: str = "",
     ticker: str = "",
+    names: Optional[dict[str, str]] = None,
 ) -> list[dict[str, Any]]:
+    """Filter by kind/date and free-text ticker query.
+
+    ``ticker`` matches if the query is a substring of the ticker id **or**
+    of the company name (from ``names`` / row ``name``), case-insensitive.
+    """
     want = {k.strip().lower() for k in (kinds or []) if k and k.strip()}
-    tid = (ticker or "").strip().upper()
+    q = (ticker or "").strip()
+    q_up = q.upper()
+    q_cf = q.casefold()
+    name_by = names or {}
     lo = (date_from or "").strip()[:10]
     hi = (date_to or "").strip()[:10]
     out = []
     for r in rows:
         if want and r.get("kind") not in want:
             continue
-        if tid and (r.get("ticker") or "").upper() != tid:
-            continue
+        if q:
+            tid = (r.get("ticker") or "").strip().upper()
+            name = (r.get("name") or name_by.get(tid) or "").strip()
+            if q_up not in tid and q_cf not in name.casefold():
+                continue
         day = r.get("day") or ""
         if lo and day and day < lo:
             continue
@@ -246,7 +267,12 @@ def build_history(
     annotate_kinds(rows, kind_map(session))
     all_summary = summarize(rows)
     hits = filter_rows(
-        rows, kinds=kinds, date_from=date_from, date_to=date_to, ticker=ticker
+        rows,
+        kinds=kinds,
+        date_from=date_from,
+        date_to=date_to,
+        ticker=ticker,
+        names=name_map(session),
     )
     total = len(hits)
     shown = hits[: limit] if limit and limit > 0 else hits
