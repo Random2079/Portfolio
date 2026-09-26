@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -763,15 +764,23 @@ def _is_valid_hotkey_spec(spec: str) -> bool:
 
 
 class HotkeyCaptureEdit(QLineEdit):
-    """Клик → жми клавиши или боковую кнопку мыши. Не свободный текст."""
+    """ЛКМ — выбрать поле (синяя рамка). Потом комбо/Mouse4/5 → черновик.
+    Enter — принять; Esc / ✕ — отмена. Без фокуса кнопки мыши поле не трогают."""
+
+    committed = Signal(object)  # self после Enter
 
     def __init__(self, initial: str, default: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._default = _normalize_hotkey_spec(default) or default
+        raw = _normalize_hotkey_spec(initial) or self._default
+        if not _is_valid_hotkey_spec(raw):
+            raw = self._default
+        self._committed = raw
+        self._drafting = False
         self.setReadOnly(True)
-        self.setText(_normalize_hotkey_spec(initial) or self._default)
+        self.setText(self._committed)
         self.setMinimumHeight(32)
-        self.setMinimumWidth(150)
+        self.setMinimumWidth(130)
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.setStyleSheet(
             "QLineEdit {"
@@ -783,43 +792,94 @@ class HotkeyCaptureEdit(QLineEdit):
             "  font-size: 13px;"
             "}"
             "QLineEdit:focus {"
-            "  border: 1px solid #38bdf8;"
+            "  border: 2px solid #38bdf8;"
             "  background: #0f172a;"
             "}"
         )
         self.setToolTip(
-            "Кликни поле → жми сочетание (Ctrl+Shift+1) или боковую кнопку мыши (Mouse4/5),\n"
-            "курсор над полем. Esc / клик мимо — выйти из редактирования. Backspace — дефолт."
+            "1) ЛКМ по полю (синяя рамка)\n"
+            "2) жми сочетание или Mouse4/5\n"
+            "3) Enter — принять · Esc / ✕ — отмена\n"
+            "Backspace — подставить дефолт (потом всё равно Enter)"
         )
 
-    def _finish_capture(self) -> None:
-        """Отпустить фокус — иначе «залипает» в поле."""
+    def current_spec(self) -> str:
+        return self._committed
+
+    def force_spec(self, spec: str) -> None:
+        """Сброс снаружи (дубликат забрали / дефолт)."""
+        raw = _normalize_hotkey_spec(spec) or self._default
+        if not _is_valid_hotkey_spec(raw):
+            raw = self._default
+        self._committed = raw
+        self._drafting = False
+        self.setText(raw)
+
+    def cancel_edit(self) -> None:
+        """✕ / Esc — откат черновика."""
+        self._drafting = False
+        self.setText(self._committed)
+        if self.hasFocus():
+            self.clearFocus()
+
+    def apply_mouse_spec(self, mspec: str) -> bool:
+        """Mouse3/4/5 только если поле уже выбрано (фокус)."""
+        if not self.hasFocus() or not self._drafting:
+            return False
+        self.setText(mspec)
+        self.selectAll()
+        return True
+
+    def _commit_draft(self) -> None:
+        raw = _normalize_hotkey_spec(self.text())
+        if not raw or not _is_valid_hotkey_spec(raw):
+            raw = self._default
+        self._committed = raw
+        self.setText(raw)
+        self._drafting = False
+        self.committed.emit(self)
         self.clearFocus()
 
     def focusInEvent(self, event) -> None:  # noqa: N802
         super().focusInEvent(event)
+        self._drafting = True
+        self.setText(self._committed)
         self.selectAll()
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        if self._drafting:
+            self._drafting = False
+            self.setText(self._committed)
+        super().focusOutEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.isAutoRepeat():
             event.accept()
             return
         key = event.key()
-        # Esc — просто выйти из поля, не меняя значение
-        if key == Qt.Key.Key_Escape and not (
-            event.modifiers()
+        mods = event.modifiers() & (
+            Qt.KeyboardModifier.ControlModifier
+            | Qt.KeyboardModifier.AltModifier
+            | Qt.KeyboardModifier.MetaModifier
+            | Qt.KeyboardModifier.ShiftModifier
+        )
+        if key == Qt.Key.Key_Escape and not mods:
+            self.cancel_edit()
+            event.accept()
+            return
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (
+            mods
             & (
                 Qt.KeyboardModifier.ControlModifier
                 | Qt.KeyboardModifier.AltModifier
                 | Qt.KeyboardModifier.MetaModifier
-                | Qt.KeyboardModifier.ShiftModifier
             )
         ):
-            self._finish_capture()
+            self._commit_draft()
             event.accept()
             return
         if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete) and not (
-            event.modifiers()
+            mods
             & (
                 Qt.KeyboardModifier.ControlModifier
                 | Qt.KeyboardModifier.AltModifier
@@ -827,42 +887,51 @@ class HotkeyCaptureEdit(QLineEdit):
             )
         ):
             self.setText(self._default)
-            self._finish_capture()
-            event.accept()
-            return
-        # Enter/Return — принять текущее и выйти
-        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self._finish_capture()
+            self.selectAll()
             event.accept()
             return
         spec = _key_event_to_hotkey_spec(event)
-        if spec is None:
-            event.accept()
-            return
-        # Один Esc как хоткей (поле back_esc) — пишем и выходим
-        if not _is_valid_hotkey_spec(spec):
+        if spec is None or not _is_valid_hotkey_spec(spec):
             event.accept()
             return
         self.setText(_normalize_hotkey_spec(spec))
-        self._finish_capture()
+        self.selectAll()
         event.accept()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         mspec = _mouse_button_to_spec(event.button())
-        # Mouse3/4/5: пишем сразу (даже если фокус ещё не был — иначе «не ставится»)
         if mspec:
-            self.setText(mspec)
-            self._finish_capture()
+            if self.hasFocus() and self._drafting:
+                self.setText(mspec)
+                self.selectAll()
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
             event.accept()
             return
         super().mousePressEvent(event)
-        self.setFocus(Qt.FocusReason.MouseFocusReason)
 
-    def current_spec(self) -> str:
-        raw = _normalize_hotkey_spec(self.text())
-        if not raw or not _is_valid_hotkey_spec(raw):
-            return self._default
-        return raw
+
+def _make_hotkey_row(edit: HotkeyCaptureEdit) -> QWidget:
+    """Поле + ✕ (отмена черновика)."""
+    row = QWidget()
+    hl = QHBoxLayout(row)
+    hl.setContentsMargins(0, 0, 0, 0)
+    hl.setSpacing(4)
+    hl.addWidget(edit, stretch=1)
+    clear_btn = QToolButton()
+    clear_btn.setText("✕")
+    clear_btn.setToolTip("Отмена правки (как Esc). Не сохраняет черновик.")
+    clear_btn.setFixedSize(28, 28)
+    clear_btn.setStyleSheet(
+        "QToolButton { color:#94a3b8; border:1px solid #334155; border-radius:6px; }"
+        "QToolButton:hover { color:#f87171; border-color:#f87171; }"
+    )
+    clear_btn.clicked.connect(edit.cancel_edit)
+    hl.addWidget(clear_btn)
+    return row
 
 
 class PulseVisual(QWidget):
@@ -978,7 +1047,7 @@ class OverlaySettingsDialog(QDialog):
         layout.addLayout(top)
 
         hk_title = QLabel(
-            "Горячие клавиши — клик по полю, потом жми сочетание или Mouse4/5 (скролл ↓)"
+            "Хоткеи: ЛКМ по полю → комбо/Mouse4/5 → Enter принять · ✕/Esc отмена"
         )
         hk_title.setStyleSheet("color:#94a3b8;font-size:12px;")
         layout.addWidget(hk_title)
@@ -1015,15 +1084,17 @@ class OverlaySettingsDialog(QDialog):
         for key, label in labels.items():
             default = _DEFAULT_HOTKEYS[key]
             edit = HotkeyCaptureEdit(str(hotkeys.get(key, default)), default)
+            edit.committed.connect(self._on_hotkey_committed)
             self.hk_edits[key] = edit
-            form.addRow(label, edit)
+            form.addRow(label, _make_hotkey_row(edit))
 
         scroll.setWidget(inner)
         layout.addWidget(scroll, stretch=1)
 
         hint = QLabel(
-            "Пока окно открыто — глобальные хоткеи Фон выкл (можно записать комбо).\n"
-            "Backspace — сброс. Боковые кнопки мыши: клик в поле → Mouse4/Mouse5."
+            "Пока окно открыто — глобальные хоткеи Фон выкл.\n"
+            "Без синей рамки Mouse4/5 поля не меняют. Одно сочетание = одна функция "
+            "(дубликат сбрасывается на дефолт). ✕ — отмена правки."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#94a3b8;font-size:11px;")
@@ -1031,9 +1102,66 @@ class OverlaySettingsDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        for b in buttons.buttons():
+            b.setAutoDefault(False)
+            b.setDefault(False)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        # Mouse4/5 → в выбранное поле, даже если курсор не над ним
+        if event.type() == QEvent.Type.MouseButtonPress:
+            try:
+                btn = event.button()
+            except Exception:
+                btn = None
+            mspec = _mouse_button_to_spec(btn) if btn is not None else None
+            if mspec:
+                fw = QApplication.focusWidget()
+                if isinstance(fw, HotkeyCaptureEdit) and fw in self.hk_edits.values():
+                    if fw.apply_mouse_spec(mspec):
+                        return True
+        return super().eventFilter(watched, event)
+
+    def _on_hotkey_committed(self, edit: HotkeyCaptureEdit) -> None:
+        """Одно сочетание — одна функция: у остальных такой же spec → дефолт."""
+        spec = _normalize_hotkey_spec(edit.current_spec()).lower()
+        if not spec:
+            return
+        for other in self.hk_edits.values():
+            if other is edit:
+                continue
+            if _normalize_hotkey_spec(other.current_spec()).lower() == spec:
+                other.force_spec(other._default)
+
+    def accept(self) -> None:  # noqa: N802
+        fw = QApplication.focusWidget()
+        if isinstance(fw, HotkeyCaptureEdit) and fw in self.hk_edits.values():
+            fw._commit_draft()
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        super().accept()
+
+    def reject(self) -> None:  # noqa: N802
+        fw = QApplication.focusWidget()
+        if isinstance(fw, HotkeyCaptureEdit) and fw in self.hk_edits.values():
+            fw.cancel_edit()
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        super().reject()
+
+    def done(self, result: int) -> None:  # noqa: N802
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        super().done(result)
 
     def result_prefs(self) -> dict:
         hotkeys = {k: e.current_spec() for k, e in self.hk_edits.items()}
