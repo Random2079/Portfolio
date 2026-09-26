@@ -692,6 +692,51 @@
       .review-box .rv-lead {
         margin: 0 0 0.65rem; font-size: 0.8rem; color: var(--muted);
       }
+      .ai-review-box {
+        margin-top: 1rem; padding: 0.85rem 1rem;
+        border: 1px solid var(--border); border-radius: 12px;
+        background: #fff;
+      }
+      .ai-review-box .arv-head {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem 0.65rem;
+        margin-bottom: 0.45rem;
+      }
+      .ai-review-box h3 {
+        margin: 0; font-size: 0.92rem; font-weight: 700;
+      }
+      .ai-review-box .arv-btn {
+        font: inherit; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--accent); background: var(--accent); color: #fff;
+        border-radius: 8px; padding: 0.28rem 0.7rem;
+      }
+      .ai-review-box .arv-btn:disabled { opacity: 0.55; cursor: default; }
+      .ai-review-box .arv-btn.ghost {
+        border-color: var(--border); background: #fff; color: var(--text);
+      }
+      .ai-review-box .arv-hint {
+        font-size: 0.72rem; color: var(--muted); width: 100%;
+      }
+      .ai-review-box .arv-urg {
+        font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+        border-radius: 6px; padding: 0.1rem 0.4rem;
+      }
+      .ai-review-box .arv-urg.low { background: #eef2f7; color: #555; }
+      .ai-review-box .arv-urg.mid { background: #fff3e0; color: #e65100; }
+      .ai-review-box .arv-urg.high { background: #ffebee; color: #b71c1c; }
+      .ai-review-box .arv-sum {
+        margin: 0.35rem 0 0.55rem; font-size: 0.85rem; line-height: 1.4;
+      }
+      .ai-review-box ul {
+        margin: 0.25rem 0 0.55rem; padding-left: 1.1rem; font-size: 0.82rem;
+      }
+      .ai-review-box .arv-label {
+        font-size: 0.72rem; font-weight: 700; color: var(--muted);
+        margin: 0.45rem 0 0.15rem;
+      }
+      .ai-review-box .arv-empty {
+        margin: 0; font-size: 0.8rem; color: var(--muted);
+      }
+      .ai-review-box .arv-err { color: var(--down); font-size: 0.8rem; }
       .review-kinds { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.75rem; }
       .review-kinds button {
         font: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer;
@@ -949,6 +994,19 @@
           </div>
           <div id="reviewBody"></div>
           <p class="rv-note">Мультипликаторы SmartLab / Dohod — следующим слоем. Вердикт кликабельный, на тикер (localStorage).</p>
+        </div>
+
+        <div class="ai-review-box" id="aiReviewBox" aria-label="ИИ разбор тикера">
+          <div class="arv-head">
+            <h3>ИИ-разбор</h3>
+            <span class="rv-mock-tag">F-B</span>
+            <button type="button" class="arv-btn" id="btnAiReview" disabled>Разбор ИИ</button>
+            <button type="button" class="arv-btn ghost" id="btnAiReviewForce" disabled hidden>Ещё раз</button>
+          </div>
+          <p class="arv-hint" id="aiReviewHint">Выбери тикер · нужен DEEPSEEK + AI_NOISE_ENABLED</p>
+          <div id="aiReviewBody">
+            <p class="arv-empty">One-shot по новостям тикера: на что бьёт + чеклист к стратегии. Не чат, не «купи».</p>
+          </div>
         </div>
       </section>
       </div>
@@ -3521,6 +3579,7 @@
         const seq = ++reviewLoadSeq;
         if (!tid) {
           renderReviewPayload(null);
+          clearAiReview();
           return;
         }
         if (body) {
@@ -3544,6 +3603,175 @@
             body.innerHTML =
               "<p class='rv-err'>" + esc(shortErr(e.message || e)) + "</p>";
           }
+        }
+        loadAiReviewCached(tid);
+      }
+
+      let aiReviewBusy = false;
+      let aiReviewTicker = "";
+
+      function clearAiReview() {
+        aiReviewTicker = "";
+        const body = document.getElementById("aiReviewBody");
+        const hint = document.getElementById("aiReviewHint");
+        const btn = document.getElementById("btnAiReview");
+        const btnF = document.getElementById("btnAiReviewForce");
+        if (body) {
+          body.innerHTML =
+            "<p class='arv-empty'>One-shot по новостям тикера: на что бьёт + чеклист к стратегии. Не чат, не «купи».</p>";
+        }
+        if (hint) hint.textContent = "Выбери тикер · нужен DEEPSEEK + AI_NOISE_ENABLED";
+        if (btn) btn.disabled = true;
+        if (btnF) {
+          btnF.disabled = true;
+          btnF.hidden = true;
+        }
+      }
+
+      function renderAiReviewData(data, meta) {
+        const body = document.getElementById("aiReviewBody");
+        const hint = document.getElementById("aiReviewHint");
+        const btnF = document.getElementById("btnAiReviewForce");
+        if (!body || !data) return;
+        const urg = String(data.urgency || "low").toLowerCase();
+        const hits = (data.hits || [])
+          .map((x) => "<li>" + esc(String(x)) + "</li>")
+          .join("");
+        const checks = (data.checklist || [])
+          .map((x) => "<li>" + esc(String(x)) + "</li>")
+          .join("");
+        const caves = (data.caveats || [])
+          .map((x) => "<li>" + esc(String(x)) + "</li>")
+          .join("");
+        let metaLine = "";
+        if (meta && meta.from_cache) metaLine = "кэш";
+        if (data.news_count != null) {
+          metaLine += (metaLine ? " · " : "") + "новостей: " + data.news_count;
+        }
+        body.innerHTML =
+          '<span class="arv-urg ' +
+          esc(urg) +
+          '">' +
+          esc(urg) +
+          "</span>" +
+          (metaLine
+            ? '<span class="arv-hint" style="width:auto;margin-left:0.5rem">' +
+              esc(metaLine) +
+              "</span>"
+            : "") +
+          '<p class="arv-sum">' +
+          esc(data.summary || "—") +
+          "</p>" +
+          (hits
+            ? '<div class="arv-label">На что бьёт</div><ul>' + hits + "</ul>"
+            : "") +
+          (checks
+            ? '<div class="arv-label">Чеклист к стратегии</div><ul>' +
+              checks +
+              "</ul>"
+            : "") +
+          (caves
+            ? '<div class="arv-label">Оговорки</div><ul>' + caves + "</ul>"
+            : "");
+        if (hint) hint.textContent = "";
+        if (btnF) {
+          btnF.hidden = false;
+          btnF.disabled = aiReviewBusy;
+        }
+      }
+
+      async function refreshAiReviewButtons() {
+        const btn = document.getElementById("btnAiReview");
+        const btnF = document.getElementById("btnAiReviewForce");
+        const hint = document.getElementById("aiReviewHint");
+        let ready = false;
+        let hintText = "";
+        try {
+          const st = await fetch("/api/news/ai-status").then((r) => r.json());
+          ready = !!(st && st.ready);
+          hintText = st && st.hint ? st.hint : "";
+        } catch (_) {
+          hintText = "статус ИИ недоступен";
+        }
+        const hasTid = !!aiReviewTicker;
+        if (btn) btn.disabled = !ready || !hasTid || aiReviewBusy;
+        if (btnF && !btnF.hidden) btnF.disabled = !ready || !hasTid || aiReviewBusy;
+        if (hint && hintText && !document.querySelector("#aiReviewBody .arv-sum")) {
+          hint.textContent = hasTid
+            ? hintText || "Готово к разбору"
+            : "Выбери тикер · " + (hintText || "ИИ");
+        }
+      }
+
+      async function loadAiReviewCached(tid) {
+        aiReviewTicker = String(tid || "").trim().toUpperCase();
+        const body = document.getElementById("aiReviewBody");
+        await refreshAiReviewButtons();
+        if (!aiReviewTicker) {
+          clearAiReview();
+          return;
+        }
+        try {
+          const r = await fetch(
+            "/api/ai/ticker-review/" + encodeURIComponent(aiReviewTicker)
+          );
+          const j = await r.json();
+          if (j && j.ok && j.data) {
+            renderAiReviewData(j.data, { from_cache: true });
+          } else if (body) {
+            body.innerHTML =
+              "<p class='arv-empty'>Нет разбора по " +
+              esc(aiReviewTicker) +
+              " — нажми «Разбор ИИ».</p>";
+          }
+        } catch (_) {
+          if (body) {
+            body.innerHTML =
+              "<p class='arv-empty'>Нет кэша — нажми «Разбор ИИ».</p>";
+          }
+        }
+        await refreshAiReviewButtons();
+      }
+
+      async function runAiTickerReview(force) {
+        if (!aiReviewTicker || aiReviewBusy) return;
+        aiReviewBusy = true;
+        await refreshAiReviewButtons();
+        const body = document.getElementById("aiReviewBody");
+        if (body) body.innerHTML = "<p class='arv-empty'>ИИ думает…</p>";
+        try {
+          const r = await fetch("/api/ai/ticker-review", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ticker: aiReviewTicker,
+              force: !!force,
+              news_limit: 12,
+            }),
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            const detail =
+              (j && (j.detail || j.error)) || r.statusText || "ошибка";
+            if (body) {
+              body.innerHTML =
+                "<p class='arv-err'>" +
+                esc(typeof detail === "string" ? detail : JSON.stringify(detail)) +
+                "</p>";
+            }
+            return;
+          }
+          if (j && j.data) renderAiReviewData(j.data, { from_cache: !!j.from_cache });
+        } catch (e) {
+          if (body) {
+            body.innerHTML =
+              "<p class='arv-err'>" +
+              esc(e && e.message ? e.message : "сеть") +
+              "</p>";
+          }
+        } finally {
+          aiReviewBusy = false;
+          await refreshAiReviewButtons();
         }
       }
 
@@ -4751,6 +4979,11 @@
         });
       }
       refreshAiStatus();
+      const btnAiRev = document.getElementById("btnAiReview");
+      if (btnAiRev) btnAiRev.addEventListener("click", () => runAiTickerReview(false));
+      const btnAiRevF = document.getElementById("btnAiReviewForce");
+      if (btnAiRevF) btnAiRevF.addEventListener("click", () => runAiTickerReview(true));
+      refreshAiReviewButtons();
       const notifyModeSel = document.getElementById("notifyMode");
       if (notifyModeSel) {
         notifyModeSel.addEventListener("change", () => {

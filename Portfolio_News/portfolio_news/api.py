@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from portfolio_news.bcs_client import classify_asset_class, get_bcs_client, match_holding
 from portfolio_news.config import Settings, get_settings
-from portfolio_news.db import NewsAiCache, NewsItem, Ticker, make_session_factory
+from portfolio_news.db import NewsAiCache, NewsItem, Ticker, TickerAiReviewCache, make_session_factory
 from portfolio_news.focus import list_focus_tickers, replace_focus, set_focus
 from portfolio_news.import_tickers import load_tickers_from_json, upsert_tickers
 from portfolio_news.metrics_moex import (
@@ -114,6 +114,12 @@ class NewsAiStatusOut(BaseModel):
     has_key: bool
     ready: bool
     hint: str = ""
+
+
+class TickerAiReviewIn(BaseModel):
+    ticker: str
+    force: bool = False
+    news_limit: int = Field(12, ge=1, le=25)
 
 
 class DividendOut(BaseModel):
@@ -635,6 +641,144 @@ def news_ai_classify(
         skipped=max(0, skipped),
         ids=done_ids,
     )
+
+
+@app.get("/api/ai/ticker-review/{ticker}")
+def get_ticker_ai_review(ticker: str, db: Session = Depends(get_db)):
+    """F-B: cached one-shot review (null payload if never run)."""
+    tid = (ticker or "").strip().upper()
+    if not tid:
+        raise HTTPException(status_code=400, detail="ticker required")
+    row = db.get(TickerAiReviewCache, tid)
+    if row is None or not row.payload_json:
+        return {"ok": False, "ticker": tid, "from_cache": False, "data": None}
+    try:
+        import json as _json
+
+        data = _json.loads(row.payload_json)
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "ticker": tid, "from_cache": False, "data": None}
+    return {
+        "ok": bool(row.ok),
+        "ticker": tid,
+        "from_cache": True,
+        "updated_at": row.updated_at,
+        "data": data,
+    }
+
+
+@app.post("/api/ai/ticker-review")
+def post_ticker_ai_review(
+    body: TickerAiReviewIn,
+    db: Session = Depends(get_db),
+    cfg: Settings = Depends(get_cfg),
+):
+    """F-B: button one-shot DeepSeek review for ticker news (not chat, no orders)."""
+    import json as _json
+
+    from portfolio_news.ai_ticker import review_ticker_news
+    from portfolio_news.review_facts import resolve_sector
+
+    if not cfg.ai_noise_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="ai_noise_enabled=false — поставь AI_NOISE_ENABLED=true в .env",
+        )
+    api_key = (cfg.deepseek_api_key or "").strip()
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="DEEPSEEK_API_KEY не задан в Portfolio_News/.env",
+        )
+
+    tid = (body.ticker or "").strip().upper()
+    if not tid:
+        raise HTTPException(status_code=400, detail="ticker required")
+
+    if not body.force:
+        cached = db.get(TickerAiReviewCache, tid)
+        if cached and cached.ok and cached.payload_json:
+            age = time.time() - float(cached.updated_at or 0)
+            if age < 6 * 3600:  # 6h fresh
+                try:
+                    data = _json.loads(cached.payload_json)
+                    return {
+                        "ok": True,
+                        "ticker": tid,
+                        "from_cache": True,
+                        "updated_at": cached.updated_at,
+                        "data": data,
+                    }
+                except Exception:  # noqa: BLE001
+                    pass
+
+    row = db.get(Ticker, tid) or db.get(Ticker, tid.lower())
+    if row is None:
+        for t in db.scalars(select(Ticker)).all():
+            if str(t.id).upper() == tid:
+                row = t
+                break
+    kind = ((row.kind if row else "") or "equity").strip().lower()
+    if kind not in ("equity", "bond", "fund"):
+        kind = "equity"
+    name = ((row.name if row else "") or tid).strip()
+    category = ((row.category if row else "") or "").strip()
+    sector = resolve_sector(tid, category)
+    look = sector.get("look_for") or ""
+    if isinstance(look, (list, tuple)):
+        look = ", ".join(str(x) for x in look)
+    ks_labels = f"{sector.get('id', '')}: {sector.get('label', '')}; смотри: {look}"
+
+    q = (
+        select(NewsItem)
+        .where(NewsItem.ticker_id == tid)
+        .order_by(desc(NewsItem.created_at))
+        .limit(int(body.news_limit or 12))
+    )
+    # also match case variants
+    news_rows = list(db.scalars(q).all())
+    if not news_rows:
+        q2 = (
+            select(NewsItem)
+            .where(NewsItem.ticker_id.in_([tid, tid.lower(), tid.capitalize()]))
+            .order_by(desc(NewsItem.created_at))
+            .limit(int(body.news_limit or 12))
+        )
+        news_rows = list(db.scalars(q2).all())
+
+    news_payload = [
+        {"id": n.id, "title": n.title, "source": n.source or ""} for n in news_rows
+    ]
+    try:
+        data = review_ticker_news(
+            api_key,
+            ticker=tid,
+            news=news_payload,
+            kind=kind,
+            name=name,
+            ks_labels=ks_labels,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("ai ticker-review failed")
+        raise HTTPException(status_code=502, detail=str(exc)[:300]) from exc
+
+    data["news_ids"] = [n["id"] for n in news_payload if n.get("id") is not None]
+    now = time.time()
+    cache = db.get(TickerAiReviewCache, tid)
+    if cache is None:
+        cache = TickerAiReviewCache(ticker=tid)
+        db.add(cache)
+    cache.payload_json = _json.dumps(data, ensure_ascii=False)
+    cache.updated_at = now
+    cache.ok = 1
+    db.commit()
+    return {
+        "ok": True,
+        "ticker": tid,
+        "from_cache": False,
+        "updated_at": now,
+        "data": data,
+    }
 
 
 @app.get("/api/focus", response_model=FocusOut)

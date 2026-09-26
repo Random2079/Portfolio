@@ -182,6 +182,17 @@ class FundTerUniverseCache(Base):
     source_as_of: Mapped[str] = mapped_column(String(128), default="")
 
 
+class TickerAiReviewCache(Base):
+    """F-B: last one-shot AI ticker review payload (button, not chat)."""
+
+    __tablename__ = "ticker_ai_review_cache"
+
+    ticker: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[float] = mapped_column(Float, default=0.0)
+    ok: Mapped[int] = mapped_column(Integer, default=0)
+
+
 def make_engine(database_url: str):
     connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
     return create_engine(database_url, future=True, connect_args=connect_args)
