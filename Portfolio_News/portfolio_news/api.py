@@ -503,6 +503,9 @@ def list_news(
                 .limit(limit)
             )
     rows = list(db.scalars(q).all())
+    from portfolio_news.sources.news_noise import is_noise_title
+
+    rows = [r for r in rows if not is_noise_title(r.title or "")]
     ai_map = _news_ai_map(db, [r.id for r in rows])
     hide_noise = (ai or "").strip().lower() == "hide_noise"
     out: list[NewsOut] = []

@@ -71,6 +71,10 @@ class PollResult:
 
 
 def _insert_if_new(session: Session, ticker_id: str, item: RawNews) -> NewsItem | None:
+    from portfolio_news.sources.news_noise import is_noise_title
+
+    if is_noise_title(item.title or ""):
+        return None
     exists = session.scalar(select(NewsItem.id).where(NewsItem.url == item.url).limit(1))
     if exists is not None:
         return None

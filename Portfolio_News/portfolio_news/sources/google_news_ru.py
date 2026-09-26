@@ -9,6 +9,7 @@ import feedparser
 import requests
 
 from portfolio_news.sources.base import RawNews
+from portfolio_news.sources.news_noise import google_query_exclusions, is_noise_title
 
 _HEADERS = {
     "User-Agent": "PortfolioNews/0.1 (+local; personal monitor)",
@@ -41,6 +42,9 @@ def _query_for(ticker_id: str, search_query: str, kind: str) -> str:
     if kind == "equity" and ticker_id and not ticker_id.startswith("RU000"):
         if ticker_id.upper() not in q.upper():
             q = f"{ticker_id} {q}"
+    excl = google_query_exclusions(kind)
+    if excl:
+        q = f"{q} {excl}".strip()
     return q.strip() or ticker_id
 
 
@@ -66,6 +70,8 @@ class GoogleNewsRuSource:
             link = (entry.get("link") or "").strip()
             title = (entry.get("title") or "").strip()
             if not link or not title:
+                continue
+            if is_noise_title(title):
                 continue
             out.append(
                 RawNews(
