@@ -123,7 +123,7 @@ export default function PositionCard({ ticker, holdings, totalValue }) {
     return (
       <section className="pos-card">
         <h3>Карточка бумаги</h3>
-        <p className="muted">Кликни тикер — avg, покупки, PnL, доля.</p>
+        <p className="pos-empty">Кликни тикер — avg, покупки, PnL, доля.</p>
       </section>
     );
   }
@@ -190,7 +190,7 @@ export default function PositionCard({ ticker, holdings, totalValue }) {
         {staleBit}
       </h3>
       {!ok && (err || loading) ? (
-        <p className={err ? "err-text" : "muted"}>
+        <p className={err ? "pos-empty err" : "pos-empty"}>
           {loading && !err ? "Загрузка цифр…" : err}
         </p>
       ) : null}

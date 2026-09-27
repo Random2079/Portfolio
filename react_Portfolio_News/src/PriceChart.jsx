@@ -218,6 +218,10 @@ export default function PriceChart({ ticker, holdings, avgPrice }) {
         }
         if (!hostRef.current || cancelled) return;
 
+        const chartH = Math.max(
+          hostRef.current.clientHeight || 0,
+          320
+        );
         const chart = createChart(hostRef.current, {
           layout: {
             background: { color: "transparent" },
@@ -236,7 +240,7 @@ export default function PriceChart({ ticker, holdings, avgPrice }) {
           },
           timeScale: { borderColor: "#2a313c", timeVisible: false },
           width: Math.max(hostRef.current.clientWidth || 0, 100),
-          height: 280,
+          height: chartH,
         });
         const series = chart.addCandlestickSeries({
           upColor: "#26a69a",
@@ -328,6 +332,7 @@ export default function PriceChart({ ticker, holdings, avgPrice }) {
                 if (!hostRef.current || !chartRef.current) return;
                 chartRef.current.applyOptions({
                   width: Math.max(hostRef.current.clientWidth || 0, 100),
+                  height: Math.max(hostRef.current.clientHeight || 0, 320),
                 });
               })
             : null;
@@ -358,10 +363,12 @@ export default function PriceChart({ ticker, holdings, avgPrice }) {
 
   return (
     <section className="chart-box">
-      <h3>График · {tid || "—"}</h3>
-      <p className="muted chart-hint">
-        вид: этот год · зел./красн. свечи · маркеры сделок BCS
-      </p>
+      <div className="chart-toolbar">
+        <span className="chart-ticker-label">{tid || "—"}</span>
+        <span className="chart-hint">
+          вид: этот год · ● зел./красн. · маркеры сделок BCS
+        </span>
+      </div>
       <div className="chart-wrap" ref={hostRef} />
       <p className={"chart-status" + (statusErr ? " err" : "")}>{status}</p>
     </section>

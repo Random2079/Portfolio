@@ -3,9 +3,11 @@ import { motion } from "framer-motion";
 import PositionCard, { posCardFromHoldings } from "./PositionCard";
 import PriceChart from "./PriceChart";
 import ReviewPanel from "./ReviewPanel";
+import "./TickerReview.css";
 
 /**
  * R2 panel: position card + LWC chart + KS review for selected ticker.
+ * Layout denser / flatter like vanilla chart-box stack.
  */
 export default function TickerReview({ ticker, holdings, totalValue }) {
   const tid = String(ticker || "")
@@ -22,29 +24,24 @@ export default function TickerReview({ ticker, holdings, totalValue }) {
   return (
     <motion.section
       className="ticker-review"
-      initial={{ opacity: 0, y: 14 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="review-head">
-        <h2>Разбор · {tid}</h2>
-        <p className="muted">карточка · график · сверка KS</p>
+        <h2>Разбор бумаги</h2>
+        <p className="lead">
+          {tid} · карточка · график · сверка KS
+        </p>
       </div>
-      <div className="review-layout">
-        <div className="review-main">
-          <PositionCard
-            ticker={tid}
-            holdings={holdings}
-            totalValue={totalValue}
-          />
-          <PriceChart
-            ticker={tid}
-            holdings={holdings}
-            avgPrice={localAvg}
-          />
-        </div>
-        <ReviewPanel ticker={tid} />
-      </div>
+
+      <PriceChart ticker={tid} holdings={holdings} avgPrice={localAvg} />
+      <PositionCard
+        ticker={tid}
+        holdings={holdings}
+        totalValue={totalValue}
+      />
+      <ReviewPanel ticker={tid} />
     </motion.section>
   );
 }

@@ -1,0 +1,414 @@
+/* Ticker review — density/hierarchy closer to vanilla chart-box stack.
+   Loaded from TickerReview.jsx (after App.css) so day-agent WIP in App.css
+   is not touched. Scope: .ticker-review and its chart/card/KS children. */
+
+.day-panel .ticker-review {
+  margin-top: 1rem;
+}
+
+.ticker-review {
+  margin-top: 1.25rem;
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(26, 37, 51, 0.92);
+  box-shadow: none;
+}
+
+.ticker-review .review-head {
+  margin-bottom: 0.75rem;
+}
+
+.ticker-review .review-head h2 {
+  margin: 0 0 0.35rem;
+  font-family: var(--font);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.ticker-review .review-head .lead {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* —— Chart (primary) —— */
+
+.ticker-review .chart-box {
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ticker-review .chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.ticker-review .chart-ticker-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.ticker-review .chart-hint {
+  margin: 0;
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.ticker-review .chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 360px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0b0e11;
+  border: 1px solid #222831;
+}
+
+.ticker-review .chart-status {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  min-height: 1.15em;
+}
+
+.ticker-review .chart-status.err {
+  color: var(--down);
+}
+
+/* —— Position card (separator under chart, not nested card) —— */
+
+.ticker-review .pos-card {
+  margin-top: 0.85rem;
+  padding: 0.85rem 0 0;
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.ticker-review .pos-card h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.ticker-review .pos-empty {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.ticker-review .pos-empty.err {
+  color: var(--down);
+}
+
+.ticker-review .pos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.55rem 0.85rem;
+}
+
+.ticker-review .pos-grid .cell {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ticker-review .pos-grid .k {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.12rem;
+}
+
+.ticker-review .pos-grid .v {
+  font-size: 0.92rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.ticker-review .pos-grid .s {
+  margin-top: 0.08rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* —— KS review (dashed inset like vanilla) —— */
+
+.ticker-review .review-box {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px dashed rgba(232, 220, 196, 0.22);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.ticker-review .rv-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  margin-bottom: 0.45rem;
+}
+
+.ticker-review .rv-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.ticker-review .rv-tag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #e8d48a;
+  background: rgba(232, 212, 138, 0.12);
+  border: 1px solid rgba(232, 212, 138, 0.35);
+  border-radius: 6px;
+  padding: 0.12rem 0.4rem;
+}
+
+.ticker-review .rv-lead {
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.ticker-review .rv-err {
+  margin: 0 0 0.55rem;
+  color: var(--down);
+  font-size: 0.8rem;
+}
+
+.ticker-review .rv-sector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.45rem 0.65rem;
+  margin-bottom: 0.7rem;
+}
+
+.ticker-review .rv-chip {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(61, 139, 253, 0.14);
+  border: 1px solid rgba(61, 139, 253, 0.35);
+  color: #7eb8ff;
+}
+
+.ticker-review .rv-look {
+  margin-top: 0;
+  font-size: 0.8rem;
+  color: var(--ink);
+  line-height: 1.4;
+  flex: 1 1 12rem;
+}
+
+.ticker-review .rv-look span {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.ticker-review .rv-bond-title {
+  font-size: 0.88rem;
+  font-weight: 650;
+  margin: 0 0 0.55rem;
+  line-height: 1.35;
+}
+
+.ticker-review .rv-bond-title .isin {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ticker-review .rv-pos {
+  margin: 0 0 0.65rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.ticker-review .rv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.8rem, 1fr));
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.ticker-review .rv-cell {
+  padding: 0.5rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.ticker-review .rv-cell .k {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.15rem;
+}
+
+.ticker-review .rv-cell .v {
+  font-size: 0.9rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.ticker-review .rv-cell .v.miss {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+
+.ticker-review .rv-src {
+  display: inline-block;
+  margin-top: 0.28rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 0.08rem 0.32rem;
+}
+
+.ticker-review .rv-src.moex {
+  color: #7eb8ff;
+  background: rgba(61, 139, 253, 0.14);
+}
+
+.ticker-review .rv-src.bcs {
+  color: #3dba9a;
+  background: rgba(61, 186, 154, 0.12);
+}
+
+.ticker-review .rv-src.miss {
+  color: #e8d48a;
+  background: rgba(232, 212, 138, 0.12);
+  opacity: 1;
+}
+
+.ticker-review .rv-flags {
+  margin: 0 0 0.75rem;
+}
+
+.ticker-review .rv-flags .fk,
+.ticker-review .rv-verdict .vk {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.ticker-review .rv-legend {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.ticker-review .rv-flags ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+
+.ticker-review .rv-flags li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.ticker-review .rv-flags li .dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: rgba(154, 168, 184, 0.4);
+  flex-shrink: 0;
+}
+
+.ticker-review .rv-flags li.warn {
+  color: var(--ink);
+}
+
+.ticker-review .rv-flags li.warn .dot {
+  background: #d97706;
+}
+
+.ticker-review .rv-flags li.bad {
+  color: var(--down);
+  font-weight: 600;
+}
+
+.ticker-review .rv-flags li.bad .dot {
+  background: var(--down);
+}
+
+.ticker-review .rv-verdict-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.ticker-review .rv-verdict-btns button {
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.ticker-review .rv-verdict-btns button:hover {
+  border-color: rgba(232, 220, 196, 0.25);
+  color: var(--ink);
+}
+
+.ticker-review .rv-verdict-btns button.on {
+  color: #fff;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.ticker-review .rv-note {
+  margin: 0.65rem 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}

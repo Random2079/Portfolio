@@ -105,10 +105,12 @@ export default function ReviewPanel({ ticker }) {
     return (
       <section className="review-box">
         <div className="rv-head">
-          <h3>Сверка</h3>
+          <h3>Сверка / факты</h3>
           <span className="rv-tag">KS</span>
         </div>
-        <p className="muted">Кликни тикер — подтянется сверка (кэш / MOEX).</p>
+        <p className="rv-lead">
+          Кликни тикер — подтянется сверка (кэш / MOEX).
+        </p>
       </section>
     );
   }
@@ -125,14 +127,18 @@ export default function ReviewPanel({ ticker }) {
   return (
     <section className="review-box" aria-label="Сверка факты">
       <div className="rv-head">
-        <h3>Сверка · {tid}</h3>
+        <h3>Сверка / факты · {tid}</h3>
         <span className="rv-tag">{tag}</span>
       </div>
+      <p className="rv-lead">
+        Чек-поинт по активу. Не совет купить/продать. Кэш → MOEX; дырки =
+        [НЕТ ДАННЫХ].
+      </p>
 
       {loading && !data ? (
-        <p className="muted">Сверка {tid}…</p>
+        <p className="rv-lead">Сверка {tid}…</p>
       ) : null}
-      {err && !data ? <p className="err-text">{err}</p> : null}
+      {err && !data ? <p className="rv-err">{err}</p> : null}
 
       {data ? (
         <>
@@ -158,7 +164,7 @@ export default function ReviewPanel({ ticker }) {
             <p className="rv-pos">{data.position_line}</p>
           ) : null}
           {data.error ? (
-            <p className="err-text">{String(data.error).slice(0, 180)}</p>
+            <p className="rv-err">{String(data.error).slice(0, 180)}</p>
           ) : null}
 
           <div className="rv-grid">
@@ -213,6 +219,9 @@ export default function ReviewPanel({ ticker }) {
               ))}
             </div>
           </div>
+          <p className="rv-note">
+            Вердикт кликабельный, на тикер (localStorage).
+          </p>
         </>
       ) : null}
     </section>
