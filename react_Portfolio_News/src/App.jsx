@@ -10,40 +10,9 @@ import {
   paperId,
   sumField,
 } from "./holdings";
+import { fmtPct, fmtRub, pnlClass, qtyFmt } from "./format";
+import TickerReview from "./TickerReview";
 import "./App.css";
-
-function fmtRub(n, { signed = false, digits = 0 } = {}) {
-  if (n == null || Number.isNaN(Number(n))) return "—";
-  const v = Number(n);
-  const sign = signed && v > 0 ? "+" : "";
-  return (
-    sign +
-    v.toLocaleString("ru-RU", {
-      maximumFractionDigits: digits,
-      minimumFractionDigits: digits,
-    }) +
-    " ₽"
-  );
-}
-
-function fmtPct(n) {
-  if (n == null || Number.isNaN(Number(n))) return "—";
-  const v = Number(n);
-  const sign = v > 0 ? "+" : "";
-  return sign + v.toFixed(2) + "%";
-}
-
-function pnlClass(n) {
-  if (n == null || Number.isNaN(Number(n))) return "";
-  if (Number(n) > 0) return "up";
-  if (Number(n) < 0) return "down";
-  return "";
-}
-
-function qtyFmt(n) {
-  if (n == null || Number.isNaN(Number(n))) return "—";
-  return Number(n).toLocaleString("ru-RU");
-}
 
 export default function App() {
   const [health, setHealth] = useState(null);
@@ -178,7 +147,7 @@ export default function App() {
         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
       >
         <div>
-          <p className="eyebrow">IDEA-003 · React R1</p>
+          <p className="eyebrow">IDEA-003 · React R2</p>
           <h1 className="brand">Portfolio News</h1>
           <p className="tagline">
             Утренний терминал · API{" "}
@@ -351,11 +320,11 @@ export default function App() {
         {selected ? (
           <p className="selection-bar">
             Выбрано: <strong>{selected}</strong>
-            <span className="muted"> · разбор (карточка + график) — R2</span>
+            <span className="muted"> · разбор ниже</span>
           </p>
         ) : (
           <p className="selection-bar muted">
-            Кликни тикер в топе дня или в списке — выбор для R2.
+            Кликни тикер в топе дня или в списке — откроется разбор.
           </p>
         )}
 
@@ -474,6 +443,14 @@ export default function App() {
         )}
       </motion.section>
 
+      {selected ? (
+        <TickerReview
+          ticker={selected}
+          holdings={holdings}
+          totalValue={snap?.total_value ?? null}
+        />
+      ) : null}
+
       <motion.footer
         className="foot"
         initial={{ opacity: 0 }}
@@ -481,11 +458,11 @@ export default function App() {
         transition={{ delay: 0.35 }}
       >
         <p>
-          <strong>R1</strong> — день топ + позиции / focus. Бэкап ванили:{" "}
+          <strong>R2</strong> — разбор: карточка + LWC + KS. Бэкап ванили:{" "}
           <a href="http://127.0.0.1:8765/" target="_blank" rel="noreferrer">
             127.0.0.1:8765
           </a>
-          . Дальше R2: карточка + график + KS.
+          . Дальше R3: новости.
         </p>
       </motion.footer>
     </div>
