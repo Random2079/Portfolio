@@ -13,6 +13,8 @@ import {
 import { fmtPct, fmtRub, pnlClass, qtyFmt } from "./format";
 import TickerReview from "./TickerReview";
 import NewsFeed from "./NewsFeed";
+import OpsPanel from "./OpsPanel";
+import CalendarPanel from "./CalendarPanel";
 import "./App.css";
 
 export default function App() {
@@ -149,7 +151,7 @@ export default function App() {
         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
       >
         <div>
-          <p className="eyebrow">IDEA-003 · React R3</p>
+          <p className="eyebrow">IDEA-003 · React R4</p>
           <h1 className="brand">Portfolio News</h1>
           <p className="tagline">
             Утренний терминал · API{" "}
@@ -183,6 +185,20 @@ export default function App() {
         >
           Новости
         </button>
+        <button
+          type="button"
+          className={"tab" + (tab === "ops" ? " on" : "")}
+          onClick={() => setTab("ops")}
+        >
+          Сделки
+        </button>
+        <button
+          type="button"
+          className={"tab" + (tab === "calendar" ? " on" : "")}
+          onClick={() => setTab("calendar")}
+        >
+          Календарь
+        </button>
       </nav>
 
       {error ? (
@@ -206,6 +222,8 @@ export default function App() {
       ) : null}
 
       {tab === "news" ? <NewsFeed /> : null}
+      {tab === "ops" ? <OpsPanel /> : null}
+      {tab === "calendar" ? <CalendarPanel /> : null}
 
       {tab === "home" ? (
       <>
@@ -483,11 +501,11 @@ export default function App() {
         transition={{ delay: 0.35 }}
       >
         <p>
-          <strong>R3</strong> — новости + ИИ-бейджи. Бэкап ванили:{" "}
+          <strong>R4</strong> — сделки + календарь выплат. Бэкап ванили:{" "}
           <a href="http://127.0.0.1:8765/" target="_blank" rel="noreferrer">
             127.0.0.1:8765
           </a>
-          . Дальше R4: сделки / календарь.
+          . React MVP закрыт · дальше хвосты / G.
         </p>
       </motion.footer>
     </div>
