@@ -22,6 +22,7 @@ function fmtWhen(iso) {
   const s = String(iso || "").trim();
   if (!s) return "—";
   const d = new Date(s);
+  // Журнал Snowball по старым сделкам времени не знает — не рисуем «00:00»
   if (!Number.isNaN(d.getTime()) && /T00:00:00/.test(s)) {
     return d.toLocaleDateString("ru-RU", {
       day: "2-digit",
@@ -86,7 +87,7 @@ export default function OpsPanel() {
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => {
-      setTickerQ(tickerInput.trim());
+      setTickerQ(tickerInput.trim().toUpperCase());
     }, 280);
     return () => {
       if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -136,9 +137,10 @@ export default function OpsPanel() {
 
   const lead = useMemo(() => {
     if (!anyKind) return "Выбери хотя бы один тип бумаг.";
+    if (loading && !snap) return "Вся история: журнал Snowball + свежие сделки БКС.";
     if (loading) return "Загрузка…";
     if (error) return `Сделки не загрузились: ${error}`;
-    if (!snap) return "Загрузка…";
+    if (!snap) return "Вся история: журнал Snowball + свежие сделки БКС.";
     if (!snap.configured) {
       return "Нет BCS токена и нет журнала — сделки недоступны.";
     }
@@ -173,34 +175,28 @@ export default function OpsPanel() {
   return (
     <motion.section
       className="ops-box"
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
+      transition={{ duration: 0.28 }}
     >
-      <div className="panel-head">
-        <div>
-          <h2>Сделки</h2>
-          <p className="muted lead">{lead}</p>
-        </div>
-        <button type="button" className="btn sm" onClick={load} disabled={loading}>
-          Обновить
-        </button>
-      </div>
+      <h2>Сделки</h2>
+      <p className="lead">{lead}</p>
 
       <div className="ops-filters">
-        <div className="chip-row" role="group" aria-label="Тип бумаг">
+        <div className="ops-kind-chips" role="group" aria-label="Тип бумаг">
           {KIND_LABELS.map(({ key, label }) => (
             <button
               key={key}
               type="button"
-              className={"chip" + (kinds[key] ? " on" : "")}
+              className={"ops-kind-chip" + (kinds[key] ? " on" : "")}
+              data-kind={key}
               onClick={() => toggleKind(key)}
             >
               {label}
             </button>
           ))}
         </div>
-        <label className="filter-field">
+        <label className="ops-period-wrap">
           <span>Период</span>
           <select
             value={year}
@@ -219,11 +215,11 @@ export default function OpsPanel() {
           type="search"
           className="ops-search"
           placeholder="Тикер или название"
-          aria-label="Фильтр по тикеру или названию"
+          aria-label="Фильтр по тикеру или названию компании"
           value={tickerInput}
           onChange={(e) => setTickerInput(e.target.value)}
         />
-        <a className="btn sm" href={csvHref(kinds, year, tickerQ)}>
+        <a className="ops-csv-btn" href={csvHref(kinds, year, tickerQ)}>
           Скачать CSV
         </a>
       </div>
@@ -287,7 +283,7 @@ export default function OpsPanel() {
                       <td>{fmtWhen(o.executed_at)}</td>
                       <td>
                         <strong>{o.ticker || "—"}</strong>
-                        {tag ? <span className="ops-kind-tag">{tag}</span> : null}
+                        {tag ? <span className="ops-kind-tag"> {tag}</span> : null}
                       </td>
                       <td className={side.cls}>{side.text}</td>
                       <td className="num">{qtyFmt(o.quantity)}</td>
@@ -301,7 +297,7 @@ export default function OpsPanel() {
                     <td colSpan={6}>
                       <button
                         type="button"
-                        className="btn sm more"
+                        className="ops-more-btn"
                         onClick={toggleExpand}
                       >
                         {expanded
