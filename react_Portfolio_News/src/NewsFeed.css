@@ -1,0 +1,235 @@
+/* News tab — density/layout closer to vanilla dashboard-demo feed-box.
+   Loaded after App.css (via main.jsx) so we don't fight day-agent WIP in App.css. */
+
+.news-panel {
+  margin-bottom: 1.5rem;
+  margin-top: 0;
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(26, 37, 51, 0.92);
+}
+
+.news-panel .news-head {
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.news-panel .news-head h2 {
+  margin: 0 0 0.35rem;
+  font-family: var(--font);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.news-panel .news-head .lead {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.news-panel .feed-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 0 0.85rem;
+}
+
+.news-panel .notify-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.news-panel .notify-label select {
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.28rem 0.55rem;
+}
+
+.news-panel .poll-btn {
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #0c1118;
+  border-radius: 8px;
+  padding: 0.32rem 0.85rem;
+}
+
+.news-panel .poll-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.news-panel .poll-cancel {
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0.32rem 0.7rem;
+}
+
+.news-panel .ai-btn {
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 0.32rem 0.85rem;
+}
+
+.news-panel .ai-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.news-panel .feed-refresh {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0.28rem 0.65rem;
+}
+
+.news-panel .feed-refresh:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.news-panel .ai-hide {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.news-panel .poll-status {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-left: auto;
+  min-height: 1.1em;
+}
+
+.news-panel .poll-status.err {
+  color: var(--down);
+}
+
+.news-panel .ai-hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+  width: 100%;
+}
+
+.news-panel .feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: block;
+}
+
+.news-panel .feed-item {
+  padding: 0.55rem 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+.news-panel .feed-item:last-child {
+  border-bottom: none;
+}
+
+.news-panel .feed-item:hover {
+  background: transparent;
+}
+
+.news-panel .feed-item > a,
+.news-panel .feed-item > span.feed-title {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  line-height: 1.35;
+}
+
+.news-panel .feed-item > a:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.news-panel .feed-meta {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.news-panel .ai-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+
+.news-panel .ai-badge.noise {
+  background: rgba(154, 168, 184, 0.22);
+  color: #b8c4d0;
+}
+
+.news-panel .ai-badge.relevant {
+  background: rgba(61, 186, 154, 0.2);
+  color: #7ddec4;
+}
+
+.news-panel .ai-badge.dup {
+  background: rgba(232, 164, 90, 0.2);
+  color: #f0c090;
+}
+
+.news-panel .ai-urg {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-left: 0.25rem;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
+.news-panel .pad {
+  padding: 0.5rem 0;
+}
+
+.news-panel .banner.err {
+  margin-bottom: 0.75rem;
+}

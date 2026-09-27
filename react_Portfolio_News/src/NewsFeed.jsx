@@ -223,31 +223,21 @@ export default function NewsFeed() {
   return (
     <motion.section
       className="news-panel"
-      initial={{ opacity: 0, y: 14 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
     >
       <div className="news-head">
-        <div>
-          <h2>Новости</h2>
-          <p className="muted">
-            Лента по бумагам портфеля (BCS). Toast — только сегодняшние, по
-            умолчанию digest.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn sm"
-          onClick={loadNews}
-          disabled={loading || pollBusy}
-        >
-          Обновить ленту
-        </button>
+        <h2>Новости</h2>
+        <p className="lead">
+          Лента по бумагам портфеля (BCS). Toast — только сегодняшние, по
+          умолчанию digest.
+        </p>
       </div>
 
       <div className="feed-toolbar">
         <label className="notify-label">
-          <span className="muted">Toast</span>
+          <span>Toast</span>
           <select
             value={notify}
             onChange={(e) => onNotify(e.target.value)}
@@ -261,20 +251,20 @@ export default function NewsFeed() {
         </label>
         <button
           type="button"
-          className="btn"
+          className="poll-btn"
           onClick={startPoll}
           disabled={pollBusy}
         >
           Искать новости
         </button>
         {pollBusy ? (
-          <button type="button" className="btn ghost" onClick={cancelPoll}>
+          <button type="button" className="poll-cancel" onClick={cancelPoll}>
             Отмена
           </button>
         ) : null}
         <button
           type="button"
-          className="btn ai"
+          className="ai-btn"
           onClick={runAiClassify}
           disabled={!aiReady || aiBusy || pollBusy}
           title={
@@ -293,6 +283,14 @@ export default function NewsFeed() {
           />
           <span>Скрыть шум</span>
         </label>
+        <button
+          type="button"
+          className="feed-refresh"
+          onClick={loadNews}
+          disabled={loading || pollBusy}
+        >
+          Обновить
+        </button>
         {statusText ? (
           <span
             className={"poll-status" + (statusErr ? " err" : "")}
@@ -301,7 +299,7 @@ export default function NewsFeed() {
             {statusText}
           </span>
         ) : null}
-        {aiHint ? <span className="ai-hint muted">{aiHint}</span> : null}
+        {aiHint ? <span className="ai-hint">{aiHint}</span> : null}
       </div>
 
       {error ? (
@@ -323,23 +321,21 @@ export default function NewsFeed() {
                 <motion.li
                   key={n.id}
                   layout
-                  initial={{ opacity: 0, y: 6 }}
+                  initial={{ opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0 }}
-                  transition={{ duration: 0.18 }}
+                  transition={{ duration: 0.16 }}
                   className="feed-item"
                 >
-                  <div className="feed-title-row">
-                    {href ? (
-                      <a href={href} target="_blank" rel="noreferrer">
-                        {title}
-                      </a>
-                    ) : (
-                      <span>{title}</span>
-                    )}
-                    <AiBadge item={n} />
-                  </div>
-                  {meta ? <div className="feed-meta muted">{meta}</div> : null}
+                  {href ? (
+                    <a href={href} target="_blank" rel="noreferrer">
+                      {title}
+                    </a>
+                  ) : (
+                    <span className="feed-title">{title}</span>
+                  )}
+                  <AiBadge item={n} />
+                  {meta ? <div className="feed-meta">{meta}</div> : null}
                 </motion.li>
               );
             })}
