@@ -12,9 +12,11 @@ import {
 } from "./holdings";
 import { fmtPct, fmtRub, pnlClass, qtyFmt } from "./format";
 import TickerReview from "./TickerReview";
+import NewsFeed from "./NewsFeed";
 import "./App.css";
 
 export default function App() {
+  const [tab, setTab] = useState("home");
   const [health, setHealth] = useState(null);
   const [day, setDay] = useState(null);
   const [snap, setSnap] = useState(null);
@@ -147,7 +149,7 @@ export default function App() {
         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
       >
         <div>
-          <p className="eyebrow">IDEA-003 · React R2</p>
+          <p className="eyebrow">IDEA-003 · React R3</p>
           <h1 className="brand">Portfolio News</h1>
           <p className="tagline">
             Утренний терминал · API{" "}
@@ -166,6 +168,23 @@ export default function App() {
         </div>
       </motion.header>
 
+      <nav className="tabs" aria-label="Разделы">
+        <button
+          type="button"
+          className={"tab" + (tab === "home" ? " on" : "")}
+          onClick={() => setTab("home")}
+        >
+          День
+        </button>
+        <button
+          type="button"
+          className={"tab" + (tab === "news" ? " on" : "")}
+          onClick={() => setTab("news")}
+        >
+          Новости
+        </button>
+      </nav>
+
       {error ? (
         <motion.div
           className="banner err"
@@ -180,12 +199,16 @@ export default function App() {
         </motion.div>
       ) : null}
 
-      {!error && holdingsNote ? (
+      {!error && holdingsNote && tab === "home" ? (
         <div className="banner warn">
           <span className="muted">{holdingsNote}</span>
         </div>
       ) : null}
 
+      {tab === "news" ? <NewsFeed /> : null}
+
+      {tab === "home" ? (
+      <>
       <motion.section
         className="kpi-row"
         initial={{ opacity: 0, y: 16 }}
@@ -450,6 +473,8 @@ export default function App() {
           totalValue={snap?.total_value ?? null}
         />
       ) : null}
+      </>
+      ) : null}
 
       <motion.footer
         className="foot"
@@ -458,11 +483,11 @@ export default function App() {
         transition={{ delay: 0.35 }}
       >
         <p>
-          <strong>R2</strong> — разбор: карточка + LWC + KS. Бэкап ванили:{" "}
+          <strong>R3</strong> — новости + ИИ-бейджи. Бэкап ванили:{" "}
           <a href="http://127.0.0.1:8765/" target="_blank" rel="noreferrer">
             127.0.0.1:8765
           </a>
-          . Дальше R3: новости.
+          . Дальше R4: сделки / календарь.
         </p>
       </motion.footer>
     </div>
