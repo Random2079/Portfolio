@@ -87,10 +87,19 @@ export default function App() {
     () => holdings.filter((h) => !isCashHolding(h)),
     [holdings]
   );
+  const cashRows = useMemo(
+    () => holdings.filter((h) => isCashHolding(h)),
+    [holdings]
+  );
   const groups = useMemo(() => groupHoldingsByAssetClass(papers), [papers]);
   const focusSet = useMemo(() => new Set(focusTickers), [focusTickers]);
   const focusId = focusTickers[0] || "";
 
+  const totalValue = useMemo(() => {
+    if (day && day.total_value != null) return day.total_value;
+    if (snap?.total_value != null) return snap.total_value;
+    return sumField(papers, "market_value");
+  }, [day, snap, papers]);
   const totalPnl = useMemo(() => {
     if (snap?.pnl != null) return snap.pnl;
     return sumField(papers, "pnl");
@@ -101,10 +110,32 @@ export default function App() {
     if (totalPnl != null && totalCost) return (totalPnl / totalCost) * 100;
     return null;
   }, [snap, totalPnl, totalCost]);
+  const cashVal = useMemo(() => {
+    const fromRows = sumField(cashRows, "market_value");
+    if (fromRows != null) return fromRows;
+    if (snap?.cash != null && !Number.isNaN(Number(snap.cash))) {
+      return Number(snap.cash);
+    }
+    return null;
+  }, [cashRows, snap]);
   const breakdown = useMemo(
     () => fmtPosBreakdown(countPapersByKind(papers)),
     [papers]
   );
+  /** MSK Sat/Sun — как ванильный dayMktNote */
+  const moexWeekend = useMemo(() => {
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Europe/Moscow",
+        weekday: "short",
+      }).formatToParts(new Date());
+      const wd = parts.find((p) => p.type === "weekday")?.value;
+      return wd === "Sat" || wd === "Sun";
+    } catch {
+      const d = new Date().getDay();
+      return d === 0 || d === 6;
+    }
+  }, []);
 
   const selectTicker = useCallback((tid) => {
     const id = String(tid || "")
@@ -226,110 +257,134 @@ export default function App() {
       {tab === "calendar" ? <CalendarPanel /> : null}
 
       {tab === "home" ? (
-      <>
+      <div className="day-panel">
       <motion.section
-        className="kpi-row"
-        initial={{ opacity: 0, y: 16 }}
+        className="kpis"
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.08, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ delay: 0.06, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       >
         <article className="kpi">
-          <h2>День</h2>
-          <p className={"v " + pnlClass(day && day.day_rub)}>
-            {loading ? "…" : fmtRub(day && day.day_rub, { signed: true })}
-          </p>
-          <p className={"s " + pnlClass(day && day.day_pct)}>
-            {loading ? "" : fmtPct(day && day.day_pct)}
-            {day && day.stale ? " · кэш" : ""}
-          </p>
+          <div className="k">Стоимость</div>
+          <div className="v">
+            {loading ? "…" : totalValue != null ? fmtRub(totalValue) : "—"}
+          </div>
+          <div className="s muted">
+            {totalCost != null ? `вложено ${fmtRub(totalCost)}` : "вложено —"}
+          </div>
         </article>
         <article className="kpi">
-          <h2>Стоимость бумаг</h2>
-          <p className="v">
-            {loading
-              ? "…"
-              : day && day.total_value != null
-                ? fmtRub(day.total_value)
-                : snap && snap.total_value != null
-                  ? fmtRub(snap.total_value)
-                  : "—"}
-          </p>
-          <p className="s muted">
-            {day && day.missing
-              ? "без котировок: " + day.missing
-              : papers.length
-                ? `${papers.length} поз · ${breakdown}`
-                : "MOEX × BCS"}
-          </p>
+          <div className="k">Денег на счёте</div>
+          <div className="v">
+            {loading ? "…" : cashVal != null ? fmtRub(cashVal) : "—"}
+          </div>
+          <div className="s muted">кэш</div>
         </article>
-        <article className="kpi wide">
-          <h2>Кто двинул день</h2>
-          {loading ? (
-            <p className="muted">грузим…</p>
-          ) : top.length ? (
-            <ul className="movers">
-              {top.map((r, i) => {
-                const tid = String(r.ticker || "")
-                  .trim()
-                  .toUpperCase();
-                const active = tid && tid === selected;
-                return (
-                  <motion.li
-                    key={tid || i}
-                    role="button"
-                    tabIndex={0}
-                    className={active ? "active" : ""}
-                    title={tid ? `Выбрать ${tid} (разбор в R2)` : undefined}
-                    onClick={() => selectTicker(tid)}
-                    onKeyDown={(ev) => {
-                      if (ev.key === "Enter" || ev.key === " ") {
-                        ev.preventDefault();
-                        selectTicker(tid);
-                      }
-                    }}
-                    initial={{ opacity: 0, x: -8 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.12 + i * 0.05 }}
-                  >
-                    <span className="t">{r.ticker}</span>
-                    <span className={"rub " + pnlClass(r.day_rub)}>
-                      {fmtRub(r.day_rub, { signed: true })}
-                    </span>
-                    <span className="pct muted">{fmtPct(r.day_pct)}</span>
-                  </motion.li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p className="muted">Нет топа (выходной / нет Δ)</p>
-          )}
+        <article className="kpi">
+          <div className="k">За день</div>
+          <div className={"v " + pnlClass(day && day.day_rub)}>
+            {loading ? "…" : fmtRub(day && day.day_rub, { signed: true })}
+          </div>
+          <div className={"s " + pnlClass(day && day.day_pct)}>
+            {loading
+              ? "MOEX × позиции"
+              : `${fmtPct(day && day.day_pct)}${day && day.stale ? " · кэш" : ""}`}
+          </div>
+        </article>
+        <article className="kpi">
+          <div className="k">PnL</div>
+          <div className={"v " + pnlClass(totalPnl)}>
+            {loading ? "…" : fmtRub(totalPnl, { signed: true })}
+          </div>
+          <div className={"s " + pnlClass(totalPnlPct)}>
+            {loading ? "—" : fmtPct(totalPnlPct)}
+          </div>
+        </article>
+        <article className="kpi">
+          <div className="k">Позиций</div>
+          <div className="v">
+            {loading ? "…" : String(papers.length)}
+          </div>
+          <div className="s muted">{breakdown}</div>
         </article>
       </motion.section>
 
       <motion.section
-        className="holdings"
-        initial={{ opacity: 0, y: 18 }}
+        className={"day-box" + (loading ? " loading" : "")}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.18, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ delay: 0.1, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      >
+        <h2>Кто двинул день</h2>
+        <p className="lead">
+          {loading
+            ? "Считаем, кто двинул день…"
+            : top.length
+              ? `Топ по вкладу в дневной Δ — клик по строке откроет разбор${
+                  day && day.missing ? ` · без котировок: ${day.missing}` : ""
+                }.`
+              : "Нет топа (выходной / нет Δ)."}
+        </p>
+        {moexWeekend ? (
+          <p className="mkt-note">
+            Биржа выходной · цифры за последнюю сессию MOEX (MSK)
+          </p>
+        ) : null}
+        {loading ? (
+          <p className="day-skel">загрузка котировок…</p>
+        ) : top.length ? (
+          <ol className="movers">
+            {top.map((r, i) => {
+              const tid = String(r.ticker || "")
+                .trim()
+                .toUpperCase();
+              const active = tid && tid === selected;
+              return (
+                <motion.li
+                  key={tid || i}
+                  role="button"
+                  tabIndex={0}
+                  className={"day-row" + (active ? " active" : "")}
+                  title={tid ? `Открыть разбор ${tid}` : undefined}
+                  onClick={() => selectTicker(tid)}
+                  onKeyDown={(ev) => {
+                    if (ev.key === "Enter" || ev.key === " ") {
+                      ev.preventDefault();
+                      selectTicker(tid);
+                    }
+                  }}
+                  initial={{ opacity: 0, x: -6 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.1 + i * 0.04 }}
+                >
+                  <span className="t">{r.ticker}</span>
+                  <span className={"rub " + pnlClass(r.day_rub)}>
+                    {fmtRub(r.day_rub, { signed: true })}
+                  </span>
+                  <span className="pct muted">{fmtPct(r.day_pct)}</span>
+                  <span className="go">разбор →</span>
+                </motion.li>
+              );
+            })}
+          </ol>
+        ) : null}
+      </motion.section>
+
+      <motion.section
+        className="holdings"
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.14, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       >
         <div className="holdings-head">
           <div>
             <h2>Позиции</h2>
-            <p className="muted">
+            <p className="muted lead">
               {loading
                 ? "грузим…"
                 : papers.length
                   ? `${papers.length} · ${breakdown}`
                   : "Нет позиций в ответе БКС"}
-              {totalPnl != null ? (
-                <>
-                  {" · PnL "}
-                  <span className={pnlClass(totalPnl)}>
-                    {fmtRub(totalPnl, { signed: true })}
-                    {totalPnlPct != null ? ` · ${fmtPct(totalPnlPct)}` : ""}
-                  </span>
-                </>
-              ) : null}
             </p>
           </div>
           <div className="focus-chip">
@@ -384,12 +439,19 @@ export default function App() {
                   : g.rows.slice(0, LIST_PREVIEW);
               const rest = g.rows.length - LIST_PREVIEW;
               return (
-                <div key={g.key} className="asset-group">
+                <div key={g.key} className={"asset-group ac-" + g.key}>
                   <h3>
                     {g.title}
                     <span className="muted"> · {g.rows.length}</span>
                   </h3>
                   <ul className="pos-list">
+                    <li className="pos-cols" aria-hidden="true">
+                      <span>Тикер</span>
+                      <span className="num">Кол-во</span>
+                      <span className="num">Стоимость</span>
+                      <span className="num">PnL</span>
+                      <span className="star" />
+                    </li>
                     <AnimatePresence initial={false}>
                       {visible.map((h, i) => {
                         const tid = paperId(h);
@@ -401,10 +463,10 @@ export default function App() {
                           <motion.li
                             key={tid || `${g.key}-${i}`}
                             layout
-                            initial={{ opacity: 0, y: 6 }}
+                            initial={{ opacity: 0, y: 4 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0 }}
-                            transition={{ duration: 0.2 }}
+                            transition={{ duration: 0.18 }}
                             className={
                               "pos-row" +
                               (active ? " active" : "") +
@@ -491,7 +553,7 @@ export default function App() {
           totalValue={snap?.total_value ?? null}
         />
       ) : null}
-      </>
+      </div>
       ) : null}
 
       <motion.footer
