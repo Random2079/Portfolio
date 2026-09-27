@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SR — авто-плеер после скачивания · превью</title>
+  <style>
+    :root { font-family: "Segoe UI", system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 20px 64px;
+      background: #080a0e;
+      color: #e2e8f0;
+    }
+    h1 { font-size: 1.2rem; margin: 0 0 6px; font-weight: 600; }
+    .hint {
+      color: #94a3b8;
+      font-size: 0.92rem;
+      max-width: 820px;
+      line-height: 1.45;
+      margin: 0 0 8px;
+    }
+    .pick {
+      color: #64748b;
+      font-size: 0.85rem;
+      margin-bottom: 22px;
+      max-width: 820px;
+      line-height: 1.4;
+    }
+    .pick strong { color: #cbd5e1; }
+
+    .row-demo {
+      margin-bottom: 28px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid #1e2533;
+      background: #0c0f14;
+      max-width: 560px;
+    }
+    .row-demo h2 {
+      margin: 0 0 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .muted { color: #64748b; font-size: 0.78rem; margin: 0 0 10px; line-height: 1.35; }
+
+    .win {
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #1e2533;
+      background: #0f1115;
+      box-shadow: 0 12px 40px rgba(0,0,0,.4);
+    }
+    .titlebar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 12px;
+      font-size: 11px;
+      color: #64748b;
+      background: #0c0e12;
+      border-bottom: 1px solid #1c1f26;
+    }
+    .dots span {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 4px;
+      background: #3f3f46;
+    }
+    .body { padding: 14px; }
+    .brand {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+    }
+    .mark {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: linear-gradient(135deg, #475569, #1e293b);
+      color: #f8fafc; font-weight: 800; font-size: 0.8rem;
+      display: grid; place-items: center;
+    }
+    .app-title { margin: 0; font-size: 1.15rem; font-weight: 700; }
+    .sub { margin: 0 0 12px; font-size: 0.75rem; color: #94a3b8; line-height: 1.35; }
+    .url {
+      width: 100%; border-radius: 10px; padding: 10px 12px;
+      font-size: 0.82rem; border: 1px solid #2a3548;
+      background: #151a24; color: #cbd5e1; margin-bottom: 10px;
+    }
+    .lang {
+      display: flex; gap: 6px; align-items: center;
+      margin-bottom: 8px; font-size: 0.8rem; color: #94a3b8;
+    }
+    .pill {
+      border: none; border-radius: 8px;
+      padding: 5px 12px; font-size: 0.75rem; font-weight: 600;
+    }
+    .pill.on { background: #334155; color: #f8fafc; border: 1px solid #64748b; }
+    .pill.off { background: #1c212b; color: #94a3b8; }
+    .status {
+      font-size: 0.75rem; color: #64748b;
+      margin-bottom: 10px; min-height: 2.4em; line-height: 1.35;
+    }
+    .status.ok { color: #94a3b8; }
+    .status.bridge { color: #7dd3fc; }
+    .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+    .btns button {
+      border: none; border-radius: 10px;
+      padding: 9px 12px; font-size: 0.78rem; font-weight: 600;
+      cursor: pointer; color: #f1f5f9;
+      background: #1e293b; border: 1px solid #334155;
+    }
+    .btns button.primary {
+      box-shadow: 0 1px 0 rgba(15,23,42,.5), 0 0 12px rgba(15,23,42,.35);
+    }
+    .btns button.secondary {
+      background: #151a24; color: #cbd5e1; border-color: #2a3548;
+    }
+    .btns button:disabled { opacity: 0.45; cursor: default; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+    }
+    .variant {
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px solid #1e2533;
+      background: #0c0f14;
+    }
+    .vhead {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+      margin-bottom: 8px;
+    }
+    .vhead h2 { margin: 0; font-size: 1rem; }
+    .tag {
+      font-size: 0.68rem; padding: 2px 8px; border-radius: 999px;
+      background: #1e293b; color: #94a3b8;
+    }
+    .tag.rec { background: #14332a; color: #6ee7b7; }
+    .why {
+      font-size: 0.78rem; color: #94a3b8; line-height: 1.4;
+      margin: 0 0 12px; min-height: 3.2em;
+    }
+
+    /* player mock */
+    .player-body { padding: 0; display: flex; flex-direction: column; min-height: 220px; }
+    .player-top {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px; border-bottom: 1px solid #1c1f26;
+      font-size: 0.75rem; color: #94a3b8;
+    }
+    .player-top .back {
+      background: #151a24; border: 1px solid #2a3548; color: #e2e8f0;
+      border-radius: 8px; padding: 4px 8px; font-size: 0.72rem; cursor: pointer;
+    }
+    .player-main {
+      flex: 1; display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      min-height: 160px;
+    }
+    .video {
+      background: #05070c; border-right: 1px solid #1c1f26;
+      display: grid; place-items: center; padding: 16px; text-align: center;
+    }
+    .video .ph {
+      color: #64748b; font-size: 0.75rem; line-height: 1.4;
+    }
+    .load-btn {
+      margin-top: 10px;
+      background: #334155; color: #f8fafc; border: 1px solid #64748b;
+      border-radius: 10px; padding: 8px 14px; font-weight: 600;
+      font-size: 0.78rem; cursor: pointer;
+    }
+    .side {
+      padding: 10px; font-size: 0.72rem; color: #94a3b8;
+      background: #0f1115;
+    }
+    .side .banner {
+      background: #151a24; border: 1px solid #2a3548;
+      border-radius: 8px; padding: 8px 10px; margin-bottom: 8px;
+      color: #cbd5e1; line-height: 1.35;
+    }
+    .side .banner.sky {
+      border-color: rgba(56,189,248,.35);
+      background: #0f172a;
+      color: #7dd3fc;
+    }
+    .toast {
+      position: absolute; left: 12px; right: 12px; bottom: 12px;
+      background: #1e293b; border: 1px solid #475569;
+      border-radius: 10px; padding: 8px 10px;
+      font-size: 0.72rem; color: #e2e8f0;
+      display: none; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .toast.show { display: flex; }
+    .toast button {
+      border: none; background: #334155; color: #f8fafc;
+      border-radius: 6px; padding: 4px 8px; font-size: 0.7rem; cursor: pointer;
+      white-space: nowrap;
+    }
+    .stage-wrap { position: relative; }
+
+    .sim {
+      margin-top: 10px;
+      display: flex; gap: 6px; flex-wrap: wrap;
+    }
+    .sim button {
+      font-size: 0.72rem; padding: 6px 10px; border-radius: 8px;
+      border: 1px solid #334155; background: #1a2230; color: #cbd5e1;
+      cursor: pointer;
+    }
+    .sim button:hover { border-color: #64748b; }
+    .steps {
+      margin-top: 8px; font-size: 0.7rem; color: #64748b;
+      font-family: ui-monospace, Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>После «Скачать» → плеер: как показать</h1>
+  <p class="hint">
+    Жанр: tool. Ряд кнопок уже без «Очистить», «Музыка» → <strong>↓ MP3</strong>.
+    Ниже три способа <em>авто-открыть плеер</em> — нажми «Симулировать скачивание» в каждом.
+    ▶ видео по-прежнему ручной (как в коде сейчас) — отдельный шаг, чтобы не автоплеить YouTube.
+  </p>
+  <p class="pick">
+    Выбери вариант: <strong>A</strong> мгновенно · <strong>B</strong> мост 1с (рек.) · <strong>C</strong> плеер + «Остаться» 3с.
+    Потом вкатим в Qt.
+  </p>
+
+  <!-- static row -->
+  <div class="row-demo">
+    <h2>Ряд на главной (общая правка)</h2>
+    <p class="muted">Убраны «Очистить». Подпись аудио ясная. Два primary: Скачать + Плеер (Плеер реже нужен руками, если авто сработает).</p>
+    <div class="win">
+      <div class="titlebar">
+        <span>Subtitle Ripper Pro</span>
+        <span class="dots"><span></span><span></span><span></span></span>
+      </div>
+      <div class="body">
+        <div class="brand">
+          <div class="mark">SR</div>
+          <h3 class="app-title">YouTube → субтитры</h3>
+        </div>
+        <p class="sub">Вставь ссылку, выбери язык, жми «Скачать». Текст уйдёт в буфер · затем плеер.</p>
+        <input class="url" type="text" value="https://youtube.com/watch?v=dQw4w9WgXcQ" readonly />
+        <div class="lang">
+          Язык:
+          <button class="pill on" type="button">RU</button>
+          <button class="pill off" type="button">EN</button>
+        </div>
+        <div class="status">Статус: ожидание…</div>
+        <div class="btns">
+          <button class="primary" type="button">Скачать</button>
+          <button class="secondary" type="button">↓ MP3</button>
+          <button class="secondary" type="button">🎞 Фон</button>
+          <button class="primary" type="button">Плеер</button>
+          <button class="secondary" type="button">🔖 Закладки</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- A -->
+    <div class="variant" data-v="a">
+      <div class="vhead">
+        <h2>A — мгновенный cut</h2>
+        <span class="tag">как switch экрана</span>
+      </div>
+      <p class="why">Скачал → сразу экран плеера. Быстро, но «прыжок» без паузы: легко не понять, что буфер уже готов.</p>
+      <div class="stage-wrap win" id="stage-a">
+        <div class="titlebar">
+          <span>Subtitle Ripper Pro</span>
+          <span class="dots"><span></span><span></span><span></span></span>
+        </div>
+        <div class="download-pane body">
+          <div class="brand"><div class="mark">SR</div><h3 class="app-title">YouTube → субтитры</h3></div>
+          <input class="url" type="text" value="https://youtube.com/watch?v=…" readonly />
+          <div class="status" data-status>Статус: готов скачать</div>
+          <div class="btns">
+            <button class="primary" type="button" data-dl>Скачать</button>
+            <button class="secondary" type="button" disabled>↓ MP3</button>
+            <button class="secondary" type="button" disabled>🎞 Фон</button>
+            <button class="primary" type="button" disabled>Плеер</button>
+            <button class="secondary" type="button" disabled>🔖 Закладки</button>
+          </div>
+        </div>
+        <div class="player-pane player-body" hidden>
+          <div class="player-top">
+            <button class="back" type="button" data-back>← Назад</button>
+            <span>Плеер · субы готовы</span>
+          </div>
+          <div class="player-main">
+            <div class="video">
+              <div>
+                <div class="ph">Видео не загружено<br/>(как сейчас в коде)</div>
+                <button class="load-btn" type="button">▶ Загрузить видео</button>
+              </div>
+            </div>
+            <div class="side">
+              <div class="banner">Таймкоды · текст в буфере</div>
+              Разбор / моменты…
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="sim">
+        <button type="button" data-sim>Симулировать скачивание</button>
+        <button type="button" data-reset>Сброс</button>
+      </div>
+      <div class="steps" data-steps>шаги: —</div>
+    </div>
+
+    <!-- B -->
+    <div class="variant" data-v="b">
+      <div class="vhead">
+        <h2>B — мост ~1с</h2>
+        <span class="tag rec">рекомендую</span>
+      </div>
+      <p class="why">Статус: «Готово · открываю плеер…» → через ~1с экран плеера. Мозг успевает считать успех, без лишней кнопки.</p>
+      <div class="stage-wrap win" id="stage-b">
+        <div class="titlebar">
+          <span>Subtitle Ripper Pro</span>
+          <span class="dots"><span></span><span></span><span></span></span>
+        </div>
+        <div class="download-pane body">
+          <div class="brand"><div class="mark">SR</div><h3 class="app-title">YouTube → субтитры</h3></div>
+          <input class="url" type="text" value="https://youtube.com/watch?v=…" readonly />
+          <div class="status" data-status>Статус: готов скачать</div>
+          <div class="btns">
+            <button class="primary" type="button" data-dl>Скачать</button>
+            <button class="secondary" type="button" disabled>↓ MP3</button>
+            <button class="secondary" type="button" disabled>🎞 Фон</button>
+            <button class="primary" type="button" disabled>Плеер</button>
+            <button class="secondary" type="button" disabled>🔖 Закладки</button>
+          </div>
+        </div>
+        <div class="player-pane player-body" hidden>
+          <div class="player-top">
+            <button class="back" type="button" data-back>← Назад</button>
+            <span>Плеер · субы готовы</span>
+          </div>
+          <div class="player-main">
+            <div class="video">
+              <div>
+                <div class="ph">Видео не загружено</div>
+                <button class="load-btn" type="button">▶ Загрузить видео</button>
+              </div>
+            </div>
+            <div class="side">
+              <div class="banner sky">Субы + буфер готовы · жми ▶</div>
+              Разбор / моменты…
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="sim">
+        <button type="button" data-sim>Симулировать скачивание</button>
+        <button type="button" data-reset>Сброс</button>
+      </div>
+      <div class="steps" data-steps>шаги: —</div>
+    </div>
+
+    <!-- C -->
+    <div class="variant" data-v="c">
+      <div class="vhead">
+        <h2>C — плеер + отмена 3с</h2>
+        <span class="tag">если иногда только буфер</span>
+      </div>
+      <p class="why">Сразу в плеер, но toast «Остаться на главной» 3с. Если часто нужен только Ctrl+V — спасает. Чуть шумнее.</p>
+      <div class="stage-wrap win" id="stage-c">
+        <div class="titlebar">
+          <span>Subtitle Ripper Pro</span>
+          <span class="dots"><span></span><span></span><span></span></span>
+        </div>
+        <div class="download-pane body">
+          <div class="brand"><div class="mark">SR</div><h3 class="app-title">YouTube → субтитры</h3></div>
+          <input class="url" type="text" value="https://youtube.com/watch?v=…" readonly />
+          <div class="status" data-status>Статус: готов скачать</div>
+          <div class="btns">
+            <button class="primary" type="button" data-dl>Скачать</button>
+            <button class="secondary" type="button" disabled>↓ MP3</button>
+            <button class="secondary" type="button" disabled>🎞 Фон</button>
+            <button class="primary" type="button" disabled>Плеер</button>
+            <button class="secondary" type="button" disabled>🔖 Закладки</button>
+          </div>
+        </div>
+        <div class="player-pane player-body" hidden>
+          <div class="player-top">
+            <button class="back" type="button" data-back>← Назад</button>
+            <span>Плеер · субы готовы</span>
+          </div>
+          <div class="player-main">
+            <div class="video">
+              <div>
+                <div class="ph">Видео не загружено</div>
+                <button class="load-btn" type="button">▶ Загрузить видео</button>
+              </div>
+            </div>
+            <div class="side">
+              <div class="banner">Таймкоды · текст в буфере</div>
+              Разбор / моменты…
+            </div>
+          </div>
+          <div class="toast" data-toast>
+            <span>Открыл плеер · буфер готов</span>
+            <button type="button" data-stay>Остаться на главной</button>
+          </div>
+        </div>
+      </div>
+      <div class="sim">
+        <button type="button" data-sim>Симулировать скачивание</button>
+        <button type="button" data-reset>Сброс</button>
+      </div>
+      <div class="steps" data-steps>шаги: —</div>
+    </div>
+  </div>
+
+  <script>
+    function setSteps(el, text) {
+      el.querySelector("[data-steps]").textContent = "шаги: " + text;
+    }
+
+    function resetVariant(root) {
+      const stage = root.querySelector(".stage-wrap");
+      clearTimeout(stage._timer);
+      clearTimeout(stage._timer2);
+      stage.querySelector(".download-pane").hidden = false;
+      stage.querySelector(".player-pane").hidden = true;
+      const st = stage.querySelector("[data-status]");
+      st.textContent = "Статус: готов скачать";
+      st.className = "status";
+      const toast = stage.querySelector("[data-toast]");
+      if (toast) toast.classList.remove("show");
+      setSteps(root, "—");
+    }
+
+    function showPlayer(stage) {
+      stage.querySelector(".download-pane").hidden = true;
+      stage.querySelector(".player-pane").hidden = false;
+    }
+
+    function showDownload(stage) {
+      stage.querySelector(".download-pane").hidden = false;
+      stage.querySelector(".player-pane").hidden = true;
+    }
+
+    document.querySelectorAll(".variant").forEach((root) => {
+      const kind = root.dataset.v;
+      const stage = root.querySelector(".stage-wrap");
+
+      root.querySelector("[data-sim]").addEventListener("click", () => {
+        resetVariant(root);
+        const st = stage.querySelector("[data-status]");
+        st.textContent = "Статус: скачиваю субтитры…";
+        st.className = "status";
+        setSteps(root, "1 скачивание…");
+
+        stage._timer = setTimeout(() => {
+          if (kind === "a") {
+            st.textContent = "Готово!";
+            setSteps(root, "1 скачал → 2 плеер (сразу)");
+            showPlayer(stage);
+            return;
+          }
+          if (kind === "b") {
+            st.textContent = "Готово · текст в буфере · открываю плеер…";
+            st.className = "status bridge";
+            setSteps(root, "1 скачал → мост 1с…");
+            stage._timer2 = setTimeout(() => {
+              showPlayer(stage);
+              setSteps(root, "1 скачал → 2 мост → 3 плеер (▶ вручную)");
+            }, 1000);
+            return;
+          }
+          if (kind === "c") {
+            showPlayer(stage);
+            const toast = stage.querySelector("[data-toast]");
+            toast.classList.add("show");
+            setSteps(root, "1 скачал → 2 плеер + toast 3с");
+            stage._timer2 = setTimeout(() => {
+              toast.classList.remove("show");
+              setSteps(root, "1 скачал → 2 плеер (toast скрыт)");
+            }, 3000);
+          }
+        }, 700);
+      });
+
+      root.querySelector("[data-reset]").addEventListener("click", () => resetVariant(root));
+
+      stage.querySelector("[data-back]").addEventListener("click", () => {
+        clearTimeout(stage._timer);
+        clearTimeout(stage._timer2);
+        showDownload(stage);
+        const toast = stage.querySelector("[data-toast]");
+        if (toast) toast.classList.remove("show");
+        const st = stage.querySelector("[data-status]");
+        st.textContent = "Статус: на главной (субы уже есть)";
+        st.className = "status ok";
+        setSteps(root, "назад на главную");
+      });
+
+      const stay = stage.querySelector("[data-stay]");
+      if (stay) {
+        stay.addEventListener("click", () => {
+          clearTimeout(stage._timer2);
+          showDownload(stage);
+          stage.querySelector("[data-toast]").classList.remove("show");
+          const st = stage.querySelector("[data-status]");
+          st.textContent = "Готово! Текст в буфере — Ctrl+V. Плеер не открывал.";
+          st.className = "status ok";
+          setSteps(root, "отмена авто → остался на главной");
+        });
+      }
+    });
+  </script>
+</body>
+</html>

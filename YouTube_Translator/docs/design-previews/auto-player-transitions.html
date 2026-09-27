@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SR — анимации перехода в плеер</title>
+  <style>
+    :root {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      --bg: #080a0e;
+      --panel: #0c0f14;
+      --win: #0f1115;
+      --line: #1e2533;
+      --muted: #64748b;
+      --text: #e2e8f0;
+      --sky: #7dd3fc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 20px 72px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    h1 { font-size: 1.2rem; margin: 0 0 6px; font-weight: 600; }
+    .hint {
+      color: #94a3b8;
+      font-size: 0.92rem;
+      max-width: 860px;
+      line-height: 1.45;
+      margin: 0 0 8px;
+    }
+    .pick {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-bottom: 20px;
+      max-width: 860px;
+    }
+    .pick strong { color: #cbd5e1; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 18px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .vhead {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
+      margin-bottom: 6px;
+    }
+    .vhead h2 { margin: 0; font-size: 1rem; }
+    .tag {
+      font-size: 0.68rem; padding: 2px 8px; border-radius: 999px;
+      background: #1e293b; color: #94a3b8;
+    }
+    .tag.rec { background: #14332a; color: #6ee7b7; }
+    .why {
+      font-size: 0.78rem; color: #94a3b8; line-height: 1.4;
+      margin: 0 0 12px; min-height: 2.8em;
+    }
+
+    .stage {
+      position: relative;
+      height: 280px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      background: #05070c;
+    }
+    .chrome {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+    }
+    .titlebar {
+      flex: 0 0 auto;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 7px 12px; font-size: 11px; color: var(--muted);
+      background: #0c0e12; border-bottom: 1px solid #1c1f26;
+      z-index: 5;
+    }
+    .dots span {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; margin-right: 4px; background: #3f3f46;
+    }
+    .stack {
+      position: relative;
+      flex: 1;
+      overflow: hidden;
+      background: var(--win);
+    }
+    .pane {
+      position: absolute;
+      inset: 0;
+      padding: 12px;
+      background: var(--win);
+    }
+    .brand {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .mark {
+      width: 28px; height: 28px; border-radius: 8px;
+      background: linear-gradient(135deg, #475569, #1e293b);
+      display: grid; place-items: center;
+      font-size: 0.7rem; font-weight: 800;
+    }
+    .title { font-size: 0.95rem; font-weight: 700; margin: 0; }
+    .url {
+      width: 100%; border-radius: 8px; padding: 8px 10px;
+      border: 1px solid #2a3548; background: #151a24; color: #cbd5e1;
+      font-size: 0.75rem; margin-bottom: 8px;
+    }
+    .status {
+      font-size: 0.72rem; color: var(--muted);
+      min-height: 2.2em; margin-bottom: 8px; line-height: 1.35;
+    }
+    .status.bridge { color: var(--sky); }
+    .btns { display: flex; flex-wrap: wrap; gap: 5px; }
+    .btns span {
+      font-size: 0.7rem; font-weight: 600; padding: 7px 10px;
+      border-radius: 8px; background: #1e293b; border: 1px solid #334155;
+    }
+    .btns span.sec { background: #151a24; color: #cbd5e1; border-color: #2a3548; }
+
+    .player-pane { display: flex; flex-direction: column; padding: 0; }
+    .player-top {
+      display: flex; gap: 8px; align-items: center;
+      padding: 8px 10px; border-bottom: 1px solid #1c1f26;
+      font-size: 0.72rem; color: #94a3b8;
+    }
+    .back {
+      padding: 3px 8px; border-radius: 6px; background: #151a24;
+      border: 1px solid #2a3548; font-size: 0.68rem;
+    }
+    .player-main {
+      flex: 1; display: grid; grid-template-columns: 1.35fr 1fr;
+    }
+    .video {
+      background: #05070c; border-right: 1px solid #1c1f26;
+      display: grid; place-items: center; text-align: center;
+      color: var(--muted); font-size: 0.72rem; line-height: 1.4;
+    }
+    .load {
+      margin-top: 8px; display: inline-block;
+      padding: 7px 12px; border-radius: 8px;
+      background: #334155; color: #f8fafc; border: 1px solid #64748b;
+      font-size: 0.72rem; font-weight: 600;
+    }
+    .side {
+      padding: 10px; font-size: 0.7rem; color: #94a3b8; background: #0f1115;
+    }
+    .banner {
+      background: #0f172a; border: 1px solid rgba(56,189,248,.35);
+      color: var(--sky); border-radius: 8px; padding: 8px;
+      margin-bottom: 8px; line-height: 1.35;
+    }
+
+    /* ---- motion presets (applied via data-motion on .stack) ---- */
+    .stack[data-motion="none"] .pane-download,
+    .stack[data-motion="none"] .pane-player {
+      transition: none;
+    }
+    .stack[data-motion="none"] .pane-player[data-active="false"] { visibility: hidden; }
+    .stack[data-motion="none"] .pane-download[data-active="false"] { visibility: hidden; }
+
+    /* fade */
+    .stack[data-motion="fade"] .pane {
+      transition: opacity 280ms ease;
+    }
+    .stack[data-motion="fade"] .pane[data-active="false"] {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .stack[data-motion="fade"] .pane[data-active="true"] { opacity: 1; }
+
+    /* slide left (download exits left, player enters from right) */
+    .stack[data-motion="slide"] .pane {
+      transition: transform 320ms cubic-bezier(.22,.61,.36,1), opacity 280ms ease;
+    }
+    .stack[data-motion="slide"] .pane-download[data-active="true"] {
+      transform: translateX(0); opacity: 1;
+    }
+    .stack[data-motion="slide"] .pane-download[data-active="false"] {
+      transform: translateX(-28%); opacity: 0; pointer-events: none;
+    }
+    .stack[data-motion="slide"] .pane-player[data-active="false"] {
+      transform: translateX(40%); opacity: 0; pointer-events: none;
+    }
+    .stack[data-motion="slide"] .pane-player[data-active="true"] {
+      transform: translateX(0); opacity: 1;
+    }
+
+    /* soft zoom + fade */
+    .stack[data-motion="zoom"] .pane {
+      transition: transform 300ms cubic-bezier(.22,.61,.36,1), opacity 280ms ease;
+    }
+    .stack[data-motion="zoom"] .pane-download[data-active="true"] {
+      transform: scale(1); opacity: 1;
+    }
+    .stack[data-motion="zoom"] .pane-download[data-active="false"] {
+      transform: scale(0.96); opacity: 0; pointer-events: none;
+    }
+    .stack[data-motion="zoom"] .pane-player[data-active="false"] {
+      transform: scale(1.04); opacity: 0; pointer-events: none;
+    }
+    .stack[data-motion="zoom"] .pane-player[data-active="true"] {
+      transform: scale(1); opacity: 1;
+    }
+
+    /* push: both move together */
+    .stack[data-motion="push"] .pane {
+      transition: transform 340ms cubic-bezier(.22,.61,.36,1);
+    }
+    .stack[data-motion="push"] .pane-download[data-active="true"] {
+      transform: translateX(0);
+    }
+    .stack[data-motion="push"] .pane-download[data-active="false"] {
+      transform: translateX(-100%);
+    }
+    .stack[data-motion="push"] .pane-player[data-active="false"] {
+      transform: translateX(100%);
+    }
+    .stack[data-motion="push"] .pane-player[data-active="true"] {
+      transform: translateX(0);
+    }
+
+    .controls {
+      margin-top: 10px;
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .controls button {
+      font-size: 0.72rem; padding: 6px 10px; border-radius: 8px;
+      border: 1px solid #334155; background: #1a2230; color: #cbd5e1;
+      cursor: pointer;
+    }
+    .controls button:hover { border-color: #64748b; }
+    .steps {
+      margin-top: 8px;
+      font-size: 0.7rem;
+      color: var(--muted);
+      font-family: ui-monospace, Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>Анимация перехода · сценарий B</h1>
+  <p class="hint">
+    Сначала мост ~1с («Готово · открываю плеер…»), потом смена экрана.
+    Сравни движения. В Qt ближе всего к <strong>fade</strong> и <strong>zoom</strong>; slide/push с WebEngine чуть рискованнее.
+  </p>
+  <p class="pick">
+    Выбери: <strong>1 none</strong> · <strong>2 fade</strong> (рек.) · <strong>3 slide</strong> · <strong>4 zoom</strong> · <strong>5 push</strong>
+  </p>
+
+  <div class="grid">
+    <!-- 1 none -->
+    <div class="card" data-card data-motion="none">
+      <div class="vhead">
+        <h2>1 — без анимации</h2>
+        <span class="tag">baseline B</span>
+      </div>
+      <p class="why">Только статус-мост, потом резкий cut. Уже ок, если анимация бесит.</p>
+      <div class="stage" data-stage></div>
+      <div class="controls">
+        <button type="button" data-sim>Симулировать</button>
+        <button type="button" data-reset>Сброс</button>
+      </div>
+      <div class="steps" data-steps>шаги: —</div>
+    </div>
+
+    <!-- 2 fade -->
+    <div class="card" data-card data-motion="fade">
+      <div class="vhead">
+        <h2>2 — crossfade</h2>
+        <span class="tag rec">рекомендую</span>
+      </div>
+      <p class="why">~280 ms прозрачность. Спокойно для tool, дружит с WebEngine.</p>
+      <div class="stage" data-stage></div>
+      <div class="controls">
+        <button type="button" data-sim>Симулировать</button>
+        <button type="button" data-reset>Сброс</button>
+      </div>
+      <div class="steps" data-steps>шаги: —</div>
+    </div>
+
+    <!-- 3 slide -->
+    <div class="card" data-card data-motion="slide">
+      <div class="vhead">
+        <h2>3 — slide</h2>
+        <span class="tag">мягкий сдвиг</span>
+      </div>
+      <p class="why">Главная уходит влево, плеер заезжает справа + лёгкий fade. Чуть «приложение».</p>
+      <div class="stage" data-stage></div>
+      <div class="controls">
+        <button type="button" data-sim>Симулировать</button>
+        <button type="button" data-reset>Сброс</button>
+      </div>
+      <div class="steps" data-steps>шаги: —</div>
+    </div>
+
+    <!-- 4 zoom -->
+    <div class="card" data-card data-motion="zoom">
+      <div class="vhead">
+        <h2>4 — soft zoom</h2>
+        <span class="tag">характер</span>
+      </div>
+      <p class="why">Лёгкий scale + fade. Заметно, но без цирка. В Qt тоже реально через opacity/effect.</p>
+      <div class="stage" data-stage></div>
+      <div class="controls">
+        <button type="button" data-sim>Симулировать</button>
+        <button type="button" data-reset>Сброс</button>
+      </div>
+      <div class="steps" data-steps>шаги: —</div>
+    </div>
+
+    <!-- 5 push -->
+    <div class="card" data-card data-motion="push">
+      <div class="vhead">
+        <h2>5 — push 100%</h2>
+        <span class="tag">как iOS</span>
+      </div>
+      <p class="why">Экраны толкают друг друга целиком. Эффектно; в Qt с WebView чаще дёргается.</p>
+      <div class="stage" data-stage></div>
+      <div class="controls">
+        <button type="button" data-sim>Симулировать</button>
+        <button type="button" data-reset>Сброс</button>
+      </div>
+      <div class="steps" data-steps>шаги: —</div>
+    </div>
+  </div>
+
+  <template id="stage-tpl">
+    <div class="chrome">
+      <div class="titlebar">
+        <span>Subtitle Ripper Pro</span>
+        <span class="dots"><span></span><span></span><span></span></span>
+      </div>
+      <div class="stack">
+        <div class="pane pane-download" data-active="true">
+          <div class="brand"><div class="mark">SR</div><p class="title">YouTube → субтитры</p></div>
+          <input class="url" type="text" value="https://youtube.com/watch?v=…" readonly />
+          <div class="status" data-status>Статус: готов скачать</div>
+          <div class="btns">
+            <span>Скачать</span>
+            <span class="sec">↓ MP3</span>
+            <span class="sec">🎞 Фон</span>
+            <span>Плеер</span>
+            <span class="sec">🔖 Закладки</span>
+          </div>
+        </div>
+        <div class="pane pane-player player-pane" data-active="false">
+          <div class="player-top"><span class="back">← Назад</span><span>Плеер · субы готовы</span></div>
+          <div class="player-main">
+            <div class="video">
+              <div>
+                Видео не загружено<br/>(▶ вручную)
+                <div class="load">▶ Загрузить видео</div>
+              </div>
+            </div>
+            <div class="side">
+              <div class="banner">Субы + буфер готовы · жми ▶</div>
+              Разбор / моменты…
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    const tpl = document.getElementById("stage-tpl");
+
+    document.querySelectorAll("[data-card]").forEach((card) => {
+      const motion = card.dataset.motion;
+      const host = card.querySelector("[data-stage]");
+      host.appendChild(tpl.content.cloneNode(true));
+      const stack = host.querySelector(".stack");
+      stack.dataset.motion = motion;
+
+      const dl = host.querySelector(".pane-download");
+      const pl = host.querySelector(".pane-player");
+      const st = host.querySelector("[data-status]");
+      const steps = card.querySelector("[data-steps]");
+      let t1, t2;
+
+      function reset() {
+        clearTimeout(t1); clearTimeout(t2);
+        dl.dataset.active = "true";
+        pl.dataset.active = "false";
+        st.textContent = "Статус: готов скачать";
+        st.className = "status";
+        steps.textContent = "шаги: —";
+      }
+
+      function goPlayer() {
+        dl.dataset.active = "false";
+        pl.dataset.active = "true";
+      }
+
+      card.querySelector("[data-sim]").addEventListener("click", () => {
+        reset();
+        st.textContent = "Статус: скачиваю субтитры…";
+        steps.textContent = "шаги: 1 скачивание…";
+        t1 = setTimeout(() => {
+          st.textContent = "Готово · текст в буфере · открываю плеер…";
+          st.className = "status bridge";
+          steps.textContent = "шаги: 1 скачал → мост ~1с…";
+          t2 = setTimeout(() => {
+            goPlayer();
+            steps.textContent = "шаги: 1 скачал → 2 мост → 3 " + motion;
+          }, 1000);
+        }, 650);
+      });
+
+      card.querySelector("[data-reset]").addEventListener("click", reset);
+      reset();
+    });
+  </script>
+</body>
+</html>

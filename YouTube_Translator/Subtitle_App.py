@@ -53,7 +53,12 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
+from PySide6.QtWebEngineCore import (
+    QWebEnginePage,
+    QWebEngineProfile,
+    QWebEngineSettings,
+    QWebEngineUrlRequestInterceptor,
+)
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
@@ -818,15 +823,65 @@ def bookmark_allowed_hosts(items: list[dict] | None = None) -> tuple[str, ...]:
 _YT_NAV_HOSTS = (
     "youtube.com",
     "www.youtube.com",
+    "m.youtube.com",
+    "accounts.youtube.com",
+    "youtube-nocookie.com",
+    "www.youtube-nocookie.com",
     "accounts.google.com",
+    "myaccount.google.com",
     "google.com",
     "www.google.com",
+    "apis.google.com",
+    "clients.google.com",
+    "play.google.com",
     "ytimg.com",
     "yt3.ggpht.com",
     "googlevideo.com",
     "googleapis.com",
     "gstatic.com",
+    "googleusercontent.com",
+    "127.0.0.1",
+    "localhost",
 )
+
+# База для embed-shell (Referer). Top-level /embed/ без Referer → YouTube Error 153.
+_YT_EMBED_ORIGIN = "http://127.0.0.1"
+_YT_EMBED_REFERER = b"https://www.youtube.com/"
+
+
+class _YtRefererInterceptor(QWebEngineUrlRequestInterceptor):
+    """Referer только для медиа YouTube. Не трогать Google login (иначе вечная загрузка)."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.active = True
+
+    def interceptRequest(self, info) -> None:  # noqa: N802 — Qt API
+        if not self.active:
+            return
+        host = (info.requestUrl().host() or "").lower()
+        if not host:
+            return
+        # Вход Google ходит на gstatic/googleapis — подмена Referer вешает спиннер
+        if (
+            host.startswith("accounts.")
+            or host.startswith("myaccount.")
+            or "googleapis.com" in host
+            or "gstatic.com" in host
+            or host.endswith("google.com")
+            and "youtube" not in host
+        ):
+            return
+        if (
+            host == "youtu.be"
+            or host == "youtube.com"
+            or host.endswith(".youtube.com")
+            or "youtube-nocookie.com" in host
+            or "googlevideo.com" in host
+            or "ytimg.com" in host
+            or "ggpht.com" in host
+        ):
+            info.setHttpHeader(b"Referer", _YT_EMBED_REFERER)
 
 
 def _nav_host_allowed(host: str, allowed: tuple[str, ...]) -> bool:
@@ -2463,7 +2518,6 @@ class SubtitleApp(QMainWindow):
             self.load_video_btn,
             self.player_audio_btn,
             self.dist_files_btn,
-            self.login_btn,
             self.ai_invest_btn,
             self.ai_general_btn,
             self.sidebar_toggle_btn,
@@ -2780,14 +2834,6 @@ class SubtitleApp(QMainWindow):
         self.player_cancel_btn.setVisible(False)
         row1.addWidget(self.player_cancel_btn)
 
-        self.login_btn = QPushButton("Войти")
-        self.login_btn.setProperty("fallback", True)
-        self.login_btn.setToolTip("Войти в YouTube / назад к видео")
-        self._login_mode = False  # False=войти, True=назад к видео
-        self.login_btn.clicked.connect(self._login_btn_clicked)
-        # Кнопка «Войти» убрана из UI (логин через cookies/профиль при необходимости)
-        self.login_btn.hide()
-        self._refresh_login_btn_visibility()
         layout.addWidget(self.player_chrome_row1)
 
         self._player_page_layout = layout
@@ -2812,6 +2858,10 @@ class SubtitleApp(QMainWindow):
         self._yt_profile.setPersistentCookiesPolicy(
             QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
         )
+        self._yt_profile.setHttpUserAgent(_bookmarks_user_agent())
+        # Referer для медиа YouTube (не для Google login — см. interceptor)
+        self._yt_referer_interceptor = _YtRefererInterceptor(self)
+        self._yt_profile.setUrlRequestInterceptor(self._yt_referer_interceptor)
         settings = self._yt_profile.settings()
         # Жест не блокируем: иначе кадр часто белый. Автоplay гасим через _force_pause_youtube.
         settings.setAttribute(
@@ -2830,6 +2880,7 @@ class SubtitleApp(QMainWindow):
             pass
         self.web_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.web_view.loadFinished.connect(self._on_webview_loaded)
+        self.web_view.urlChanged.connect(self._on_yt_webview_url_changed)
         video_layout.addWidget(self.web_view)
 
         # Кнопка «Загрузить» убрана: YouTube грузится сам при открытии плеера (на паузе).
@@ -2919,7 +2970,6 @@ class SubtitleApp(QMainWindow):
             self.player_audio_btn,
             self.dist_files_btn,
             self.player_cancel_btn,
-            self.login_btn,
             self.ai_invest_btn,
             self.ai_general_btn,
             self.sidebar_toggle_btn,
@@ -3589,11 +3639,6 @@ class SubtitleApp(QMainWindow):
             pass
         self._player_video_loaded = False
         self._pending_seek_seconds = None
-        self._login_mode = False
-        if hasattr(self, "login_btn"):
-            self.login_btn.setText("Войти")
-            self.login_btn.setToolTip("Войти в YouTube")
-            self._refresh_login_btn_visibility()
 
     def _morph_shell_to(
         self,
@@ -3652,7 +3697,6 @@ class SubtitleApp(QMainWindow):
         self._cancel_auto_player()
 
         def _finish_show() -> None:
-            self._refresh_login_btn_visibility()
             QTimer.singleShot(0, lambda: self.web_view.setFocus())
 
         # Закладки не гасим: иначе Aniwaves каждый раз заново ловит Cloudflare
@@ -3971,13 +4015,9 @@ class SubtitleApp(QMainWindow):
             self._set_player_status("Статус: нет video ID — открой плеер из папки с субами")
             return
         self._set_player_status("Статус: загружаю YouTube…")
-        # embed: без белой шапки сайта, сразу кадр; autoplay=0 → старт на паузе
-        self.web_view.setUrl(
-            QUrl(
-                f"https://www.youtube.com/embed/{vid}"
-                f"?autoplay=0&rel=0&modestbranding=1&playsinline=1"
-            )
-        )
+        # watch (не голый /embed/): setHtml-оболочка давала чёрный экран в Qt WebEngine.
+        # Referer-interceptor на профиле — запас на embed/подресурсы (Error 153).
+        self.web_view.setUrl(QUrl(f"https://www.youtube.com/watch?v={vid}"))
 
     def _unload_player_page_only(self) -> None:
         """Сбросить WebView без сноса папки/меток."""
@@ -4238,36 +4278,23 @@ class SubtitleApp(QMainWindow):
             return True
         return _yt_profile_looks_logged_in()
 
-    def _refresh_login_btn_visibility(self) -> None:
-        """Кнопка «Войти» скрыта из UI (оставлена в коде на случай возврата)."""
-        if not hasattr(self, "login_btn"):
-            return
-        self.login_btn.hide()
-        self._login_mode = False
+    def _on_yt_webview_url_changed(self, url: QUrl) -> None:
+        """Вход через UI YouTube: на accounts.* не подменяем Referer."""
+        self._sync_yt_referer_for_url(url)
 
-    def _login_btn_clicked(self) -> None:
-        # UI-кнопки нет; логика сохранена на случай ручного вызова
-        if not self._login_mode:
-            # → открыть страницу входа
-            self.web_view.setUrl(QUrl("https://accounts.google.com/signin/v2/identifier?service=youtube"))
-            self._set_player_status("Статус: войди в аккаунт (кнопка Войти скрыта — логин через cookies)")
-            self.login_btn.setText("Назад")
-            self.login_btn.setToolTip("Назад к видео")
-            self._login_mode = True
-            self.login_btn.hide()
-        else:
-            # → вернуться на видео
-            self.login_btn.setText("Войти")
-            self.login_btn.setToolTip("Войти в YouTube")
-            self._login_mode = False
-            self._refresh_login_btn_visibility()
-            if self._current_player_folder:
-                vid = _extract_id_from_folder(self._current_player_folder)
-                if vid:
-                    self._player_pending_video_id = vid
-                    self.on_load_player_video()
-                    return
-            self._set_player_status("Статус: нет video ID для возврата")
+    def _sync_yt_referer_for_url(self, url: QUrl | str) -> None:
+        if not hasattr(self, "_yt_referer_interceptor"):
+            return
+        s = url.toString() if isinstance(url, QUrl) else str(url or "")
+        s = s.lower()
+        on_google_login = (
+            "accounts.google." in s
+            or "myaccount.google." in s
+            or "accounts.youtube." in s
+            or ("google." in s and "/signin" in s)
+            or ("google." in s and "/servicelogin" in s)
+        )
+        self._yt_referer_interceptor.active = not on_google_login
 
     def seek_in_player(self, seconds: int) -> None:
         # Если видео ещё не грузили — сначала ▶, потом seek после load
@@ -4281,12 +4308,13 @@ class SubtitleApp(QMainWindow):
         self._seek_in_player_now(int(seconds))
 
     def _seek_in_player_now(self, seconds: int) -> None:
+        sec = int(seconds)
         script = f"""
         (function() {{
             try {{
                 var video = document.querySelector('video');
                 if (video) {{
-                    video.currentTime = {int(seconds)};
+                    video.currentTime = {sec};
                     var p = video.play();
                     if (p && p.catch) p.catch(function(){{}});
                     return 'seek';
@@ -4310,6 +4338,7 @@ class SubtitleApp(QMainWindow):
             url = self.web_view.url().toString()
         except Exception:  # noqa: BLE001
             url = ""
+        self._sync_yt_referer_for_url(url)
         is_yt = (
             "youtube.com" in url
             or "youtu.be" in url
@@ -4338,7 +4367,7 @@ class SubtitleApp(QMainWindow):
             self._set_player_status("Статус: встроенный плеер готов")
         else:
             self._set_player_status(
-                "Статус: встроенный плеер не загрузился — проверь VPN/сеть или Войти."
+                "Статус: плеер не загрузился — VPN/сеть или войди через UI YouTube."
             )
 
     def on_download(self) -> None:
