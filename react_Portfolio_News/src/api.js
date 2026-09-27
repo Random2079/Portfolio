@@ -1,6 +1,8 @@
-/** Vanilla Portfolio_News API (python -m portfolio_news serve). */
-export const API_BASE =
-  (import.meta.env.VITE_API_BASE || "http://127.0.0.1:8765").replace(/\/$/, "");
+/**
+ * Same-origin by default (serve /app/ or Vite proxy /api → :8765).
+ * Override: VITE_API_BASE=http://127.0.0.1:8765
+ */
+export const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
 
 function urlFor(path) {
   return path.startsWith("http")

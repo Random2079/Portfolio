@@ -10,7 +10,7 @@ import time
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc, select
@@ -36,6 +36,8 @@ log = logging.getLogger(__name__)
 _settings = get_settings()
 _SessionLocal = make_session_factory(_settings.database_url)
 _STATIC = Path(__file__).resolve().parent / "static"
+# Sibling DS_Projects/react_Portfolio_News/dist (npm run build there)
+_REACT_DIST = Path(__file__).resolve().parents[2] / "react_Portfolio_News" / "dist"
 
 
 def get_db():
@@ -452,6 +454,12 @@ def ui_demo():
 def ui_pay_chart_demo():
     """K7 chart design sandbox — not the live calendar."""
     return _html(_STATIC / "pay-chart-demo.html")
+
+
+@app.get("/app")
+def react_ui_redirect():
+    """React UI (built dist) — same process as API; vanilla stays on /."""
+    return RedirectResponse(url="/app/", status_code=307)
 
 
 @app.get("/api/health")
@@ -1642,3 +1650,25 @@ def chart_ticker(
 
 # Local assets (e.g. offline logos under static/logos/)
 app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
+
+# React UI from sibling react_Portfolio_News/dist → http://127.0.0.1:8765/app/
+if (_REACT_DIST / "index.html").is_file():
+    app.mount(
+        "/app",
+        StaticFiles(directory=str(_REACT_DIST), html=True),
+        name="react_app",
+    )
+else:
+
+    @app.get("/app/")
+    def react_ui_missing():
+        return HTMLResponse(
+            "<!doctype html><meta charset=utf-8><title>React UI</title>"
+            "<body style='font:14px/1.4 system-ui;max-width:40rem;margin:2rem'>"
+            "<h1>React UI не собран</h1>"
+            "<p>В <code>DS_Projects/react_Portfolio_News</code>:</p>"
+            "<pre>npm install\nnpm run build</pre>"
+            "<p>Потом перезапусти <code>python -m portfolio_news serve</code>.</p>"
+            "<p>Ваниль: <a href=/>/</a></p>",
+            status_code=503,
+        )

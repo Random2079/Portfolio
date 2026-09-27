@@ -166,6 +166,8 @@ export default function App() {
 
   const apiOk = !!(health && (health.ok === true || health.ok === "true"));
   const top = (day && day.top) || [];
+  const apiLabel = API_BASE || (typeof window !== "undefined" ? window.location.origin : "этот сервер");
+  const apiHref = API_BASE || "/";
 
   return (
     <div className="shell">
@@ -180,8 +182,8 @@ export default function App() {
           <h1 className="brand">Portfolio News</h1>
           <p className="tagline">
             Утренний терминал · API{" "}
-            <a href={API_BASE} target="_blank" rel="noreferrer">
-              {API_BASE}
+            <a href={apiHref} target="_blank" rel="noreferrer">
+              {apiLabel}
             </a>
           </p>
         </div>

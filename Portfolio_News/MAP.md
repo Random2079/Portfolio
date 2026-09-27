@@ -1,7 +1,7 @@
 # MAP — Portfolio_News (IDEA-003)
 
 **Это главная карта для тебя.** Один файл: что есть, что дальше, как устроено, что нельзя.  
-Обновлено: **2026-09-26**.
+Обновлено: **2026-09-27**.
 
 Остальные `docs/TZ.md`, `docs/parts/*`, `.cursor/WHERE_WE_ARE.md`, `.cursor/plans/*` — техника или **указатели сюда**.  
 Статус / очередь / план следующего слоя **не дублировать** в parts и plans.  
@@ -17,20 +17,21 @@
 - разбор бумаги: карточка + график + **сверка/факты**  
 - не советник, не торговый бот, не «купи/продай»
 
-**Запуск:** `python -m portfolio_news serve` → http://127.0.0.1:8765/  
-После правок API — **перезапустить serve** (иначе старый процесс).
+**Запуск утро:** `python -m portfolio_news serve` →  
+- React: http://127.0.0.1:8765/app/ (нужен `npm run build` в `react_Portfolio_News`)  
+- Ваниль-бэкап: http://127.0.0.1:8765/  
+После правок API — **перезапустить serve**. После правок React — `npm run build`, потом refresh (перезапуск serve только если dist не было).
 
-**Репо:** `Portfolio_News/` · карточка идей: `IDEAS.md` → IDEA-003
+**Репо:** `Portfolio_News/` · React UI: sibling `react_Portfolio_News/` · IDEA-003
 
 ---
 
 ## 2. Где мы сейчас (одним абзацем)
 
-**Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап**, не пилим фичи/KV сюда.  
-Файл-референс и откат: `portfolio_news/static/dashboard-demo.html` (+ API как есть).  
-**Новый трек (2026-09-26):** **React UI** в sibling **`react_Portfolio_News/`** — красота, анимация; поведение с ванильного дашборда.  
-Если React «пизда» → снова пользуемся ванилью на `serve` `/`, React не трогаем API.  
-**Очередь:** React MVP по слоям (не G/чат, пока не скажешь) — дальше **R2**. G и хвосты ванили — на паузе.
+**Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
+**React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
+Если React «пизда» → снова `/` ванили.  
+**Очередь:** дальше **R2**. G и хвосты ванили — на паузе.
 
 ---
 
@@ -221,9 +222,10 @@
 
 **Зачем:** красота, анимация, удобство; пощупать React.  
 **Где код:** sibling-папка **`DS_Projects/react_Portfolio_News/`** (не внутри freeze ванили).  
-**Бэкап:** репо `Portfolio_News/` + `dashboard-demo.html`; `serve` `/` = ваниль.  
-**API:** тот же FastAPI на `127.0.0.1:8765`; React только клиент (Vite proxy).  
-**Старый** `Portfolio_News/frontend/` — черновик, не канон; канон = `react_Portfolio_News/`.
+**Бэкап:** `serve` `/` = ваниль `dashboard-demo.html`.  
+**Утро:** один процесс — `serve` отдаёт API + собранный React на **`/app/`** (`dist/` после `npm run build`).  
+**Пилить UI:** `npm run dev` на `:5173` + тот же API.  
+**Старый** `Portfolio_News/frontend/` — черновик, не канон.
 
 ### Правила отката
 
@@ -266,7 +268,8 @@
 
 | Зона | Файлы |
 |------|--------|
-| UI | `portfolio_news/static/dashboard-demo.html` |
+| UI ваниль | `portfolio_news/static/dashboard-demo.html` |
+| UI React | sibling `react_Portfolio_News/` → `dist/` на `/app/` |
 | API | `portfolio_news/api.py` |
 | Сверка | `review_facts.py`, `fundamentals_smartlab.py`, `bonds_dohod.py`, `funds_cbr_ter.py` |
 | График | `chart_cache.py`, LWC в dashboard |

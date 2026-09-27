@@ -4,30 +4,45 @@
 
 Карта: [`../Portfolio_News/MAP.md`](../Portfolio_News/MAP.md) §7R.
 
-## Запуск
+## Утро (один процесс)
 
-Терминал 1 — ванильный backend:
+Сначала один раз собрать UI (после правок React — снова):
+
+```powershell
+cd ..\react_Portfolio_News
+npm run build
+```
+
+или из `Portfolio_News`: `.\scripts\build_react_ui.ps1`
+
+Потом только API:
 
 ```powershell
 cd ..\Portfolio_News
 python -m portfolio_news serve
 ```
 
-Терминал 2 — React:
+- **React:** http://127.0.0.1:8765/app/  
+- **Ваниль (бэкап):** http://127.0.0.1:8765/  
+
+`/api` — тот же сервер (same-origin). Vite для утра не нужен.
+
+## Разработка UI (два процесса)
 
 ```powershell
+# терминал 1
+cd ..\Portfolio_News
+python -m portfolio_news serve
+
+# терминал 2
 cd ..\react_Portfolio_News
-npm install
 npm run dev
 ```
 
 Открыть: http://127.0.0.1:5173/  
-Бэкап ванили: http://127.0.0.1:8765/
+Vite проксирует `/api` → `:8765`. `api.js` по умолчанию ходит относительными путями.
 
-Vite проксирует `/api` → `127.0.0.1:8765`, но UI ходит **напрямую** на API
-(`src/api.js` → `http://127.0.0.1:8765`). CORS на FastAPI уже разрешает `:5173`.
-
-Переопределить: `VITE_API_BASE=http://127.0.0.1:8765` в `.env` при необходимости.
+Переопределить API: `VITE_API_BASE=http://127.0.0.1:8765` в `.env`.
 
 ## Слои
 
