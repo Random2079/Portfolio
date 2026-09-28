@@ -24,12 +24,13 @@
 |---------|----------|
 | Stage (полное окно) + playing + галка «Авто-плотность» | Старт idle-таймера |
 | Idle `auto_density_idle_sec` (дефолт **4**) без мыши по кадру | Вкл сквозь + % от яркости стола/обоев (база `auto_density_pct` ±22) → `_apply_stage_opacity` |
+| Пока авто-сквозь | Каждые `auto_density_adapt_sec` (дефолт **2**) снова меряет стол и подкручивает % (средняя видимость) |
 | Mouse move/click по кадру, Esc, ручной выкл сквозь, выход в каталог, stop | Стоп таймера; если был авто-CT — выкл сквозь (как Esc), плотность слайдера **не** затирать (prefs) |
 | Каталог / не playing | Авто не активен; opacity 100% как сейчас |
 
 **Контракт (не ломать):** `_apply_stage_opacity` — `% < 100` только при `_click_through`. Авто **сначала** сквозь, потом %.
 
-**A3 яркость:** сэмпл экрана вне окна Фона; если почти fullscreen → файл обоев Windows. Светлый → выше %; тёмный → ниже %. Нет данных → база prefs.
+**A3 яркость:** сэмпл экрана вне окна Фона; если почти fullscreen → файл обоев / цвет стола. Светлый → выше %; тёмный → ниже %. Нет данных → база prefs. Ctrl+[ / ] — пауза тика ~8с.
 
 ---
 
@@ -37,10 +38,10 @@
 
 | Слой | Статус | Что в коде |
 |------|--------|------------|
-| **A0** | ✅ | Prefs + UI Настр. (`auto_density`, `auto_density_pct`, `auto_density_idle_sec`). |
+| **A0** | ✅ | Prefs + UI Настр. (`auto_density`, `auto_density_pct`, `auto_density_idle_sec`, `auto_density_adapt_sec`). |
 | **A1** | ✅ | `QTimer` idle; на fire → CT + pct; хук play/stage/catalog/pause. |
 | **A2** | ✅ | Hold при next track; авто-% не в `stage_opacity` prefs; выход CT → вернуть ручной %; каталог 100%. |
-| **A3** | ✅ | На fire: `%` от яркости стола/обоев (база ± span). |
+| **A3** | ✅ | Fire + тик пока CT: `%` от яркости стола (база ± span). |
 
 ---
 
@@ -51,6 +52,7 @@
 | Prefs load/save | `load_overlay_prefs` / `save_overlay_prefs` |
 | Настр. UI | `OverlaySettingsDialog` |
 | Яркость стола / обои | `_desktop_luminance_outside`, `_wallpaper_luminance`, `_resolve_auto_density_pct` |
+| Тик средней видимости | `_start_auto_density_adapt`, `_on_auto_density_adapt_tick` |
 | Поставить opacity | `_apply_stage_opacity`, `_apply_catalog_opacity` |
 | Сквозь | `_set_click_through`, `_toggle_click_through` |
 | Play/pause/stage | `_toggle_play`, `_enter_stage`, `_enter_catalog`, playback state |
@@ -65,8 +67,8 @@
 - Отдельный процесс / ML / камера
 - Плотность в каталоге
 - Правки `Subtitle_App.py`, SMTC, хоткеев списка
-- Менять смысл Ctrl+[ / слайдера вручную (ручной override ок)
-- Пересчёт яркости каждые N сек пока уже в CT (только на fire)
+- Менять смысл Ctrl+[ / слайдера вручную (ручной override ок; пауза тика ~8с)
+- Сэмпл «под» fullscreen-стеклом (grab не видит сквозь окно — края монитора / обои)
 
 ---
 
@@ -84,6 +86,6 @@ python overlay_player.py
 
 **A2:** После авто — next track без мигания 100%; каталог снова 100%.
 
-**A3:** Светлые обои → статус `%` выше базы; тёмные → ниже. Статус вида `Авто-плотность 58% (обои светлый)`.
+**A3:** Светлые обои → статус `%` выше базы; тёмные → ниже. Пока сквозь — тик каждые 2с подкручивает %. Ctrl+[ — не перебивает ~8с.
 
 **Регрессия:** клик/2× по кадру; ручной слайдер + Ctrl+O без галки авто; play when hidden.

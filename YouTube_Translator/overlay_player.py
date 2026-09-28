@@ -391,6 +391,7 @@ _DEFAULT_PREFS = {
     "auto_density": False,
     "auto_density_pct": 45,
     "auto_density_idle_sec": 4,
+    "auto_density_adapt_sec": 2,
     "hotkeys": dict(_DEFAULT_HOTKEYS),
 }
 
@@ -568,6 +569,8 @@ def load_overlay_prefs() -> dict:
             )
         if "auto_density_idle_sec" in raw:
             data["auto_density_idle_sec"] = max(1, min(120, int(raw["auto_density_idle_sec"])))
+        if "auto_density_adapt_sec" in raw:
+            data["auto_density_adapt_sec"] = max(1, min(60, int(raw["auto_density_adapt_sec"])))
         hk = raw.get("hotkeys")
         if isinstance(hk, dict):
             for key, default in _DEFAULT_HOTKEYS.items():
@@ -1173,6 +1176,17 @@ class OverlaySettingsDialog(QDialog):
         self.auto_density_idle.setSuffix(" с")
         self.auto_density_idle.setValue(max(1, min(120, int(prefs.get("auto_density_idle_sec", 4)))))
         top.addRow("Авто: пауза до сквозь", self.auto_density_idle)
+        self.auto_density_adapt = QSpinBox()
+        self.auto_density_adapt.setRange(1, 60)
+        self.auto_density_adapt.setSuffix(" с")
+        self.auto_density_adapt.setValue(
+            max(1, min(60, int(prefs.get("auto_density_adapt_sec", 2))))
+        )
+        self.auto_density_adapt.setToolTip(
+            "Пока сквозь авто: раз в N сек снова меряет яркость стола и подкручивает %, "
+            "чтобы анимация в среднем оставалась видна. Ctrl+[ / ] — пауза подстройки ~8с."
+        )
+        top.addRow("Авто: обновлять % каждые", self.auto_density_adapt)
         layout.addLayout(top)
 
         hk_title = QLabel(
@@ -1302,6 +1316,7 @@ class OverlaySettingsDialog(QDialog):
             "auto_density": self.auto_density.isChecked(),
             "auto_density_pct": int(self.auto_density_pct.value()),
             "auto_density_idle_sec": int(self.auto_density_idle.value()),
+            "auto_density_adapt_sec": int(self.auto_density_adapt.value()),
             "hotkeys": hotkeys,
         }
 
@@ -1358,7 +1373,11 @@ class OverlayPlayerWindow(QWidget):
         self._auto_density_timer = QTimer(self)
         self._auto_density_timer.setSingleShot(True)
         self._auto_density_timer.timeout.connect(self._on_auto_density_fire)
+        self._auto_density_adapt_timer = QTimer(self)
+        self._auto_density_adapt_timer.setSingleShot(False)
+        self._auto_density_adapt_timer.timeout.connect(self._on_auto_density_adapt_tick)
         self._auto_density_armed = False  # сквозь включили авто
+        self._auto_density_manual_until = 0.0  # Ctrl+[ / ] — не перебивать N сек
         self._suppress_opacity_prefs = False  # A2: авто-% не писать в stage_opacity
         self._hk_retry_pending = False
         self._hotkeys_registered: set[int] = set()
@@ -1986,10 +2005,49 @@ class OverlayPlayerWindow(QWidget):
         self._auto_density_timer.stop()
         if exit_ct_if_armed and self._auto_density_armed and self._click_through:
             self._auto_density_armed = False
+            self._stop_auto_density_adapt()
             self._set_click_through(False)
         else:
             if not self._click_through:
                 self._auto_density_armed = False
+                self._stop_auto_density_adapt()
+
+    def _start_auto_density_adapt(self) -> None:
+        """Пока авто-сквозь: периодически мерять стол и держать среднюю видимость."""
+        self._auto_density_adapt_timer.stop()
+        if not self._prefs.get("auto_density"):
+            return
+        if not (self._auto_density_armed and self._click_through and self._stage_mode):
+            return
+        sec = max(1, min(60, int(self._prefs.get("auto_density_adapt_sec", 2))))
+        self._auto_density_adapt_timer.start(sec * 1000)
+
+    def _stop_auto_density_adapt(self) -> None:
+        self._auto_density_adapt_timer.stop()
+
+    def _on_auto_density_adapt_tick(self) -> None:
+        if not self._prefs.get("auto_density"):
+            self._stop_auto_density_adapt()
+            return
+        if not (
+            self._auto_density_armed
+            and self._click_through
+            and self._stage_mode
+            and self._playing
+        ):
+            self._stop_auto_density_adapt()
+            return
+        if time.monotonic() < self._auto_density_manual_until:
+            return
+        pct, tone = self._resolve_auto_density_pct()
+        cur = int(self.opacity_slider.value())
+        if abs(pct - cur) < 2:
+            return
+        self._set_opacity_slider_visual(pct, persist=False)
+        self._apply_stage_opacity()
+        self.status.setText(
+            f"Авто-плотность {pct}% ({tone}) · сквозь · Ctrl+O / Esc — вернуть"
+        )
 
     def _resolve_auto_density_pct(self) -> tuple[int, str]:
         """База prefs + яркость стола/обоев → итоговый % и короткая метка."""
@@ -2023,6 +2081,7 @@ class OverlayPlayerWindow(QWidget):
         self.status.setText(
             f"Авто-плотность {pct}% ({tone}) · сквозь · Ctrl+O / Esc — вернуть"
         )
+        self._start_auto_density_adapt()
 
     def _set_opacity_slider_visual(self, pct: int, *, persist: bool) -> None:
         """Выставить слайдер; persist=False — не в prefs (авто-сессия)."""
@@ -2177,6 +2236,9 @@ class OverlayPlayerWindow(QWidget):
         self._prefs["stage_opacity"] = int(self.opacity_slider.value())
         self._apply_stage_opacity()
         self._flush_opacity_prefs()
+        # Ручной Ctrl+[ / ] — не перебивать авто-подстройкой ~8с
+        if self._auto_density_armed and self._click_through:
+            self._auto_density_manual_until = time.monotonic() + 8.0
 
     def _enter_stage(self) -> None:
         """Полное окно: каталог спрятан, видео/пульс на весь экран, управление снизу."""
@@ -2348,6 +2410,8 @@ class OverlayPlayerWindow(QWidget):
                 # Подцепить VK_MEDIA_* пока играет
                 QTimer.singleShot(0, self._register_hotkeys)
             self._arm_auto_density_timer()
+            if self._auto_density_armed and self._click_through:
+                self._start_auto_density_adapt()
         else:
             self._set_play_icon(False)
             if state == QMediaPlayer.PlaybackState.StoppedState:
@@ -2632,6 +2696,7 @@ class OverlayPlayerWindow(QWidget):
         if not enabled:
             self._auto_density_armed = False
             self._auto_density_timer.stop()
+            self._stop_auto_density_adapt()
             # Вернуть слайдер к ручному stage_opacity (авто-% в prefs не писали)
             saved = int(self._prefs.get("stage_opacity", self.opacity_slider.value()))
             self._set_opacity_slider_visual(saved, persist=False)
