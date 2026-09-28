@@ -23,6 +23,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QGuiApplication,
     QIcon,
     QKeySequence,
     QLinearGradient,
@@ -326,8 +327,12 @@ _VOLUME_STEP = 5
 _OPACITY_STEP = 5
 _OPACITY_MIN = 5
 _OPACITY_MAX = 100
+# A3: база ± span от яркости стола (светлый → плотнее, тёмный → прозрачнее)
+_AUTO_DENSITY_LUMA_SPAN = 22
 # Метка «сейчас играет» в QListWidgetItem
 _ROLE_PLAYING = int(Qt.ItemDataRole.UserRole) + 1
+
+_wallpaper_luma_cache: tuple[str, float, float] | None = None  # path, mtime, luma
 
 # Зажатие → повтор (без MOD_NOREPEAT)
 _REPEATABLE_HOTKEY_IDS = frozenset({
@@ -397,6 +402,122 @@ def _clean_media_title(stem: str) -> str:
     """Убрать [youtubeId] из отображаемого имени; файл не трогаем."""
     t = _YT_ID_BRACKET_RE.sub(" ", stem)
     return re.sub(r"\s{2,}", " ", t).strip() or stem
+
+
+def _pixel_luma01(c: QColor) -> float:
+    return (0.2126 * c.red() + 0.7152 * c.green() + 0.0722 * c.blue()) / 255.0
+
+
+def _pixmap_avg_luma(pm: QPixmap, *, step: int = 24) -> float | None:
+    if pm.isNull():
+        return None
+    img = pm.toImage()
+    if img.isNull():
+        return None
+    w, h = img.width(), img.height()
+    if w < 2 or h < 2:
+        return None
+    sx = max(1, min(step, w // 8))
+    sy = max(1, min(step, h // 8))
+    total = 0.0
+    n = 0
+    for y in range(0, h, sy):
+        for x in range(0, w, sx):
+            total += _pixel_luma01(img.pixelColor(x, y))
+            n += 1
+    return (total / n) if n else None
+
+
+def _desktop_background_color_luminance() -> float | None:
+    """Яркость сплошного цвета стола (когда WallPaper пустой)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Colors") as key:
+            raw, _ = winreg.QueryValueEx(key, "Background")
+        parts = [int(x) for x in str(raw).split()]
+        if len(parts) < 3:
+            return None
+        return _pixel_luma01(QColor(parts[0], parts[1], parts[2]))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _wallpaper_luminance() -> float | None:
+    """Средняя яркость файла обоев Windows (кеш по path+mtime)."""
+    global _wallpaper_luma_cache
+    if sys.platform != "win32":
+        return None
+    path_s = ""
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Desktop") as key:
+            path_s, _ = winreg.QueryValueEx(key, "WallPaper")
+    except OSError:
+        path_s = ""
+    p = Path(path_s) if path_s else None
+    if p is None or not p.is_file():
+        return _desktop_background_color_luminance()
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        return _desktop_background_color_luminance()
+    if (
+        _wallpaper_luma_cache is not None
+        and _wallpaper_luma_cache[0] == str(p)
+        and _wallpaper_luma_cache[1] == mtime
+    ):
+        return _wallpaper_luma_cache[2]
+    luma = _pixmap_avg_luma(QPixmap(str(p)), step=32)
+    if luma is None:
+        return _desktop_background_color_luminance()
+    _wallpaper_luma_cache = (str(p), mtime, luma)
+    return luma
+
+
+def _desktop_luminance_outside(exclude_geo) -> float | None:
+    """
+    Яркость стола: пиксели экрана вне окна Фона.
+    Если Фон почти fullscreen — мало сэмплов → None (caller → обои).
+    """
+    screens = QGuiApplication.screens()
+    if not screens:
+        return None
+    total = 0.0
+    n = 0
+    for screen in screens:
+        try:
+            pm = screen.grabWindow(0)
+        except Exception:
+            continue
+        img = pm.toImage()
+        if img.isNull():
+            continue
+        geo = screen.geometry()
+        w, h = img.width(), img.height()
+        sx = max(1, w // 16)
+        sy = max(1, h // 12)
+        for y in range(0, h, sy):
+            for x in range(0, w, sx):
+                gx = geo.x() + int(x * geo.width() / max(1, w))
+                gy = geo.y() + int(y * geo.height() / max(1, h))
+                if exclude_geo is not None and exclude_geo.contains(gx, gy):
+                    continue
+                total += _pixel_luma01(img.pixelColor(x, y))
+                n += 1
+    if n < 12:
+        return None
+    return total / n
+
+
+def _auto_density_pct_from_luma(base: int, luma: float) -> int:
+    """Светлый стол → выше % (плотнее); тёмный → ниже % (прозрачнее)."""
+    # luma 0 → base−span, luma 1 → base+span
+    pct = int(round(base + (luma * 2.0 - 1.0) * _AUTO_DENSITY_LUMA_SPAN))
+    return max(_OPACITY_MIN, min(_OPACITY_MAX, pct))
 
 
 def _win_long_fns():
@@ -1033,7 +1154,8 @@ class OverlaySettingsDialog(QDialog):
         self.auto_density = QCheckBox("Авто-плотность (полный экран + play → idle → сквозь)")
         self.auto_density.setChecked(bool(prefs.get("auto_density", False)))
         self.auto_density.setToolTip(
-            "Через N сек без мыши по кадру: сам включает сквозь и ставит плотность %"
+            "Через N сек без мыши по кадру: сквозь + плотность от яркости стола "
+            "(светлый → плотнее, тёмный → прозрачнее). База — спинбокс ниже."
         )
         top.addRow(self.auto_density)
         self.auto_density_pct = QSpinBox()
@@ -1042,7 +1164,10 @@ class OverlaySettingsDialog(QDialog):
         self.auto_density_pct.setValue(
             max(_OPACITY_MIN, min(_OPACITY_MAX, int(prefs.get("auto_density_pct", 45))))
         )
-        top.addRow("Авто: целевая плотность", self.auto_density_pct)
+        self.auto_density_pct.setToolTip(
+            f"База: итог ≈ база ±{_AUTO_DENSITY_LUMA_SPAN} по яркости обоев/стола"
+        )
+        top.addRow("Авто: база плотности (± стол)", self.auto_density_pct)
         self.auto_density_idle = QSpinBox()
         self.auto_density_idle.setRange(1, 120)
         self.auto_density_idle.setSuffix(" с")
@@ -1848,23 +1973,37 @@ class OverlayPlayerWindow(QWidget):
             if not self._click_through:
                 self._auto_density_armed = False
 
+    def _resolve_auto_density_pct(self) -> tuple[int, str]:
+        """База prefs + яркость стола/обоев → итоговый % и короткая метка."""
+        base = max(
+            _OPACITY_MIN,
+            min(_OPACITY_MAX, int(self._prefs.get("auto_density_pct", 45))),
+        )
+        luma = _desktop_luminance_outside(self.frameGeometry())
+        src = "стол"
+        if luma is None:
+            luma = _wallpaper_luminance()
+            src = "обои"
+        if luma is None:
+            return base, "база"
+        pct = _auto_density_pct_from_luma(base, luma)
+        tone = "светлый" if luma >= 0.55 else ("тёмный" if luma <= 0.35 else "средний")
+        return pct, f"{src} {tone}"
+
     def _on_auto_density_fire(self) -> None:
-        """Idle истёк → сквозь + целевая плотность (не пишем stage_opacity на диск)."""
+        """Idle истёк → сквозь + плотность от яркости стола (не пишем stage_opacity)."""
         if not self._prefs.get("auto_density"):
             return
         if not self._stage_mode or not self._playing or self._click_through:
             return
-        pct = max(
-            _OPACITY_MIN,
-            min(_OPACITY_MAX, int(self._prefs.get("auto_density_pct", 45))),
-        )
+        pct, tone = self._resolve_auto_density_pct()
         self._auto_density_armed = True
         self._set_click_through(True)
         # Слайдер только для живого стекла; prefs stage_opacity не трогаем (A2)
         self._set_opacity_slider_visual(pct, persist=False)
         self._apply_stage_opacity()
         self.status.setText(
-            f"Авто-плотность {pct}% · сквозь · Ctrl+O / Esc — вернуть управление"
+            f"Авто-плотность {pct}% ({tone}) · сквозь · Ctrl+O / Esc — вернуть"
         )
 
     def _set_opacity_slider_visual(self, pct: int, *, persist: bool) -> None:
