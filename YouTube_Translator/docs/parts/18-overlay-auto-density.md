@@ -4,7 +4,7 @@
 |---|---|
 | **Код** | Только [`../../overlay_player.py`](../../overlay_player.py) |
 | **Слой** | IDEA-025 · карточка TZ №20 · A0–A2 |
-| **Статус** | A0 ✅ · A1 ✅ · A2 ⬜ (idle bump на mouse уже есть) |
+| **Статус** | A0 ✅ · A1 ✅ · A2 ✅ |
 | **Канон очереди** | [`../../MAP.md`](../../MAP.md) |
 | **Навигация** | [INDEX](INDEX.md) · [TZ](../TZ.md) · [polish 16](16-overlay-ux-polish.md) |
 
@@ -37,7 +37,9 @@
 |------|--------|------------|
 | **A0** | ✅ | Prefs + UI Настр. (`auto_density`, `auto_density_pct`, `auto_density_idle_sec`). |
 | **A1** | ✅ | `QTimer` idle; на fire → CT + pct; хук play/stage/catalog/pause. |
-| **A2** | ⬜ | Полный сброс + hold; частично: `_bump_auto_density_idle` на mouse. |
+| **A2** | ✅ | Hold при next track; авто-% не в `stage_opacity` prefs; выход CT → вернуть ручной %; каталог 100%. |
+
+**Не в scope A2:** авто по яркости рабочего стола / кадра (отдельный слой, если скажут).
 
 ---
 

@@ -1233,7 +1233,8 @@ class OverlayPlayerWindow(QWidget):
         self._auto_density_timer = QTimer(self)
         self._auto_density_timer.setSingleShot(True)
         self._auto_density_timer.timeout.connect(self._on_auto_density_fire)
-        self._auto_density_armed = False  # сквозь включили мы сами
+        self._auto_density_armed = False  # сквозь включили авто
+        self._suppress_opacity_prefs = False  # A2: авто-% не писать в stage_opacity
         self._hk_retry_pending = False
         self._hotkeys_registered: set[int] = set()
         self._base_exstyle: int | None = None
@@ -1848,7 +1849,7 @@ class OverlayPlayerWindow(QWidget):
                 self._auto_density_armed = False
 
     def _on_auto_density_fire(self) -> None:
-        """Idle истёк → сквозь + целевая плотность (не пишем prefs на диск)."""
+        """Idle истёк → сквозь + целевая плотность (не пишем stage_opacity на диск)."""
         if not self._prefs.get("auto_density"):
             return
         if not self._stage_mode or not self._playing or self._click_through:
@@ -1859,16 +1860,27 @@ class OverlayPlayerWindow(QWidget):
         )
         self._auto_density_armed = True
         self._set_click_through(True)
-        # После CT: выставить % (CT сам мог ужать >55→40)
-        self.opacity_slider.blockSignals(True)
-        self.opacity_slider.setValue(pct)
-        self.opacity_slider.blockSignals(False)
-        if hasattr(self, "opacity_value"):
-            self.opacity_value.setText(f"{pct}%")
+        # Слайдер только для живого стекла; prefs stage_opacity не трогаем (A2)
+        self._set_opacity_slider_visual(pct, persist=False)
         self._apply_stage_opacity()
         self.status.setText(
             f"Авто-плотность {pct}% · сквозь · Ctrl+O / Esc — вернуть управление"
         )
+
+    def _set_opacity_slider_visual(self, pct: int, *, persist: bool) -> None:
+        """Выставить слайдер; persist=False — не в prefs (авто-сессия)."""
+        pct = max(_OPACITY_MIN, min(_OPACITY_MAX, int(pct)))
+        self._suppress_opacity_prefs = not persist
+        try:
+            self.opacity_slider.blockSignals(True)
+            self.opacity_slider.setValue(pct)
+            self.opacity_slider.blockSignals(False)
+            if hasattr(self, "opacity_value"):
+                self.opacity_value.setText(f"{pct}%")
+            if persist:
+                self._prefs["stage_opacity"] = pct
+        finally:
+            self._suppress_opacity_prefs = False
 
     def _on_video_single_click(self) -> None:
         """Один клик по кадру (после таймера) — play/pause."""
@@ -1928,13 +1940,16 @@ class OverlayPlayerWindow(QWidget):
             # страховка, если mediaStatus не придёт сразу
             QTimer.singleShot(120, self._finish_open_pause)
         if self._stage_mode:
+            # A2: next track при авто-сквозь — держим стекло, не мигать 100%
+            if self._click_through and self._auto_density_armed:
+                self._hold_stage_opacity = True
             self._apply_stage_opacity()
         else:
             self._apply_catalog_opacity()
         self._apply_output_volume()
         self._refresh_playing_highlight()
         QTimer.singleShot(1000, self._clear_opacity_hold)
-        if self._stage_mode and self._playing:
+        if self._stage_mode and self._playing and not self._click_through:
             self._arm_auto_density_timer()
         key = str(path)
         for i in range(self.list.count()):
@@ -2181,13 +2196,20 @@ class OverlayPlayerWindow(QWidget):
             if state == QMediaPlayer.PlaybackState.StoppedState:
                 self.pulse.stop()
                 self._playing = False
-                self._stop_auto_density_timer(exit_ct_if_armed=True)
-                # Смена трека: Stopped → Playing. Не вспыхивать 100%.
-                if self._hold_stage_opacity and self._stage_mode:
+                # A2: Stopped при смене трека — не снимать авто-сквозь / не мигать 100%
+                keep_auto_ct = bool(
+                    self._stage_mode
+                    and self._auto_density_armed
+                    and self._click_through
+                )
+                self._stop_auto_density_timer(exit_ct_if_armed=not keep_auto_ct)
+                if self._stage_mode and (
+                    self._hold_stage_opacity or keep_auto_ct
+                ):
                     self._apply_stage_opacity()
-                else:
+                elif not self._stage_mode:
                     self._apply_catalog_opacity()
-                if not self._hold_stage_opacity:
+                if not self._hold_stage_opacity and not keep_auto_ct:
                     QTimer.singleShot(0, self._register_hotkeys)
             elif state == QMediaPlayer.PlaybackState.PausedState:
                 self._playing = True
@@ -2249,18 +2271,21 @@ class OverlayPlayerWindow(QWidget):
                 self._audio.setVolume(max(0.0, min(1.0, value / 100.0)))
 
     def _on_opacity(self, value: int) -> None:
-        """Живой preview; prefs на диск — debounce / отпускание (иначе лаг на каждом тике)."""
-        self._prefs["stage_opacity"] = int(value)
+        """Живой preview; prefs на диск — debounce (авто-сессия prefs не трогает)."""
         if hasattr(self, "opacity_value"):
             self.opacity_value.setText(f"{int(value)}%")
         if self._stage_mode:
             self._apply_stage_opacity()
         else:
-            # Каталог всегда плотный — слайдер только запоминает значение для fullscreen
             self._apply_catalog_opacity()
+        if self._suppress_opacity_prefs:
+            return
+        self._prefs["stage_opacity"] = int(value)
         self._schedule_opacity_save()
 
     def _schedule_opacity_save(self) -> None:
+        if self._suppress_opacity_prefs:
+            return
         if not hasattr(self, "_opacity_save_timer"):
             self._opacity_save_timer = QTimer(self)
             self._opacity_save_timer.setSingleShot(True)
@@ -2268,6 +2293,8 @@ class OverlayPlayerWindow(QWidget):
         self._opacity_save_timer.start(400)
 
     def _flush_opacity_prefs(self) -> None:
+        if self._suppress_opacity_prefs:
+            return
         if not hasattr(self, "opacity_slider"):
             return
         val = int(self.opacity_slider.value())
@@ -2448,6 +2475,9 @@ class OverlayPlayerWindow(QWidget):
         if not enabled:
             self._auto_density_armed = False
             self._auto_density_timer.stop()
+            # Вернуть слайдер к ручному stage_opacity (авто-% в prefs не писали)
+            saved = int(self._prefs.get("stage_opacity", self.opacity_slider.value()))
+            self._set_opacity_slider_visual(saved, persist=False)
         self._click_through = bool(enabled)
         self._apply_exstyle()
         self._update_ct_label()
