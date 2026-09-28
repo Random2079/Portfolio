@@ -2543,7 +2543,9 @@ class OverlayPlayerWindow(QWidget):
             pass
 
     def present_visible(self) -> None:
-        """Кнопка «Фон» / повторный show: каталог на экране, не невидимый leftover."""
+        """Кнопка «Фон» / повторный show: fade-in (канон как у SR shell)."""
+        from ui_motion import center_widget_on_screen, fade_window_opacity
+
         if self._click_through:
             self._set_click_through(False)
         if self._stage_mode:
@@ -2552,13 +2554,16 @@ class OverlayPlayerWindow(QWidget):
             self.setWindowState(
                 self.windowState() & ~Qt.WindowState.WindowMinimized
             )
+        self.setWindowOpacity(0.0)
         self.showNormal()
         if self._normal_geometry is not None:
             self.setGeometry(self._normal_geometry)
         else:
             self.resize(1100, 640)
+            center_widget_on_screen(self)
         self.raise_()
         self.activateWindow()
+        fade_window_opacity(self, 1.0, duration_ms=180)
 
     def _toggle_hide_or_show(self) -> None:
         if self.isMinimized():

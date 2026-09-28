@@ -4,7 +4,8 @@
 Если на кнопке уже QGraphicsDropShadowEffect (primary glow) — opacity не вешаем,
 чтобы не съесть свечение.
 
-Смена экранов разного размера: morph_widget_geometry (size+pos, без телепорта у края).
+Смена экранов разного размера: fade_center_transition (fade-out → resize+center → fade-in).
+morph_widget_geometry оставлен как архив (у края кривит — не канон).
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from PySide6.QtCore import (
     QSize,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
     QWidget,
@@ -162,6 +164,86 @@ def _frame_fit_top_left(
     return x, y
 
 
+def center_widget_on_screen(widget: QWidget) -> None:
+    """Поставить окно в центр availableGeometry текущего экрана."""
+    screen = widget.screen()
+    if screen is None:
+        app = QApplication.instance()
+        screen = app.primaryScreen() if app is not None else None
+    if screen is None:
+        return
+    avail = screen.availableGeometry()
+    frame = widget.frameGeometry()
+    frame.moveCenter(avail.center())
+    widget.move(frame.topLeft())
+
+
+def fade_window_opacity(
+    widget: QWidget,
+    end_opacity: float,
+    *,
+    duration_ms: int = 180,
+    on_finished: Callable[[], None] | None = None,
+) -> QPropertyAnimation:
+    """Анимация windowOpacity (top-level)."""
+    anim = QPropertyAnimation(widget, b"windowOpacity", widget)
+    anim.setDuration(max(1, int(duration_ms)))
+    anim.setStartValue(float(widget.windowOpacity()))
+    anim.setEndValue(float(end_opacity))
+    anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+    if on_finished is not None:
+        anim.finished.connect(on_finished)
+    anim.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
+    return anim
+
+
+def fade_center_transition(
+    widget: QWidget,
+    apply_mid: Callable[[], None],
+    *,
+    duration_out_ms: int = 160,
+    duration_in_ms: int = 180,
+    on_finished: Callable[[], None] | None = None,
+) -> QPropertyAnimation:
+    """Fade-out → apply_mid (resize/center/контент) → fade-in.
+
+    Канон переходов SR (вариант 3 превью window-transition-types.html).
+    Пока окно невидимо — можно безопасно менять size/flags/stack.
+    """
+    held: dict[str, QPropertyAnimation | None] = {"anim": None}
+
+    def _fade_in() -> None:
+        widget.setWindowOpacity(0.0)
+        try:
+            apply_mid()
+        except Exception:
+            widget.setWindowOpacity(1.0)
+            if on_finished is not None:
+                on_finished()
+            return
+        center_widget_on_screen(widget)
+        widget.setWindowOpacity(0.0)
+
+        def _done() -> None:
+            widget.setWindowOpacity(1.0)
+            if on_finished is not None:
+                on_finished()
+
+        held["anim"] = fade_window_opacity(
+            widget, 1.0, duration_ms=duration_in_ms, on_finished=_done
+        )
+
+    if float(widget.windowOpacity()) <= 0.05:
+        _fade_in()
+        assert held["anim"] is not None
+        return held["anim"]
+
+    held["anim"] = fade_window_opacity(
+        widget, 0.0, duration_ms=duration_out_ms, on_finished=_fade_in
+    )
+    return held["anim"]
+
+
 def morph_widget_geometry(
     widget: QWidget,
     end_size: QSize,
@@ -169,12 +251,7 @@ def morph_widget_geometry(
     duration_ms: int = 300,
     on_finished: Callable[[], None] | None = None,
 ) -> QPropertyAnimation:
-    """Плавный ресайз+сдвиг: растёт/сжимается и сразу едет в место, где влезает.
-
-    Иначе при окне у края size-only анимация уходит за экран, а _ensure_* телепортирует.
-    """
-    from PySide6.QtWidgets import QApplication
-
+    """Архив: morph size+pos. У края кривит — не использовать для SR shell."""
     screen = widget.screen()
     if screen is None:
         app = QApplication.instance()

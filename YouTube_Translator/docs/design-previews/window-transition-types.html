@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SR — типы перехода окна (у края)</title>
+  <style>
+    :root {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      --bg: #080a0e;
+      --panel: #0c0f14;
+      --win: #0f1115;
+      --line: #1e2533;
+      --muted: #64748b;
+      --text: #e2e8f0;
+      --sky: #7dd3fc;
+      --desk: #05070c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 20px 72px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    h1 { font-size: 1.2rem; margin: 0 0 6px; font-weight: 600; }
+    .hint {
+      color: #94a3b8;
+      font-size: 0.92rem;
+      max-width: 920px;
+      line-height: 1.45;
+      margin: 0 0 8px;
+    }
+    .pick {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-bottom: 20px;
+      max-width: 920px;
+    }
+    .pick strong { color: #cbd5e1; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+      gap: 18px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .vhead {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline;
+      margin-bottom: 6px;
+    }
+    .vhead h2 { margin: 0; font-size: 1rem; }
+    .tag {
+      font-size: 0.68rem; padding: 2px 8px; border-radius: 999px;
+      background: #1e293b; color: #94a3b8;
+    }
+    .tag.rec { background: #14332a; color: #6ee7b7; }
+    .tag.old { background: #3b1d1d; color: #fca5a5; }
+    .why {
+      font-size: 0.78rem; color: #94a3b8; line-height: 1.4;
+      margin: 0 0 12px; min-height: 3.2em;
+    }
+
+    /* mock desktop — окно стартует у правого-нижнего края */
+    .desk {
+      position: relative;
+      height: 320px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, #0a0d14 0%, var(--desk) 40%),
+        repeating-linear-gradient(
+          90deg, transparent, transparent 39px, rgba(30,41,59,.25) 40px
+        );
+    }
+    .desk::before {
+      content: "экран · окно SR у края";
+      position: absolute;
+      left: 10px; top: 8px;
+      font-size: 0.65rem;
+      color: #475569;
+      letter-spacing: 0.02em;
+      z-index: 1;
+      pointer-events: none;
+    }
+    .taskbar {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 22px;
+      background: #0c1018;
+      border-top: 1px solid #1c2433;
+      z-index: 2;
+    }
+
+    .win {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #2a3548;
+      background: var(--win);
+      box-shadow: 0 14px 40px rgba(0,0,0,.5);
+      z-index: 3;
+      transform-origin: center center;
+    }
+    .win.busy { pointer-events: none; }
+
+    .titlebar {
+      flex: 0 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 10px;
+      font-size: 11px;
+      color: var(--muted);
+      background: #0c0e12;
+      border-bottom: 1px solid #1c1f26;
+    }
+    .dots span {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      margin-right: 3px;
+      background: #3f3f46;
+    }
+    .body {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      background: var(--win);
+    }
+    .pane {
+      position: absolute;
+      inset: 0;
+      padding: 10px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .pane.on {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 7px; margin-bottom: 6px;
+    }
+    .mark {
+      width: 24px; height: 24px; border-radius: 7px;
+      background: linear-gradient(135deg, #475569, #1e293b);
+      display: grid; place-items: center;
+      font-size: 0.62rem; font-weight: 800;
+    }
+    .title { font-size: 0.85rem; font-weight: 700; margin: 0; }
+    .url {
+      width: 100%; border-radius: 7px; padding: 7px 8px;
+      border: 1px solid #2a3548; background: #151a24; color: #cbd5e1;
+      font-size: 0.68rem; margin-bottom: 6px;
+    }
+    .status {
+      font-size: 0.65rem; color: var(--muted);
+      margin-bottom: 8px; line-height: 1.35; min-height: 1.6em;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 5px; }
+    .chip {
+      font-size: 0.65rem; font-weight: 600; padding: 6px 9px;
+      border-radius: 7px; background: #1e293b; border: 1px solid #334155;
+      cursor: pointer; color: #e2e8f0;
+    }
+    .chip:hover { border-color: #64748b; }
+    .chip.sec { background: #151a24; color: #cbd5e1; border-color: #2a3548; }
+    .chip.ghost { background: transparent; color: #94a3b8; }
+
+    .player-pane { display: flex; flex-direction: column; padding: 0; }
+    .player-top {
+      display: flex; gap: 8px; align-items: center;
+      padding: 7px 9px; border-bottom: 1px solid #1c1f26;
+      font-size: 0.68rem; color: #94a3b8;
+    }
+    .back-chip {
+      padding: 2px 7px; border-radius: 6px; background: #151a24;
+      border: 1px solid #2a3548; font-size: 0.65rem; cursor: pointer;
+      color: #cbd5e1;
+    }
+    .player-main {
+      flex: 1; display: grid; grid-template-columns: 1.3fr 1fr; min-height: 0;
+    }
+    .video {
+      background: #05070c; border-right: 1px solid #1c1f26;
+      display: grid; place-items: center; text-align: center;
+      color: var(--muted); font-size: 0.68rem; line-height: 1.35;
+    }
+    .side {
+      padding: 8px; font-size: 0.65rem; color: #94a3b8; background: #0f1115;
+    }
+    .bm-list {
+      font-size: 0.68rem; color: #94a3b8; line-height: 1.6;
+    }
+    .bm-list b { color: #cbd5e1; }
+    .fon-body {
+      display: grid; place-items: center; height: 100%;
+      color: #94a3b8; font-size: 0.72rem; text-align: center; line-height: 1.4;
+    }
+    .fon-body strong { color: #e2e8f0; display: block; margin-bottom: 4px; }
+
+    .controls {
+      margin-top: 10px;
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .controls button {
+      font-size: 0.72rem; padding: 6px 10px; border-radius: 8px;
+      border: 1px solid #334155; background: #1a2230; color: #cbd5e1;
+      cursor: pointer;
+    }
+    .controls button:hover { border-color: #64748b; }
+    .controls button.primary {
+      background: #334155; border-color: #64748b; color: #f8fafc; font-weight: 600;
+    }
+    .steps {
+      margin-top: 8px;
+      font-size: 0.7rem;
+      color: var(--muted);
+      font-family: ui-monospace, Consolas, monospace;
+      min-height: 1.2em;
+    }
+  </style>
+</head>
+<body>
+  <h1>Типы перехода окна · у края экрана</h1>
+  <p class="hint">
+    Окно SR специально стоит <strong>в правом-нижнем углу</strong> — там morph ломается глазом.
+    Жми <strong>Плеер</strong> / <strong>Закладки</strong> / <strong>Фон</strong> / <strong>Назад</strong> в каждой карточке.
+    Сравни, какой тип не «кривит» раскрытие.
+  </p>
+  <p class="pick">
+    Выбрано: <strong>3 — fade+center</strong> (вкатано в код).
+    Было: 1 morph · 2 snap+center · 3 fade+center · 4 scale-from-center
+  </p>
+
+  <div class="grid" id="grid"></div>
+
+  <script>
+    const SIZES = {
+      download: { w: 168, h: 168 },
+      player:   { w: 300, h: 210 },
+      bookmarks:{ w: 300, h: 210 },
+      fon:      { w: 280, h: 200 },
+    };
+
+    // desk ~ full card width; window starts bottom-right (edge case)
+    function edgeRect(desk, size) {
+      const pad = 8;
+      const bar = 22;
+      return {
+        x: desk.clientWidth - size.w - pad,
+        y: desk.clientHeight - size.h - bar - pad,
+        w: size.w,
+        h: size.h,
+      };
+    }
+    function centerRect(desk, size) {
+      const bar = 22;
+      return {
+        x: Math.round((desk.clientWidth - size.w) / 2),
+        y: Math.round((desk.clientHeight - bar - size.h) / 2),
+        w: size.w,
+        h: size.h,
+      };
+    }
+
+    const VARIANTS = [
+      {
+        id: "morph",
+        title: "1 — morph size+pos",
+        tag: "отклонено / кривит у края",
+        tagClass: "old",
+        why: "Растёт и одновременно едет от угла. У края заметна кривизна — то, на что жалуешься.",
+        run: morphTransition,
+      },
+      {
+        id: "snap",
+        title: "2 — snap + center",
+        tag: "альтернатива",
+        tagClass: "",
+        why: "Старое «исчезло», новое уже по центру. Без растягивания, резче чем fade.",
+        run: snapTransition,
+      },
+      {
+        id: "fade",
+        title: "3 — fade + center",
+        tag: "выбрано / в коде",
+        tagClass: "rec",
+        why: "Короткий fade-out → мгновенно новый размер по центру → fade-in. Вкатано в SR + Фон.",
+        run: fadeTransition,
+      },
+      {
+        id: "scale",
+        title: "4 — scale-from-center",
+        tag: "опционально",
+        tagClass: "",
+        why: "Появляется из центра экрана (не из угла окна). Чище morph, но для tool может быть лишним «цирком».",
+        run: scaleTransition,
+      },
+    ];
+
+    function paneHtml(mode) {
+      if (mode === "download") {
+        return `
+          <div class="pane on" data-pane="download">
+            <div class="brand"><div class="mark">SR</div><p class="title">Subtitle Ripper</p></div>
+            <div class="url">https://youtu.be/…</div>
+            <div class="status">Статус: готово · текст в буфере</div>
+            <div class="row">
+              <button type="button" class="chip" data-go="player">▶ Плеер</button>
+              <button type="button" class="chip sec" data-go="bookmarks">Закладки</button>
+              <button type="button" class="chip ghost" data-go="fon">🎞 Фон</button>
+            </div>
+          </div>`;
+      }
+      if (mode === "player") {
+        return `
+          <div class="pane on player-pane" data-pane="player">
+            <div class="player-top">
+              <button type="button" class="back-chip" data-go="download">← Назад</button>
+              <span>Плеер · watch?v=</span>
+            </div>
+            <div class="player-main">
+              <div class="video">видео<br/><span style="opacity:.7">▶ вручную</span></div>
+              <div class="side">разбор / статус</div>
+            </div>
+          </div>`;
+      }
+      if (mode === "bookmarks") {
+        return `
+          <div class="pane on" data-pane="bookmarks">
+            <div class="player-top" style="margin:-10px -10px 8px;padding:7px 9px;border-bottom:1px solid #1c1f26;display:flex;gap:8px;align-items:center">
+              <button type="button" class="back-chip" data-go="download">← Назад</button>
+              <span style="font-size:0.68rem;color:#94a3b8">Закладки</span>
+            </div>
+            <div class="bm-list">
+              <div><b>TradingView</b></div>
+              <div>Investing</div>
+              <div>…</div>
+            </div>
+          </div>`;
+      }
+      return `
+        <div class="pane on" data-pane="fon">
+          <div class="fon-body">
+            <div>
+              <strong>Фон</strong>
+              каталог · плотность · сквозь<br/>
+              <button type="button" class="back-chip" data-go="download" style="margin-top:10px">← Назад в SR</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function applyRect(win, r) {
+      win.style.left = r.x + "px";
+      win.style.top = r.y + "px";
+      win.style.width = r.w + "px";
+      win.style.height = r.h + "px";
+    }
+
+    function setContent(win, mode) {
+      const body = win.querySelector(".body");
+      body.innerHTML = paneHtml(mode);
+      win.dataset.mode = mode;
+      const title = win.querySelector("[data-title]");
+      const labels = {
+        download: "Subtitle Ripper",
+        player: "Плеер",
+        bookmarks: "Закладки",
+        fon: "Фон",
+      };
+      title.textContent = labels[mode] || mode;
+    }
+
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+    function animateFrame(duration, tick) {
+      return new Promise((resolve) => {
+        const t0 = performance.now();
+        function frame(now) {
+          const t = Math.min(1, (now - t0) / duration);
+          tick(easeOutCubic(t));
+          if (t < 1) requestAnimationFrame(frame);
+          else resolve();
+        }
+        requestAnimationFrame(frame);
+      });
+    }
+
+    async function morphTransition(ctx, toMode) {
+      const { win, desk, setStep } = ctx;
+      const from = {
+        x: parseFloat(win.style.left),
+        y: parseFloat(win.style.top),
+        w: parseFloat(win.style.width),
+        h: parseFloat(win.style.height),
+      };
+      const size = SIZES[toMode];
+      // like real morph: grow + slide to fit (prefer keep top-left, clamp)
+      const prefer = { x: from.x, y: from.y };
+      const end = {
+        x: Math.max(8, Math.min(prefer.x, desk.clientWidth - size.w - 8)),
+        y: Math.max(24, Math.min(prefer.y, desk.clientHeight - size.h - 30)),
+        w: size.w,
+        h: size.h,
+      };
+      setStep("morph: size+pos от угла…");
+      // swap content mid-way so layout stretch is visible
+      let swapped = false;
+      await animateFrame(320, (t) => {
+        applyRect(win, {
+          x: lerp(from.x, end.x, t),
+          y: lerp(from.y, end.y, t),
+          w: lerp(from.w, end.w, t),
+          h: lerp(from.h, end.h, t),
+        });
+        if (!swapped && t > 0.35) {
+          setContent(win, toMode);
+          swapped = true;
+        }
+      });
+      applyRect(win, end);
+      setContent(win, toMode);
+      setStep("готово · morph");
+    }
+
+    async function snapTransition(ctx, toMode) {
+      const { win, desk, setStep } = ctx;
+      const size = SIZES[toMode];
+      const end = toMode === "download" ? edgeRect(desk, size) : centerRect(desk, size);
+      setStep("snap: скрыть → центр");
+      win.style.visibility = "hidden";
+      await new Promise((r) => setTimeout(r, 40));
+      setContent(win, toMode);
+      applyRect(win, end);
+      win.style.opacity = "1";
+      win.style.transform = "none";
+      win.style.visibility = "visible";
+      setStep("готово · snap+center");
+    }
+
+    async function fadeTransition(ctx, toMode) {
+      const { win, desk, setStep } = ctx;
+      const size = SIZES[toMode];
+      const end = toMode === "download" ? edgeRect(desk, size) : centerRect(desk, size);
+      setStep("fade-out…");
+      win.style.transition = "opacity 160ms ease";
+      win.style.opacity = "0";
+      await new Promise((r) => setTimeout(r, 170));
+      win.style.transition = "none";
+      setContent(win, toMode);
+      applyRect(win, end);
+      setStep("fade-in по центру…");
+      // force reflow
+      void win.offsetWidth;
+      win.style.transition = "opacity 180ms ease";
+      win.style.opacity = "1";
+      await new Promise((r) => setTimeout(r, 190));
+      win.style.transition = "none";
+      setStep("готово · fade+center");
+    }
+
+    async function scaleTransition(ctx, toMode) {
+      const { win, desk, setStep } = ctx;
+      const size = SIZES[toMode];
+      const end = toMode === "download" ? edgeRect(desk, size) : centerRect(desk, size);
+      setStep("scale-out…");
+      win.style.transition = "opacity 140ms ease, transform 140ms ease";
+      win.style.opacity = "0";
+      win.style.transform = "scale(0.92)";
+      await new Promise((r) => setTimeout(r, 150));
+      win.style.transition = "none";
+      setContent(win, toMode);
+      applyRect(win, end);
+      win.style.transform = "scale(0.92)";
+      win.style.opacity = "0";
+      void win.offsetWidth;
+      setStep("scale-in из центра…");
+      win.style.transition = "opacity 220ms cubic-bezier(.22,.61,.36,1), transform 220ms cubic-bezier(.22,.61,.36,1)";
+      win.style.opacity = "1";
+      win.style.transform = "scale(1)";
+      await new Promise((r) => setTimeout(r, 230));
+      win.style.transition = "none";
+      win.style.transform = "none";
+      setStep("готово · scale-from-center");
+    }
+
+    function buildCard(v) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <div class="vhead">
+          <h2>${v.title}</h2>
+          <span class="tag ${v.tagClass}">${v.tag}</span>
+        </div>
+        <p class="why">${v.why}</p>
+        <div class="desk" data-desk>
+          <div class="win" data-win>
+            <div class="titlebar">
+              <span><span class="dots"><span></span><span></span><span></span></span> <span data-title>Subtitle Ripper</span></span>
+              <span>×</span>
+            </div>
+            <div class="body"></div>
+          </div>
+          <div class="taskbar"></div>
+        </div>
+        <div class="controls">
+          <button type="button" class="primary" data-act="player">▶ Плеер</button>
+          <button type="button" data-act="bookmarks">Закладки</button>
+          <button type="button" data-act="fon">🎞 Фон</button>
+          <button type="button" data-act="download">← Назад / сброс</button>
+        </div>
+        <div class="steps" data-steps>шаги: —</div>
+      `;
+
+      const desk = card.querySelector("[data-desk]");
+      const win = card.querySelector("[data-win]");
+      const steps = card.querySelector("[data-steps]");
+      const ctx = {
+        win,
+        desk,
+        setStep(s) { steps.textContent = "шаги: " + s; },
+        running: false,
+      };
+
+      function reset() {
+        win.style.transition = "none";
+        win.style.opacity = "1";
+        win.style.visibility = "visible";
+        win.style.transform = "none";
+        setContent(win, "download");
+        applyRect(win, edgeRect(desk, SIZES.download));
+        ctx.setStep("старт у края");
+      }
+
+      async function go(toMode) {
+        if (ctx.running) return;
+        const from = win.dataset.mode || "download";
+        if (from === toMode && toMode !== "download") return;
+        ctx.running = true;
+        win.classList.add("busy");
+        try {
+          await v.run(ctx, toMode);
+        } finally {
+          win.classList.remove("busy");
+          ctx.running = false;
+        }
+      }
+
+      card.querySelectorAll("[data-act]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const m = btn.getAttribute("data-act");
+          if (m === "download") {
+            // hard reset to edge for fair compare
+            win.style.transition = "none";
+            win.style.opacity = "1";
+            win.style.visibility = "visible";
+            win.style.transform = "none";
+            setContent(win, "download");
+            applyRect(win, edgeRect(desk, SIZES.download));
+            ctx.setStep("сброс у края");
+            return;
+          }
+          go(m);
+        });
+      });
+
+      desk.addEventListener("click", (e) => {
+        const t = e.target.closest("[data-go]");
+        if (!t) return;
+        const m = t.getAttribute("data-go");
+        if (m === "download") {
+          go("download");
+        } else {
+          go(m);
+        }
+      });
+
+      // initial layout after in DOM
+      requestAnimationFrame(reset);
+      return card;
+    }
+
+    const grid = document.getElementById("grid");
+    VARIANTS.forEach((v) => grid.appendChild(buildCard(v)));
+    // re-fit on resize
+    window.addEventListener("resize", () => {
+      document.querySelectorAll(".card").forEach((card) => {
+        const desk = card.querySelector("[data-desk]");
+        const win = card.querySelector("[data-win]");
+        if (!win || win.classList.contains("busy")) return;
+        const mode = win.dataset.mode || "download";
+        const size = SIZES[mode];
+        const r = mode === "download" ? edgeRect(desk, size) : centerRect(desk, size);
+        // morph keeps edge-ish; for fairness only re-center non-download if not morph card
+        // simpler: if download → edge, else keep current relative — just re-clamp download
+        if (mode === "download") applyRect(win, r);
+      });
+    });
+  </script>
+</body>
+</html>

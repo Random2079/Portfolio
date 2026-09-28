@@ -84,7 +84,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui_motion import BusyPulse, attach_many, morph_widget_geometry
+from ui_motion import BusyPulse, attach_many, center_widget_on_screen, fade_center_transition
 
 from ai_analyze import (  # DeepSeek — без доп. зависимостей
     AnalyzeCancelled,
@@ -3693,41 +3693,74 @@ class SubtitleApp(QMainWindow):
         self._player_video_loaded = False
         self._pending_seek_seconds = None
 
-    def _morph_shell_to(
+    def _fade_shell_to(
         self,
         size: tuple[int, int],
         *,
         mode: str,
+        prepare=None,
         on_finished=None,
+        animate: bool = True,
     ) -> None:
-        """Смена режима окна: download=fixed, player/bookmarks=свободное окно."""
-        self._view_trans_running = False
-        if mode == "download":
-            self._apply_fixed_shell_size(size, mode=mode)
-        else:
-            self._apply_free_shell_size(size, mode=mode)
-        if on_finished is not None:
-            on_finished()
+        """Смена режима: fade-out → resize+center → fade-in (канон вариант 3)."""
+        if self._view_trans_running and animate:
+            return
+
+        def _apply() -> None:
+            if prepare is not None:
+                prepare()
+            if mode == "download":
+                self._apply_fixed_shell_size(size, mode=mode)
+            else:
+                self._apply_free_shell_size(size, mode=mode)
+
+        def _done() -> None:
+            self._view_trans_running = False
+            self.setWindowOpacity(1.0)
+            if on_finished is not None:
+                on_finished()
+
+        if not animate or self.isFullScreen() or self.isMaximized():
+            _apply()
+            center_widget_on_screen(self)
+            _done()
+            return
+
+        self._view_trans_running = True
+        self._view_trans_anim = fade_center_transition(
+            self, _apply, on_finished=_done
+        )
 
     def show_download_view(self) -> None:
         self._cancel_auto_player()
         if self.isFullScreen():
             self.showNormal()
         self._exit_player_theater(force=True)
-        self._unload_player()
-        self.stack.setCurrentWidget(self.download_view)
-        self._lock_download_window_size()
+
+        def _prepare() -> None:
+            self._unload_player()
+            self.stack.setCurrentWidget(self.download_view)
+
+        self._fade_shell_to(
+            self._DOWNLOAD_SIZE, mode="download", prepare=_prepare
+        )
 
     def show_player_view(self, *, animate: bool = True) -> None:
-        del animate  # флаги окна меняются — без morph
         self._cancel_auto_player()
+
+        def _prepare() -> None:
+            self.stack.setCurrentWidget(self.player_view)
 
         def _finish_show() -> None:
             QTimer.singleShot(0, lambda: self.web_view.setFocus())
 
-        self.stack.setCurrentWidget(self.player_view)
-        self._unlock_player_window_size()
-        _finish_show()
+        self._fade_shell_to(
+            self._PLAYER_SIZE,
+            mode="player",
+            prepare=_prepare,
+            on_finished=_finish_show,
+            animate=animate,
+        )
 
     def show_bookmarks_view(self) -> None:
         if self._busy:
@@ -3736,10 +3769,11 @@ class SubtitleApp(QMainWindow):
         if self.isFullScreen():
             self.showNormal()
             self._ensure_window_on_screen()
-        from_download = self._is_download_view_active()
-        self._exit_player_theater(force=True)
-        self._unload_player()
-        self.stack.setCurrentWidget(self.bookmarks_view)
+
+        def _prepare() -> None:
+            self._exit_player_theater(force=True)
+            self._unload_player()
+            self.stack.setCurrentWidget(self.bookmarks_view)
 
         def _after_size() -> None:
             if self.bookmarks_tabs.count() <= 1:
@@ -3765,13 +3799,12 @@ class SubtitleApp(QMainWindow):
                 title = self._bookmarks[idx].get("title") or "закладку"
                 self.bookmarks_status.setText(f"Загружено: {title} (из кэша)")
 
-        if from_download:
-            self._morph_shell_to(
-                self._PLAYER_SIZE, mode="bookmarks", on_finished=_after_size
-            )
-        else:
-            self._apply_free_shell_size(self._PLAYER_SIZE, mode="bookmarks")
-            _after_size()
+        self._fade_shell_to(
+            self._PLAYER_SIZE,
+            mode="bookmarks",
+            prepare=_prepare,
+            on_finished=_after_size,
+        )
 
     def _on_bookmark_tab_changed(self, index: int) -> None:
         if index >= len(self._bookmarks):
@@ -4460,9 +4493,13 @@ class SubtitleApp(QMainWindow):
 
     def _on_overlay_closed(self) -> None:
         self._overlay_window = None
+        from ui_motion import fade_window_opacity
+
+        self.setWindowOpacity(0.0)
         self.show()
         self.raise_()
         self.activateWindow()
+        fade_window_opacity(self, 1.0, duration_ms=180)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         # 1) отмена фоновых задач → 2) дети yt-dlp → 3) overlay/http/webview
