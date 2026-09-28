@@ -1779,20 +1779,35 @@ class OverlayPlayerWindow(QWidget):
         play = resolve_play_path(raw)
         play_key = str(play.resolve())
         preview_on = bool(self._prefs.get("catalog_preview", True))
+        state = self._player.playbackState()
+        actually_playing = state == QMediaPlayer.PlaybackState.PlayingState
+        is_paused = state == QMediaPlayer.PlaybackState.PausedState
         if self._last_play_path == play_key:
-            if not self._stage_mode and self._playing:
+            # Играет → полный экран. На паузе / стоп + галка → play (не путать с _playing).
+            if not self._stage_mode and actually_playing:
                 self._enter_stage()
                 return
-            if preview_on and not self._playing:
-                self._play_path(play, force_sound=False, autoplay=True)
+            if preview_on and not actually_playing:
+                if is_paused:
+                    self._pause_after_open = False
+                    self._force_catalog_sound = False
+                    self._apply_output_volume()
+                    self._player.play()
+                    if self.media_stack.currentWidget() is self.pulse:
+                        self.pulse.start()
+                    self._set_play_icon(True)
+                    self._playing = True
+                    self.status.setText(
+                        f"▶ {_clean_media_title(play.stem)}{play.suffix.lower()}"
+                    )
+                    self._refresh_playing_highlight()
+                else:
+                    self._play_path(play, force_sound=False, autoplay=True)
                 return
             if not preview_on:
-                # Уже открыт на паузе — не дёргать; статус подсказка
-                self.status.setText(
-                    f"Открыто: {play.name} · ▶ / Enter — play"
-                )
+                self.status.setText(f"Открыто: {play.name} · ▶ / Enter — play")
             return
-        # Новый трек: открыть всегда (фон/кадр); play только если галка
+        # Новый трек: открыть всегда; play только если галка
         self._play_path(play, force_sound=False, autoplay=preview_on)
 
     def _on_list_activated(self, item: QListWidgetItem | None = None) -> None:
@@ -1805,7 +1820,10 @@ class OverlayPlayerWindow(QWidget):
         raw = Path(item.data(Qt.ItemDataRole.UserRole))
         play = resolve_play_path(raw)
         play_key = str(play.resolve())
-        if self._last_play_path == play_key and self._playing and not self._stage_mode:
+        actually_playing = (
+            self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+        )
+        if self._last_play_path == play_key and actually_playing and not self._stage_mode:
             self._enter_stage()
             return
         self._play_path(play, force_sound=True)
