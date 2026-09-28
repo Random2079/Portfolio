@@ -409,7 +409,15 @@ def _pixel_luma01(c: QColor) -> float:
     return (0.2126 * c.red() + 0.7152 * c.green() + 0.0722 * c.blue()) / 255.0
 
 
-def _pixmap_avg_luma(pm: QPixmap, *, step: int = 24) -> float | None:
+def _visibility_luma_from_samples(samples: list[float]) -> float | None:
+    """p75 яркости: светлые зоны (небо/UI) важнее среднего по тёмному морю."""
+    if len(samples) < 8:
+        return None
+    samples.sort()
+    return samples[min(len(samples) - 1, int(len(samples) * 0.75))]
+
+
+def _pixmap_visibility_luma(pm: QPixmap, *, step: int = 24) -> float | None:
     if pm.isNull():
         return None
     img = pm.toImage()
@@ -420,13 +428,11 @@ def _pixmap_avg_luma(pm: QPixmap, *, step: int = 24) -> float | None:
         return None
     sx = max(1, min(step, w // 8))
     sy = max(1, min(step, h // 8))
-    total = 0.0
-    n = 0
+    samples: list[float] = []
     for y in range(0, h, sy):
         for x in range(0, w, sx):
-            total += _pixel_luma01(img.pixelColor(x, y))
-            n += 1
-    return (total / n) if n else None
+            samples.append(_pixel_luma01(img.pixelColor(x, y)))
+    return _visibility_luma_from_samples(samples)
 
 
 def _desktop_background_color_luminance() -> float | None:
@@ -446,49 +452,63 @@ def _desktop_background_color_luminance() -> float | None:
         return None
 
 
-def _wallpaper_luminance() -> float | None:
-    """Средняя яркость файла обоев Windows (кеш по path+mtime)."""
-    global _wallpaper_luma_cache
+def _wallpaper_file_path() -> Path | None:
     if sys.platform != "win32":
         return None
-    path_s = ""
+    candidates: list[Path] = []
     try:
         import winreg
 
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Desktop") as key:
             path_s, _ = winreg.QueryValueEx(key, "WallPaper")
+        if path_s:
+            candidates.append(Path(str(path_s)))
     except OSError:
-        path_s = ""
-    p = Path(path_s) if path_s else None
-    if p is None or not p.is_file():
-        return _desktop_background_color_luminance()
+        pass
+    appdata = os.environ.get("APPDATA", "")
+    if appdata:
+        candidates.append(
+            Path(appdata) / "Microsoft" / "Windows" / "Themes" / "TranscodedWallpaper"
+        )
+    for p in candidates:
+        if p.is_file() and p.stat().st_size > 0:
+            return p
+    return None
+
+
+def _wallpaper_luminance() -> float | None:
+    """Яркость обоев Windows (файл / TranscodedWallpaper). Чёрный Background — слабый fallback."""
+    global _wallpaper_luma_cache
+    p = _wallpaper_file_path()
+    if p is None:
+        # Сплошной 0 0 0 часто «заглушка», а под стеклом игра/арт — не доверяем вслепую
+        return None
     try:
         mtime = p.stat().st_mtime
     except OSError:
-        return _desktop_background_color_luminance()
+        return None
     if (
         _wallpaper_luma_cache is not None
         and _wallpaper_luma_cache[0] == str(p)
         and _wallpaper_luma_cache[1] == mtime
     ):
         return _wallpaper_luma_cache[2]
-    luma = _pixmap_avg_luma(QPixmap(str(p)), step=32)
+    luma = _pixmap_visibility_luma(QPixmap(str(p)), step=32)
     if luma is None:
-        return _desktop_background_color_luminance()
+        return None
     _wallpaper_luma_cache = (str(p), mtime, luma)
     return luma
 
 
 def _desktop_luminance_outside(exclude_geo) -> float | None:
     """
-    Яркость стола: пиксели экрана вне окна Фона.
-    Если Фон почти fullscreen — мало сэмплов → None (caller → обои).
+    Яркость стола: пиксели экрана вне окна Фона (p75).
+    Если Фон почти fullscreen — мало сэмплов → None.
     """
     screens = QGuiApplication.screens()
     if not screens:
         return None
-    total = 0.0
-    n = 0
+    samples: list[float] = []
     for screen in screens:
         try:
             pm = screen.grabWindow(0)
@@ -507,16 +527,44 @@ def _desktop_luminance_outside(exclude_geo) -> float | None:
                 gy = geo.y() + int(y * geo.height() / max(1, h))
                 if exclude_geo is not None and exclude_geo.contains(gx, gy):
                     continue
-                total += _pixel_luma01(img.pixelColor(x, y))
-                n += 1
-    if n < 12:
+                samples.append(_pixel_luma01(img.pixelColor(x, y)))
+    return _visibility_luma_from_samples(samples)
+
+
+def _luminance_under_widget(widget: QWidget) -> float | None:
+    """
+    Что реально под стеклом (игра/меню): на миг opacity=0 → grab геометрии окна.
+    Иначе grab видит само видео Фона, а реестр Background=чёрный врёт.
+    """
+    if widget is None or not widget.isVisible():
         return None
-    return total / n
+    screen = widget.screen()
+    if screen is None:
+        screen = QGuiApplication.primaryScreen()
+    if screen is None:
+        return None
+    geo = widget.frameGeometry()
+    sgeo = screen.geometry()
+    x = geo.x() - sgeo.x()
+    y = geo.y() - sgeo.y()
+    w, h = geo.width(), geo.height()
+    if w < 32 or h < 32:
+        return None
+    old = float(widget.windowOpacity())
+    try:
+        widget.setWindowOpacity(0.0)
+        QApplication.processEvents()
+        pm = screen.grabWindow(0, x, y, w, h)
+    except Exception:
+        return None
+    finally:
+        widget.setWindowOpacity(old)
+        QApplication.processEvents()
+    return _pixmap_visibility_luma(pm, step=28)
 
 
 def _auto_density_pct_from_luma(base: int, luma: float) -> int:
     """Светлый стол → выше % (плотнее); тёмный → ниже % (прозрачнее)."""
-    # luma 0 → base−span, luma 1 → base+span
     pct = int(round(base + (luma * 2.0 - 1.0) * _AUTO_DENSITY_LUMA_SPAN))
     return max(_OPACITY_MIN, min(_OPACITY_MAX, pct))
 
@@ -2019,7 +2067,7 @@ class OverlayPlayerWindow(QWidget):
             return
         if not (self._auto_density_armed and self._click_through and self._stage_mode):
             return
-        sec = max(1, min(60, int(self._prefs.get("auto_density_adapt_sec", 2))))
+        sec = max(1, min(60, int(self._prefs.get("auto_density_adapt_sec", 1))))
         self._auto_density_adapt_timer.start(sec * 1000)
 
     def _stop_auto_density_adapt(self) -> None:
@@ -2050,16 +2098,28 @@ class OverlayPlayerWindow(QWidget):
         )
 
     def _resolve_auto_density_pct(self) -> tuple[int, str]:
-        """База prefs + яркость стола/обоев → итоговый % и короткая метка."""
+        """База prefs + яркость ПОД стеклом / стола → итоговый %."""
         base = max(
             _OPACITY_MIN,
             min(_OPACITY_MAX, int(self._prefs.get("auto_density_pct", 45))),
         )
-        luma = _desktop_luminance_outside(self.frameGeometry())
-        src = "стол"
+        luma = None
+        src = "база"
+        # 1) под стеклом (игра/меню) — только когда уже сквозь
+        if self._click_through:
+            luma = _luminance_under_widget(self)
+            if luma is not None:
+                src = "под стеклом"
+        # 2) края экрана вне Фона
+        if luma is None:
+            luma = _desktop_luminance_outside(self.frameGeometry())
+            if luma is not None:
+                src = "стол"
+        # 3) файл обоев / TranscodedWallpaper (не чёрный Background)
         if luma is None:
             luma = _wallpaper_luminance()
-            src = "обои"
+            if luma is not None:
+                src = "обои"
         if luma is None:
             return base, "база"
         pct = _auto_density_pct_from_luma(base, luma)
@@ -2067,15 +2127,15 @@ class OverlayPlayerWindow(QWidget):
         return pct, f"{src} {tone}"
 
     def _on_auto_density_fire(self) -> None:
-        """Idle истёк → сквозь + плотность от яркости стола (не пишем stage_opacity)."""
+        """Idle истёк → сквозь, потом замер под стеклом (не пишем stage_opacity)."""
         if not self._prefs.get("auto_density"):
             return
         if not self._stage_mode or not self._playing or self._click_through:
             return
-        pct, tone = self._resolve_auto_density_pct()
         self._auto_density_armed = True
         self._set_click_through(True)
-        # Слайдер только для живого стекла; prefs stage_opacity не трогаем (A2)
+        # CT уже on → resolve видит игру/арт под окном, не чёрный реестр
+        pct, tone = self._resolve_auto_density_pct()
         self._set_opacity_slider_visual(pct, persist=False)
         self._apply_stage_opacity()
         self.status.setText(
