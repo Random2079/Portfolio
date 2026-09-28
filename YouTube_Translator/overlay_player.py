@@ -391,7 +391,7 @@ _DEFAULT_PREFS = {
     "auto_density": False,
     "auto_density_pct": 45,
     "auto_density_idle_sec": 4,
-    "auto_density_adapt_sec": 2,
+    "auto_density_adapt_sec": 1,
     "hotkeys": dict(_DEFAULT_HOTKEYS),
 }
 
@@ -1180,11 +1180,11 @@ class OverlaySettingsDialog(QDialog):
         self.auto_density_adapt.setRange(1, 60)
         self.auto_density_adapt.setSuffix(" с")
         self.auto_density_adapt.setValue(
-            max(1, min(60, int(prefs.get("auto_density_adapt_sec", 2))))
+            max(1, min(60, int(prefs.get("auto_density_adapt_sec", 1))))
         )
         self.auto_density_adapt.setToolTip(
-            "Пока сквозь авто: раз в N сек снова меряет яркость стола и подкручивает %, "
-            "чтобы анимация в среднем оставалась видна. Ctrl+[ / ] — пауза подстройки ~8с."
+            "Пока сквозь авто: раз в N сек меряет яркость стола (live). "
+            "1с ≈ live; чаще тяжело из‑за снимка экрана. Ctrl+[ / ] — пауза ~8с."
         )
         top.addRow("Авто: обновлять % каждые", self.auto_density_adapt)
         layout.addLayout(top)
