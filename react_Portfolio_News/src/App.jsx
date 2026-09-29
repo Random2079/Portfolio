@@ -20,7 +20,6 @@ import "./App.css";
 
 export default function App() {
   const [tab, setTab] = useState("home");
-  const [health, setHealth] = useState(null);
   const [day, setDay] = useState(null);
   const [snap, setSnap] = useState(null);
   const [selected, setSelected] = useState("");
@@ -36,12 +35,10 @@ export default function App() {
     setError("");
     setHoldingsNote("");
     try {
-      const [h, d, holdingsSnap] = await Promise.all([
-        getJson("/api/health"),
+      const [d, holdingsSnap] = await Promise.all([
         getJson("/api/day?top=5"),
         getJson("/api/holdings"),
       ]);
-      setHealth(h);
       setDay(d);
       setSnap(holdingsSnap);
 
@@ -65,7 +62,6 @@ export default function App() {
       }
     } catch (e) {
       setError(String(e.message || e));
-      setHealth(null);
       setDay(null);
       setSnap(null);
     } finally {
@@ -162,7 +158,6 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [selected, tab]);
 
-  const apiOk = !!(health && (health.ok === true || health.ok === "true"));
   const top = (day && day.top) || [];
 
   return (
@@ -176,14 +171,6 @@ export default function App() {
         <div>
           <h1 className="brand">Portfolio News</h1>
           <p className="tagline">Утренний терминал</p>
-        </div>
-        <div className="top-actions">
-          <span className={"pill " + (apiOk ? "ok" : "bad")}>
-            {loading ? "…" : apiOk ? "API ok" : "API down"}
-          </span>
-          <button type="button" className="btn" onClick={load} disabled={loading}>
-            Обновить
-          </button>
         </div>
       </motion.header>
 
