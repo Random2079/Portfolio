@@ -504,8 +504,8 @@ def _wallpaper_luminance() -> float | None:
 
 def _desktop_luminance_outside(exclude_geo) -> float | None:
     """
-    Яркость стола: пиксели экрана вне окна Фона (p75).
-    Если Фон почти fullscreen — мало сэмплов → None.
+    Яркость стола вне окна Фона (p90), без hide — без мигания.
+    Grab даунскейлим: дешевле CPU.
     """
     screens = QGuiApplication.screens()
     if not screens:
@@ -516,6 +516,15 @@ def _desktop_luminance_outside(exclude_geo) -> float | None:
             pm = screen.grabWindow(0)
         except Exception:
             continue
+        if pm.isNull():
+            continue
+        if pm.width() > 640 or pm.height() > 360:
+            pm = pm.scaled(
+                640,
+                360,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            )
         img = pm.toImage()
         if img.isNull():
             continue
@@ -533,42 +542,17 @@ def _desktop_luminance_outside(exclude_geo) -> float | None:
     return _visibility_luma_from_samples(samples)
 
 
-def _luminance_under_widget(widget: QWidget) -> float | None:
-    """
-    Что под стеклом (игра/меню): hide на кадр → grab геометрии.
-    Exclusive fullscreen часто даёт чёрный кадр → None (не врём «тёмный стол»).
-    """
-    if widget is None or not widget.isVisible():
-        return None
-    screen = widget.screen()
-    if screen is None:
-        screen = QGuiApplication.primaryScreen()
-    if screen is None:
-        return None
-    geo = widget.frameGeometry()
-    sgeo = screen.geometry()
-    x = geo.x() - sgeo.x()
-    y = geo.y() - sgeo.y()
-    w, h = geo.width(), geo.height()
-    if w < 32 or h < 32:
-        return None
-    was_vis = widget.isVisible()
+def _auto_density_log(line: str) -> None:
+    """Тики → ~/.subtitle_ripper/auto_density.log (обрезка >150KB)."""
     try:
-        # hide надёжнее opacity=0: иначе grab часто видит своё же видео
-        widget.setVisible(False)
-        QApplication.processEvents()
-        pm = screen.grabWindow(0, x, y, w, h)
+        path = Path.home() / ".subtitle_ripper" / "auto_density.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file() and path.stat().st_size > 150_000:
+            path.write_text("", encoding="utf-8")
+        with path.open("a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
     except Exception:
-        return None
-    finally:
-        if was_vis:
-            widget.setVisible(True)
-            QApplication.processEvents()
-    luma = _pixmap_visibility_luma(pm, step=28)
-    # Чёрный/пустой кадр = захват не удался (часто exclusive fullscreen)
-    if luma is None or luma < 0.05:
-        return None
-    return luma
+        pass
 
 
 def _auto_density_pct_from_luma(base: int, luma: float) -> int:
@@ -2110,41 +2094,32 @@ class OverlayPlayerWindow(QWidget):
         self._apply_auto_density_now()
 
     def _apply_auto_density_now(self) -> None:
-        """Замер → слайдер + opacity. Статус всегда обновляем (видно, что тик жив)."""
+        """Замер → слайдер + opacity. Без hide — без мигания."""
         if not self._click_through or not self._stage_mode:
             return
+        t0 = time.perf_counter()
         pct, tone = self._resolve_auto_density_pct()
-        # hide/show при замере сбрасывает вид — всегда вернуть сквозь+% 
-        self._set_opacity_slider_visual(pct, persist=False)
-        try:
-            self._apply_exstyle()
-        except Exception:
-            pass
-        self._apply_stage_opacity()
+        ms = (time.perf_counter() - t0) * 1000.0
+        cur = int(self.opacity_slider.value())
+        if abs(pct - cur) >= 2:
+            self._set_opacity_slider_visual(pct, persist=False)
+            self._apply_stage_opacity()
         self.status.setText(
             f"Авто-плотность {pct}% ({tone}) · сквозь · Ctrl+O / Esc — вернуть"
         )
+        _auto_density_log(f"{pct}% {tone} slider={cur} {ms:.0f}ms")
 
     def _resolve_auto_density_pct(self) -> tuple[int, str]:
-        """База prefs + яркость ПОД стеклом / стола → итоговый %."""
+        """База prefs + яркость краёв стола / обоев (без hide под стеклом)."""
         base = max(
             _OPACITY_MIN,
             min(_OPACITY_MAX, int(self._prefs.get("auto_density_pct", 45))),
         )
-        luma = None
-        src = "база"
-        if self._click_through:
-            luma = _luminance_under_widget(self)
-            if luma is not None:
-                src = "под стеклом"
-        if luma is None:
-            luma = _desktop_luminance_outside(self.frameGeometry())
-            if luma is not None:
-                src = "стол"
+        luma = _desktop_luminance_outside(self.frameGeometry())
+        src = "стол"
         if luma is None:
             luma = _wallpaper_luminance()
-            if luma is not None:
-                src = "обои"
+            src = "обои"
         if luma is None:
             return base, "база (нет замера)"
         pct = _auto_density_pct_from_luma(base, luma)
