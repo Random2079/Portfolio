@@ -219,9 +219,6 @@ export default function ReviewPanel({ ticker }) {
               ))}
             </div>
           </div>
-          <p className="rv-note">
-            Вердикт кликабельный, на тикер (localStorage).
-          </p>
         </>
       ) : null}
     </section>

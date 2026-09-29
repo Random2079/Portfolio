@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { API_BASE, getJson, putJson } from "./api";
+import { getJson } from "./api";
 import {
   LIST_PREVIEW,
   countPapersByKind,
@@ -11,6 +11,7 @@ import {
   sumField,
 } from "./holdings";
 import { fmtPct, fmtRub, pnlClass, qtyFmt } from "./format";
+import TickerLogo from "./TickerLogo";
 import TickerReview from "./TickerReview";
 import NewsFeed from "./NewsFeed";
 import OpsPanel from "./OpsPanel";
@@ -22,31 +23,27 @@ export default function App() {
   const [health, setHealth] = useState(null);
   const [day, setDay] = useState(null);
   const [snap, setSnap] = useState(null);
-  const [focusTickers, setFocusTickers] = useState([]);
   const [selected, setSelected] = useState("");
   const [previewOpen, setPreviewOpen] = useState({});
   const [error, setError] = useState("");
   const [holdingsNote, setHoldingsNote] = useState("");
   const [loading, setLoading] = useState(true);
-  const [focusBusy, setFocusBusy] = useState("");
+  const reviewRef = useRef(null);
+  const scrollAfterSelect = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     setHoldingsNote("");
     try {
-      const [h, d, holdingsSnap, focus] = await Promise.all([
+      const [h, d, holdingsSnap] = await Promise.all([
         getJson("/api/health"),
         getJson("/api/day?top=5"),
         getJson("/api/holdings"),
-        getJson("/api/focus").catch(() => ({ tickers: [] })),
       ]);
       setHealth(h);
       setDay(d);
       setSnap(holdingsSnap);
-      setFocusTickers(
-        (focus?.tickers || []).map((t) => String(t).trim().toUpperCase()).filter(Boolean)
-      );
 
       if (!holdingsSnap?.configured) {
         setHoldingsNote("Нет BCS токена в .env");
@@ -55,8 +52,7 @@ export default function App() {
         !(holdingsSnap.holdings && holdingsSnap.holdings.length)
       ) {
         setHoldingsNote(
-          (holdingsSnap.error || "БКС не ответил") +
-            " Кэша позиций нет."
+          (holdingsSnap.error || "БКС не ответил") + " Кэша позиций нет."
         );
       } else if (
         holdingsSnap.stale ||
@@ -72,7 +68,6 @@ export default function App() {
       setHealth(null);
       setDay(null);
       setSnap(null);
-      setFocusTickers([]);
     } finally {
       setLoading(false);
     }
@@ -92,8 +87,6 @@ export default function App() {
     [holdings]
   );
   const groups = useMemo(() => groupHoldingsByAssetClass(papers), [papers]);
-  const focusSet = useMemo(() => new Set(focusTickers), [focusTickers]);
-  const focusId = focusTickers[0] || "";
 
   const totalValue = useMemo(() => {
     if (day && day.total_value != null) return day.total_value;
@@ -137,41 +130,40 @@ export default function App() {
     }
   }, []);
 
-  const selectTicker = useCallback((tid) => {
-    const id = String(tid || "")
-      .trim()
-      .toUpperCase();
-    if (!id) return;
-    setSelected(id);
-  }, []);
-
-  const toggleFocus = useCallback(
-    async (ticker, wantFocus) => {
-      const tid = String(ticker || "")
+  const selectTicker = useCallback(
+    (tid) => {
+      const id = String(tid || "")
         .trim()
         .toUpperCase();
-      if (!tid) return;
-      setFocusBusy(tid);
-      try {
-        await putJson(`/api/focus/${encodeURIComponent(tid)}`, {
-          tier: wantFocus ? "focus" : "hold",
+      if (!id) return;
+      if (id === selected && tab === "home") {
+        reviewRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
         });
-        // KB: at most one «Смотрю»
-        setFocusTickers(wantFocus ? [tid] : []);
-        if (wantFocus) setSelected(tid);
-      } catch (e) {
-        console.warn("focus toggle failed", e);
-      } finally {
-        setFocusBusy("");
+        return;
       }
+      scrollAfterSelect.current = true;
+      setSelected(id);
+      if (tab !== "home") setTab("home");
     },
-    []
+    [tab, selected]
   );
+
+  useEffect(() => {
+    if (!selected || tab !== "home" || !scrollAfterSelect.current) return;
+    scrollAfterSelect.current = false;
+    const t = window.setTimeout(() => {
+      reviewRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [selected, tab]);
 
   const apiOk = !!(health && (health.ok === true || health.ok === "true"));
   const top = (day && day.top) || [];
-  const apiLabel = API_BASE || (typeof window !== "undefined" ? window.location.origin : "этот сервер");
-  const apiHref = API_BASE || "/";
 
   return (
     <div className="shell">
@@ -182,14 +174,8 @@ export default function App() {
         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
       >
         <div>
-          <p className="eyebrow">IDEA-003 · React R4</p>
           <h1 className="brand">Portfolio News</h1>
-          <p className="tagline">
-            Утренний терминал · API{" "}
-            <a href={apiHref} target="_blank" rel="noreferrer">
-              {apiLabel}
-            </a>
-          </p>
+          <p className="tagline">Утренний терминал</p>
         </div>
         <div className="top-actions">
           <span className={"pill " + (apiOk ? "ok" : "bad")}>
@@ -257,319 +243,263 @@ export default function App() {
       {tab === "calendar" ? <CalendarPanel /> : null}
 
       {tab === "home" ? (
-      <div className="day-panel">
-      <motion.section
-        className="kpis"
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.06, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      >
-        <article className="kpi">
-          <div className="k">Стоимость</div>
-          <div className="v">
-            {loading ? "…" : totalValue != null ? fmtRub(totalValue) : "—"}
-          </div>
-          <div className="s muted">
-            {totalCost != null ? `вложено ${fmtRub(totalCost)}` : "вложено —"}
-          </div>
-        </article>
-        <article className="kpi">
-          <div className="k">Денег на счёте</div>
-          <div className="v">
-            {loading ? "…" : cashVal != null ? fmtRub(cashVal) : "—"}
-          </div>
-          <div className="s muted">кэш</div>
-        </article>
-        <article className="kpi">
-          <div className="k">За день</div>
-          <div className={"v " + pnlClass(day && day.day_rub)}>
-            {loading ? "…" : fmtRub(day && day.day_rub, { signed: true })}
-          </div>
-          <div className={"s " + pnlClass(day && day.day_pct)}>
-            {loading
-              ? "MOEX × позиции"
-              : `${fmtPct(day && day.day_pct)}${day && day.stale ? " · кэш" : ""}`}
-          </div>
-        </article>
-        <article className="kpi">
-          <div className="k">PnL</div>
-          <div className={"v " + pnlClass(totalPnl)}>
-            {loading ? "…" : fmtRub(totalPnl, { signed: true })}
-          </div>
-          <div className={"s " + pnlClass(totalPnlPct)}>
-            {loading ? "—" : fmtPct(totalPnlPct)}
-          </div>
-        </article>
-        <article className="kpi">
-          <div className="k">Позиций</div>
-          <div className="v">
-            {loading ? "…" : String(papers.length)}
-          </div>
-          <div className="s muted">{breakdown}</div>
-        </article>
-      </motion.section>
+        <div className="day-panel">
+          <motion.section
+            className="kpis"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.06, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <article className="kpi">
+              <div className="k">Стоимость</div>
+              <div className="v">
+                {loading ? "…" : totalValue != null ? fmtRub(totalValue) : "—"}
+              </div>
+              <div className="s muted">
+                {totalCost != null ? `вложено ${fmtRub(totalCost)}` : "вложено —"}
+              </div>
+            </article>
+            <article className="kpi">
+              <div className="k">Денег на счёте</div>
+              <div className="v">
+                {loading ? "…" : cashVal != null ? fmtRub(cashVal) : "—"}
+              </div>
+              <div className="s muted">кэш</div>
+            </article>
+            <article className="kpi">
+              <div className="k">За день</div>
+              <div className={"v " + pnlClass(day && day.day_rub)}>
+                {loading ? "…" : fmtRub(day && day.day_rub, { signed: true })}
+              </div>
+              <div className={"s " + pnlClass(day && day.day_pct)}>
+                {loading
+                  ? "MOEX × позиции"
+                  : `${fmtPct(day && day.day_pct)}${
+                      day && day.stale ? " · кэш" : ""
+                    }`}
+              </div>
+            </article>
+            <article className="kpi">
+              <div className="k">PnL</div>
+              <div className={"v " + pnlClass(totalPnl)}>
+                {loading ? "…" : fmtRub(totalPnl, { signed: true })}
+              </div>
+              <div className={"s " + pnlClass(totalPnlPct)}>
+                {loading ? "—" : fmtPct(totalPnlPct)}
+              </div>
+            </article>
+            <article className="kpi">
+              <div className="k">Позиций</div>
+              <div className="v">{loading ? "…" : String(papers.length)}</div>
+              <div className="s muted">{breakdown}</div>
+            </article>
+          </motion.section>
 
-      <motion.section
-        className={"day-box" + (loading ? " loading" : "")}
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      >
-        <h2>Кто двинул день</h2>
-        <p className="lead">
-          {loading
-            ? "Считаем, кто двинул день…"
-            : top.length
-              ? `Топ по вкладу в дневной Δ — клик по строке откроет разбор${
-                  day && day.missing ? ` · без котировок: ${day.missing}` : ""
-                }.`
-              : "Нет топа (выходной / нет Δ)."}
-        </p>
-        {moexWeekend ? (
-          <p className="mkt-note">
-            Биржа выходной · цифры за последнюю сессию MOEX (MSK)
-          </p>
-        ) : null}
-        {loading ? (
-          <p className="day-skel">загрузка котировок…</p>
-        ) : top.length ? (
-          <ol className="movers">
-            {top.map((r, i) => {
-              const tid = String(r.ticker || "")
-                .trim()
-                .toUpperCase();
-              const active = tid && tid === selected;
-              return (
-                <motion.li
-                  key={tid || i}
-                  role="button"
-                  tabIndex={0}
-                  className={"day-row" + (active ? " active" : "")}
-                  title={tid ? `Открыть разбор ${tid}` : undefined}
-                  onClick={() => selectTicker(tid)}
-                  onKeyDown={(ev) => {
-                    if (ev.key === "Enter" || ev.key === " ") {
-                      ev.preventDefault();
-                      selectTicker(tid);
-                    }
-                  }}
-                  initial={{ opacity: 0, x: -6 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.1 + i * 0.04 }}
-                >
-                  <span className="t">{r.ticker}</span>
-                  <span className={"rub " + pnlClass(r.day_rub)}>
-                    {fmtRub(r.day_rub, { signed: true })}
-                  </span>
-                  <span className="pct muted">{fmtPct(r.day_pct)}</span>
-                  <span className="go">разбор →</span>
-                </motion.li>
-              );
-            })}
-          </ol>
-        ) : null}
-      </motion.section>
-
-      <motion.section
-        className="holdings"
-        initial={{ opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.14, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      >
-        <div className="holdings-head">
-          <div>
-            <h2>Позиции</h2>
-            <p className="muted lead">
+          <motion.section
+            className={"day-box" + (loading ? " loading" : "")}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <h2>Кто двинул день</h2>
+            <p className="lead">
               {loading
-                ? "грузим…"
-                : papers.length
-                  ? `${papers.length} · ${breakdown}`
-                  : "Нет позиций в ответе БКС"}
+                ? "Считаем, кто двинул день…"
+                : top.length
+                  ? "Топ по вкладу в дневной Δ — клик по строке откроет разбор."
+                  : "Нет топа (выходной / нет Δ)."}
             </p>
-          </div>
-          <div className="focus-chip">
-            <span className="muted">Смотрю</span>
-            <strong>{focusId || "—"}</strong>
-            {selected && selected !== focusId ? (
-              <button
-                type="button"
-                className="btn sm"
-                disabled={!!focusBusy}
-                onClick={() => toggleFocus(selected, true)}
-              >
-                → {selected}
-              </button>
+            {moexWeekend ? (
+              <p className="mkt-note">
+                Биржа выходной · цифры за последнюю сессию MOEX (MSK)
+              </p>
             ) : null}
-            {focusId ? (
-              <button
-                type="button"
-                className="btn sm ghost"
-                disabled={!!focusBusy}
-                onClick={() => toggleFocus(focusId, false)}
-              >
-                снять
-              </button>
+            {loading ? (
+              <p className="day-skel">загрузка котировок…</p>
+            ) : top.length ? (
+              <ol className="movers">
+                {top.map((r, i) => {
+                  const tid = String(r.ticker || "")
+                    .trim()
+                    .toUpperCase();
+                  const active = tid && tid === selected;
+                  return (
+                    <motion.li
+                      key={tid || i}
+                      role="button"
+                      tabIndex={0}
+                      className={"day-row" + (active ? " active" : "")}
+                      title={tid ? `Открыть разбор ${tid}` : undefined}
+                      onClick={() => selectTicker(tid)}
+                      onKeyDown={(ev) => {
+                        if (ev.key === "Enter" || ev.key === " ") {
+                          ev.preventDefault();
+                          selectTicker(tid);
+                        }
+                      }}
+                      initial={{ opacity: 0, x: -6 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.1 + i * 0.04 }}
+                    >
+                      <span className="t">{r.ticker}</span>
+                      <span className={"rub " + pnlClass(r.day_rub)}>
+                        {fmtRub(r.day_rub, { signed: true })}
+                      </span>
+                      <span className="pct muted">{fmtPct(r.day_pct)}</span>
+                      <span className="go">разбор →</span>
+                    </motion.li>
+                  );
+                })}
+              </ol>
             ) : null}
-          </div>
-        </div>
+          </motion.section>
 
-        {selected ? (
-          <p className="selection-bar">
-            Выбрано: <strong>{selected}</strong>
-            <span className="muted"> · разбор ниже</span>
-          </p>
-        ) : (
-          <p className="selection-bar muted">
-            Кликни тикер в топе дня или в списке — откроется разбор.
-          </p>
-        )}
+          <motion.section
+            className="holdings"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{
+              delay: 0.14,
+              duration: 0.4,
+              ease: [0.22, 1, 0.36, 1],
+            }}
+          >
+            <div className="holdings-head">
+              <div>
+                <h2>Позиции</h2>
+                <p className="muted lead">
+                  {loading
+                    ? "грузим…"
+                    : papers.length
+                      ? `${papers.length} · ${breakdown}`
+                      : "Нет позиций в ответе БКС"}
+                </p>
+              </div>
+            </div>
 
-        {loading ? (
-          <p className="muted pad">грузим позиции…</p>
-        ) : !groups.length ? (
-          <p className="muted pad">Пусто.</p>
-        ) : (
-          <div className="asset-groups">
-            {groups.map((g) => {
-              const expanded = previewOpen[g.key] === true;
-              const previewOn = g.rows.length > LIST_PREVIEW;
-              const visible =
-                !previewOn || expanded
-                  ? g.rows
-                  : g.rows.slice(0, LIST_PREVIEW);
-              const rest = g.rows.length - LIST_PREVIEW;
-              return (
-                <div key={g.key} className={"asset-group ac-" + g.key}>
-                  <h3>
-                    {g.title}
-                    <span className="muted"> · {g.rows.length}</span>
-                  </h3>
-                  <ul className="pos-list">
-                    <li className="pos-cols" aria-hidden="true">
-                      <span>Тикер</span>
-                      <span className="num">Кол-во</span>
-                      <span className="num">Стоимость</span>
-                      <span className="num">PnL</span>
-                      <span className="star" />
-                    </li>
-                    <AnimatePresence initial={false}>
-                      {visible.map((h, i) => {
-                        const tid = paperId(h);
-                        const active = tid && tid === selected;
-                        const isFocus = tid && focusSet.has(tid);
-                        const title =
-                          h.name || h.ticker || h.sec_code || "—";
-                        return (
-                          <motion.li
-                            key={tid || `${g.key}-${i}`}
-                            layout
-                            initial={{ opacity: 0, y: 4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.18 }}
-                            className={
-                              "pos-row" +
-                              (active ? " active" : "") +
-                              (isFocus ? " focus" : "")
-                            }
-                          >
-                            <button
-                              type="button"
-                              className="pos-main"
-                              onClick={() => selectTicker(tid)}
-                              title={tid ? `Выбрать ${tid}` : undefined}
-                            >
-                              <span className="pos-id">
-                                <strong>{tid || "?"}</strong>
-                                {isFocus ? (
-                                  <span className="badge-focus">смотрю</span>
-                                ) : null}
-                                <span className="name muted">{title}</span>
-                              </span>
-                              <span className="pos-qty muted">
-                                {qtyFmt(h.quantity)}
-                              </span>
-                              <span className="pos-val">
-                                {fmtRub(h.market_value)}
-                              </span>
-                              <span
+            {selected ? (
+              <p className="selection-bar">
+                Выбрано: <strong>{selected}</strong>
+                <span className="muted"> · разбор ниже</span>
+              </p>
+            ) : (
+              <p className="selection-bar muted">
+                Кликни тикер в топе дня или в списке — откроется разбор.
+              </p>
+            )}
+
+            {loading ? (
+              <p className="muted pad">грузим позиции…</p>
+            ) : !groups.length ? (
+              <p className="muted pad">Пусто.</p>
+            ) : (
+              <div className="asset-groups">
+                {groups.map((g) => {
+                  const expanded = previewOpen[g.key] === true;
+                  const previewOn = g.rows.length > LIST_PREVIEW;
+                  const visible =
+                    !previewOn || expanded
+                      ? g.rows
+                      : g.rows.slice(0, LIST_PREVIEW);
+                  const rest = g.rows.length - LIST_PREVIEW;
+                  return (
+                    <div key={g.key} className={"asset-group ac-" + g.key}>
+                      <h3>
+                        {g.title}
+                        <span className="muted"> · {g.rows.length}</span>
+                      </h3>
+                      <ul className="pos-list">
+                        <li className="pos-cols" aria-hidden="true">
+                          <span>Тикер</span>
+                          <span className="num">Кол-во</span>
+                          <span className="num">Стоимость</span>
+                          <span className="num">PnL</span>
+                        </li>
+                        <AnimatePresence initial={false}>
+                          {visible.map((h, i) => {
+                            const tid = paperId(h);
+                            const active = tid && tid === selected;
+                            const title =
+                              h.name || h.ticker || h.sec_code || "—";
+                            return (
+                              <motion.li
+                                key={tid || `${g.key}-${i}`}
+                                layout
+                                initial={{ opacity: 0, y: 4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 0.18 }}
                                 className={
-                                  "pos-pnl " + pnlClass(h.pnl)
+                                  "pos-row" + (active ? " active" : "")
                                 }
                               >
-                                {fmtRub(h.pnl, { signed: true })}
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              className={
-                                "btn sm focus-btn" +
-                                (isFocus ? " on" : "")
-                              }
-                              disabled={!!focusBusy || !tid}
-                              title={
-                                isFocus
-                                  ? "Снять «Смотрю»"
-                                  : "Поставить «Смотрю»"
-                              }
-                              onClick={() =>
-                                toggleFocus(tid, !isFocus)
-                              }
-                            >
-                              {isFocus ? "★" : "☆"}
-                            </button>
-                          </motion.li>
-                        );
-                      })}
-                    </AnimatePresence>
-                  </ul>
-                  {previewOn ? (
-                    <button
-                      type="button"
-                      className="btn sm more"
-                      onClick={() =>
-                        setPreviewOpen((prev) => ({
-                          ...prev,
-                          [g.key]: !expanded,
-                        }))
-                      }
-                    >
-                      {expanded
-                        ? "Свернуть список"
-                        : `Ещё ${rest} · ${g.title.toLowerCase()} ▾`}
-                    </button>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </motion.section>
+                                <button
+                                  type="button"
+                                  className="pos-main"
+                                  onClick={() => selectTicker(tid)}
+                                  title={
+                                    tid ? `Открыть разбор ${tid}` : undefined
+                                  }
+                                >
+                                  <span className="pos-id">
+                                    <TickerLogo
+                                      ticker={tid}
+                                      isin={h.isin}
+                                      title={title}
+                                    />
+                                    <strong>{tid || "?"}</strong>
+                                    <span className="name muted">{title}</span>
+                                  </span>
+                                  <span className="pos-qty muted">
+                                    {qtyFmt(h.quantity)}
+                                  </span>
+                                  <span className="pos-val">
+                                    {fmtRub(h.market_value)}
+                                  </span>
+                                  <span
+                                    className={"pos-pnl " + pnlClass(h.pnl)}
+                                  >
+                                    {fmtRub(h.pnl, { signed: true })}
+                                  </span>
+                                </button>
+                              </motion.li>
+                            );
+                          })}
+                        </AnimatePresence>
+                      </ul>
+                      {previewOn ? (
+                        <button
+                          type="button"
+                          className="btn sm more"
+                          onClick={() =>
+                            setPreviewOpen((prev) => ({
+                              ...prev,
+                              [g.key]: !expanded,
+                            }))
+                          }
+                        >
+                          {expanded
+                            ? "Свернуть список"
+                            : `Ещё ${rest} · ${g.title.toLowerCase()} ▾`}
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </motion.section>
 
-      {selected ? (
-        <TickerReview
-          ticker={selected}
-          holdings={holdings}
-          totalValue={snap?.total_value ?? null}
-        />
+          {selected ? (
+            <TickerReview
+              ref={reviewRef}
+              ticker={selected}
+              holdings={holdings}
+              totalValue={snap?.total_value ?? null}
+            />
+          ) : null}
+        </div>
       ) : null}
-      </div>
-      ) : null}
-
-      <motion.footer
-        className="foot"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.35 }}
-      >
-        <p>
-          <strong>R4</strong> — сделки + календарь выплат. Бэкап ванили:{" "}
-          <a href="http://127.0.0.1:8765/" target="_blank" rel="noreferrer">
-            127.0.0.1:8765
-          </a>
-          . React MVP закрыт · дальше хвосты / G.
-        </p>
-      </motion.footer>
     </div>
   );
 }

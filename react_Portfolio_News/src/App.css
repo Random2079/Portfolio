@@ -435,7 +435,7 @@
 
 .day-panel .pos-cols {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) 72px 110px 110px 40px;
+  grid-template-columns: minmax(0, 1.6fr) 72px 110px 110px;
   gap: 8px;
   padding: 0.35rem 0.35rem 0.25rem;
   font-size: 0.72rem;
@@ -449,10 +449,7 @@
 }
 
 .day-panel .pos-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px;
-  align-items: stretch;
+  display: block;
   border-bottom: 1px solid var(--day-line);
 }
 
@@ -460,7 +457,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) 72px 110px 110px;
   gap: 8px;
-  align-items: baseline;
+  align-items: center;
   text-align: left;
   width: 100%;
   padding: 0.45rem 0.35rem;
@@ -470,6 +467,7 @@
   color: inherit;
   font-size: 0.82rem;
   transition: background 0.12s;
+  cursor: pointer;
 }
 
 @media (max-width: 720px) {
@@ -497,21 +495,51 @@
   border-color: transparent;
 }
 
-.day-panel .pos-row.focus .pos-main {
-  box-shadow: inset 3px 0 0 var(--warn);
-}
-
 .day-panel .pos-id {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.day-panel .logo-wrap {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: rgba(238, 243, 249, 0.08);
+  position: relative;
+}
+
+.day-panel .logo-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.day-panel .logo-wrap .fb {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.day-panel .logo-wrap.has-img .fb {
+  display: none;
 }
 
 .day-panel .pos-id strong {
   font-weight: 700;
   letter-spacing: 0.02em;
+  flex-shrink: 0;
 }
 
 .day-panel .pos-id .name {
@@ -520,18 +548,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
-}
-
-.day-panel .badge-focus {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: 999px;
-  color: var(--warn);
-  background: rgba(232, 164, 90, 0.14);
-  border: 1px solid rgba(232, 164, 90, 0.35);
 }
 
 .day-panel .pos-qty,
@@ -546,26 +562,13 @@
   font-weight: 600;
 }
 
-.day-panel .focus-btn {
-  min-width: 36px;
-  padding-left: 0;
-  padding-right: 0;
-  color: var(--muted);
-  align-self: center;
-}
-
-.day-panel .focus-btn.on {
-  color: var(--warn);
-  border-color: rgba(232, 164, 90, 0.4);
-  background: rgba(232, 164, 90, 0.12);
-}
-
 .day-panel .btn.sm.more {
   margin-top: 0.35rem;
 }
 
 .day-panel .ticker-review {
   margin-top: 1rem;
+  scroll-margin-top: 1rem;
 }
 
 /* legacy aliases kept for non-day panels if any */

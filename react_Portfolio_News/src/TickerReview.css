@@ -412,3 +412,113 @@
   font-size: 0.72rem;
   color: var(--muted);
 }
+
+/* F-B AI review (dark, denser than vanilla white card) */
+.ticker-review .ai-review-box {
+  margin-top: 0.85rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(20, 28, 40, 0.55);
+}
+
+.ticker-review .ai-review-box .arv-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.55rem;
+  margin-bottom: 0.4rem;
+}
+
+.ticker-review .ai-review-box h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.ticker-review .ai-review-box .arv-btn {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #0b1220;
+  border-radius: 8px;
+  padding: 0.28rem 0.7rem;
+}
+
+.ticker-review .ai-review-box .arv-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ticker-review .ai-review-box .arv-btn.ghost {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink);
+}
+
+.ticker-review .ai-review-box .arv-hint,
+.ticker-review .ai-review-box .arv-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.ticker-review .ai-review-box .arv-meta {
+  margin-left: 0.35rem;
+}
+
+.ticker-review .ai-review-box .arv-urg {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+}
+
+.ticker-review .ai-review-box .arv-urg.low {
+  background: rgba(148, 163, 184, 0.2);
+  color: #94a3b8;
+}
+
+.ticker-review .ai-review-box .arv-urg.mid {
+  background: rgba(234, 128, 28, 0.2);
+  color: #fb923c;
+}
+
+.ticker-review .ai-review-box .arv-urg.high {
+  background: rgba(185, 28, 28, 0.25);
+  color: #f87171;
+}
+
+.ticker-review .ai-review-box .arv-sum {
+  margin: 0.35rem 0 0.55rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.ticker-review .ai-review-box ul {
+  margin: 0.25rem 0 0.55rem;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+}
+
+.ticker-review .ai-review-box .arv-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  margin: 0.45rem 0 0.15rem;
+}
+
+.ticker-review .ai-review-box .arv-empty {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.ticker-review .ai-review-box .arv-err {
+  color: var(--down);
+  font-size: 0.8rem;
+  margin: 0.25rem 0;
+}
