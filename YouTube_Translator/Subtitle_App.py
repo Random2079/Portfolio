@@ -4889,14 +4889,15 @@ def _configure_stdio() -> None:
 
 
 def _find_sr_hwnd() -> int:
-    """HWND главного окна SR (видимое, свёрнутое или временно скрытое)."""
+    """HWND главного SR или окна «Фон» (свёрнутое/скрытое тоже считается)."""
     import ctypes
     from ctypes import wintypes
 
     user32 = ctypes.windll.user32
-    hwnd = user32.FindWindowW(None, "Subtitle Ripper Pro")
-    if hwnd:
-        return int(hwnd)
+    for title in ("Subtitle Ripper Pro", "Фон — overlay (IDEA-022)"):
+        hwnd = user32.FindWindowW(None, title)
+        if hwnd:
+            return int(hwnd)
 
     found = ctypes.c_void_p(0)
     EnumProc = ctypes.WINFUNCTYPE(
@@ -4905,12 +4906,14 @@ def _find_sr_hwnd() -> int:
 
     @EnumProc
     def _enum(h, _lp):  # type: ignore[misc]
-        # Не фильтруем IsWindowVisible — иначе второй ярлык может
-        # не найти окно и убить живой процесс как «зомби».
         buf = ctypes.create_unicode_buffer(512)
         user32.GetWindowTextW(h, buf, 512)
         title = buf.value or ""
-        if title == "Subtitle Ripper Pro" or title.startswith("Subtitle Ripper"):
+        if (
+            title == "Subtitle Ripper Pro"
+            or title.startswith("Subtitle Ripper")
+            or title.startswith("Фон — overlay")
+        ):
             found.value = h
             return False
         return True

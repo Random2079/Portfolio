@@ -1647,11 +1647,13 @@ class OverlayPlayerWindow(QWidget):
         self.catalog_btn.clicked.connect(self._enter_catalog)
         self.catalog_btn.hide()
         ctrl2.addWidget(self.catalog_btn)
-        self.hide_btn = QPushButton("Скрыть")
+        self.hide_btn = QPushButton("Свернуть")
         self.hide_btn.setObjectName("ghostBtn")
         self.hide_btn.setIcon(_svg_icon("hide", 14))
         self.hide_btn.setIconSize(QSize(14, 14))
-        self.hide_btn.setToolTip("Спрятать окно. Вернуть — кнопкой «Фон» в основном окне.")
+        self.hide_btn.setToolTip(
+            "Свернуть в панель задач (музыка играет). Иконка остаётся — клик по ней или Ctrl+Shift+O вернёт."
+        )
         self.hide_btn.clicked.connect(self._hide_keep_music)
         self.hide_btn.hide()  # в каталоге не нужен — только fullscreen / хоткей
         ctrl2.addWidget(self.hide_btn)
@@ -2344,7 +2346,7 @@ class OverlayPlayerWindow(QWidget):
         self._apply_stage_opacity()
         if not self._click_through:
             self.status.setText(
-                "Полное окно · плотность снизу · Ctrl+O — сквозь · Ctrl+Shift+O — скрыть"
+                "Полное окно · плотность снизу · Ctrl+O — сквозь · Ctrl+Shift+O — свернуть"
             )
         self._arm_auto_density_timer()
 
@@ -2812,7 +2814,7 @@ class OverlayPlayerWindow(QWidget):
                     self._start_auto_density_adapt()
                 elif not self._auto_density_armed:
                     self.status.setText(
-                        "Сквозь · UI скрыт · Ctrl+O — вернуть · Ctrl+[ / ] плотность · Ctrl+Shift+O — скрыть"
+                        "Сквозь · UI скрыт · Ctrl+O — вернуть · Ctrl+[ / ] плотность · Ctrl+Shift+O — свернуть"
                     )
                 self._register_hotkeys()
             self._sync_topmost_state()
@@ -2821,7 +2823,7 @@ class OverlayPlayerWindow(QWidget):
         else:
             if self._stage_mode:
                 self._apply_stage_opacity()
-                self.status.setText("Сквозь выкл · плотность после Ctrl+O · Ctrl+Shift+O — скрыть")
+                self.status.setText("Сквозь выкл · плотность после Ctrl+O · Ctrl+Shift+O — свернуть")
                 self._register_hotkeys()
                 self._arm_auto_density_timer()
             else:
@@ -2846,11 +2848,11 @@ class OverlayPlayerWindow(QWidget):
         self._set_click_through(not self._click_through)
 
     def _hide_keep_music(self) -> None:
-        """Спрятать Фон, музыка играет. Сначала hide — не снимать сквозь на видимом окне (чёрная дыра кликов)."""
+        """Свернуть Фон в панель задач (музыка играет). Иконка остаётся — второй ярлык не плодит процесс."""
         was_ct = bool(self._click_through)
         self._click_through = False
-        self.hide()
-        # Пока скрыты — почистить TRANSPARENT / EnableWindow, без activate/show
+        # Не hide(): иначе нет иконки → юзер жмёт ярлык → второй экземпляр / краш.
+        self.showMinimized()
         QTimer.singleShot(0, lambda: self._sanitize_after_hide(was_ct))
         # Не emit hidden_keep: иначе Translator вылезает поверх Cursor.
 
@@ -2898,25 +2900,17 @@ class OverlayPlayerWindow(QWidget):
         fade_window_opacity(self, 1.0, duration_ms=180)
 
     def _toggle_hide_or_show(self) -> None:
-        if self.isMinimized():
+        # Свёрнут в панель (Ctrl+Shift+O) → вернуть
+        if self.isMinimized() or (
+            not self.isVisible() and self.windowState() & Qt.WindowState.WindowMinimized
+        ):
             self.present_visible()
             return
         if self.isVisible() and not self.isMinimized():
             self._hide_keep_music()
             return
-        self.show()
-        if self._stage_mode:
-            self.showFullScreen()
-        self.raise_()
-        self.activateWindow()
-        if self._click_through:
-            self._set_click_through(False)
-        elif self._stage_mode:
-            self._update_chrome_visibility()
-            self._apply_stage_opacity()
-            self._sync_topmost_state()
-            self._set_video_input_enabled(True)
-            QTimer.singleShot(0, self._repair_video_surface)
+        # Полный hide (legacy) — тоже показать
+        self.present_visible()
 
     def _write_root_exstyle(self) -> None:
         """Сквозь: LAYERED+TRANSPARENT. Иначе не форсить LAYERED — иначе окно невидимо."""
