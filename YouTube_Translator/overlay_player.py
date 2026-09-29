@@ -327,8 +327,10 @@ _VOLUME_STEP = 5
 _OPACITY_STEP = 5
 _OPACITY_MIN = 5
 _OPACITY_MAX = 100
-# A3: база ± span от яркости стола (светлый → плотнее, тёмный → прозрачнее)
-_AUTO_DENSITY_LUMA_SPAN = 22
+# A3: база смещает диапазон; светлый → заметно плотнее (иначе на Bannerlord «не работает»)
+_AUTO_DENSITY_LUMA_SPAN = 22  # legacy label in UI; реальный map — _auto_density_pct_from_luma
+_AUTO_DENSITY_PCT_LO = 18   # почти чёрный фон под стеклом
+_AUTO_DENSITY_PCT_HI = 88   # светлый арт/меню — анимацию должно быть видно
 # Метка «сейчас играет» в QListWidgetItem
 _ROLE_PLAYING = int(Qt.ItemDataRole.UserRole) + 1
 
@@ -410,11 +412,11 @@ def _pixel_luma01(c: QColor) -> float:
 
 
 def _visibility_luma_from_samples(samples: list[float]) -> float | None:
-    """p75 яркости: светлые зоны (небо/UI) важнее среднего по тёмному морю."""
+    """p90 яркости: светлые зоны (небо/UI) решают, иначе тёмное море «съедает» среднее."""
     if len(samples) < 8:
         return None
     samples.sort()
-    return samples[min(len(samples) - 1, int(len(samples) * 0.75))]
+    return samples[min(len(samples) - 1, int(len(samples) * 0.90))]
 
 
 def _pixmap_visibility_luma(pm: QPixmap, *, step: int = 24) -> float | None:
@@ -533,8 +535,8 @@ def _desktop_luminance_outside(exclude_geo) -> float | None:
 
 def _luminance_under_widget(widget: QWidget) -> float | None:
     """
-    Что реально под стеклом (игра/меню): на миг opacity=0 → grab геометрии окна.
-    Иначе grab видит само видео Фона, а реестр Background=чёрный врёт.
+    Что под стеклом (игра/меню): hide на кадр → grab геометрии.
+    Exclusive fullscreen часто даёт чёрный кадр → None (не врём «тёмный стол»).
     """
     if widget is None or not widget.isVisible():
         return None
@@ -550,22 +552,38 @@ def _luminance_under_widget(widget: QWidget) -> float | None:
     w, h = geo.width(), geo.height()
     if w < 32 or h < 32:
         return None
-    old = float(widget.windowOpacity())
+    was_vis = widget.isVisible()
     try:
-        widget.setWindowOpacity(0.0)
+        # hide надёжнее opacity=0: иначе grab часто видит своё же видео
+        widget.setVisible(False)
         QApplication.processEvents()
         pm = screen.grabWindow(0, x, y, w, h)
     except Exception:
         return None
     finally:
-        widget.setWindowOpacity(old)
-        QApplication.processEvents()
-    return _pixmap_visibility_luma(pm, step=28)
+        if was_vis:
+            widget.setVisible(True)
+            QApplication.processEvents()
+    luma = _pixmap_visibility_luma(pm, step=28)
+    # Чёрный/пустой кадр = захват не удался (часто exclusive fullscreen)
+    if luma is None or luma < 0.05:
+        return None
+    return luma
 
 
 def _auto_density_pct_from_luma(base: int, luma: float) -> int:
-    """Светлый стол → выше % (плотнее); тёмный → ниже % (прозрачнее)."""
-    pct = int(round(base + (luma * 2.0 - 1.0) * _AUTO_DENSITY_LUMA_SPAN))
+    """
+    Светлый фон → высокий % (плотнее, анимацию видно).
+    Тёмный → низкий %. База сдвигает диапазон ±10 вокруг дефолта 40.
+    """
+    luma = max(0.0, min(1.0, float(luma)))
+    # base 40 → lo=18 hi=88; base 50 → lo=28 hi=95 (clamp)
+    shift = int(base) - 40
+    lo = max(_OPACITY_MIN, min(45, _AUTO_DENSITY_PCT_LO + shift))
+    hi = max(55, min(_OPACITY_MAX, _AUTO_DENSITY_PCT_HI + shift))
+    if hi <= lo:
+        hi = min(_OPACITY_MAX, lo + 30)
+    pct = int(round(lo + luma * (hi - lo)))
     return max(_OPACITY_MIN, min(_OPACITY_MAX, pct))
 
 
@@ -1216,7 +1234,8 @@ class OverlaySettingsDialog(QDialog):
             max(_OPACITY_MIN, min(_OPACITY_MAX, int(prefs.get("auto_density_pct", 45))))
         )
         self.auto_density_pct.setToolTip(
-            f"База: итог ≈ база ±{_AUTO_DENSITY_LUMA_SPAN} по яркости обоев/стола"
+            "База сдвигает диапазон. Светлый фон → до ~88%, тёмный → ~18%. "
+            f"Смотри статус: «Авто-плотность N% (… L0.xx)»."
         )
         top.addRow("Авто: база плотности (± стол)", self.auto_density_pct)
         self.auto_density_idle = QSpinBox()
@@ -2081,17 +2100,24 @@ class OverlayPlayerWindow(QWidget):
             self._auto_density_armed
             and self._click_through
             and self._stage_mode
-            and self._playing
         ):
             self._stop_auto_density_adapt()
             return
         if time.monotonic() < self._auto_density_manual_until:
             return
-        pct, tone = self._resolve_auto_density_pct()
-        cur = int(self.opacity_slider.value())
-        if abs(pct - cur) < 2:
+        self._apply_auto_density_now()
+
+    def _apply_auto_density_now(self) -> None:
+        """Замер → слайдер + opacity. Статус всегда обновляем (видно, что тик жив)."""
+        if not self._click_through or not self._stage_mode:
             return
+        pct, tone = self._resolve_auto_density_pct()
+        # hide/show при замере сбрасывает вид — всегда вернуть сквозь+% 
         self._set_opacity_slider_visual(pct, persist=False)
+        try:
+            self._apply_exstyle()
+        except Exception:
+            pass
         self._apply_stage_opacity()
         self.status.setText(
             f"Авто-плотность {pct}% ({tone}) · сквозь · Ctrl+O / Esc — вернуть"
@@ -2105,43 +2131,32 @@ class OverlayPlayerWindow(QWidget):
         )
         luma = None
         src = "база"
-        # 1) под стеклом (игра/меню) — только когда уже сквозь
         if self._click_through:
             luma = _luminance_under_widget(self)
             if luma is not None:
                 src = "под стеклом"
-        # 2) края экрана вне Фона
         if luma is None:
             luma = _desktop_luminance_outside(self.frameGeometry())
             if luma is not None:
                 src = "стол"
-        # 3) файл обоев / TranscodedWallpaper (не чёрный Background)
         if luma is None:
             luma = _wallpaper_luminance()
             if luma is not None:
                 src = "обои"
         if luma is None:
-            return base, "база"
+            return base, "база (нет замера)"
         pct = _auto_density_pct_from_luma(base, luma)
-        tone = "светлый" if luma >= 0.55 else ("тёмный" if luma <= 0.35 else "средний")
-        return pct, f"{src} {tone}"
+        tone = "светлый" if luma >= 0.45 else ("тёмный" if luma <= 0.30 else "средний")
+        return pct, f"{src} {tone} L{luma:.2f}"
 
     def _on_auto_density_fire(self) -> None:
-        """Idle истёк → сквозь, потом замер под стеклом (не пишем stage_opacity)."""
+        """Idle истёк → сквозь; apply+тик стартует из _set_click_through."""
         if not self._prefs.get("auto_density"):
             return
         if not self._stage_mode or not self._playing or self._click_through:
             return
         self._auto_density_armed = True
         self._set_click_through(True)
-        # CT уже on → resolve видит игру/арт под окном, не чёрный реестр
-        pct, tone = self._resolve_auto_density_pct()
-        self._set_opacity_slider_visual(pct, persist=False)
-        self._apply_stage_opacity()
-        self.status.setText(
-            f"Авто-плотность {pct}% ({tone}) · сквозь · Ctrl+O / Esc — вернуть"
-        )
-        self._start_auto_density_adapt()
 
     def _set_opacity_slider_visual(self, pct: int, *, persist: bool) -> None:
         """Выставить слайдер; persist=False — не в prefs (авто-сессия)."""
@@ -2782,15 +2797,20 @@ class OverlayPlayerWindow(QWidget):
             except Exception:
                 pass
             if self._stage_mode:
-                # Ручной сквозь: если плотность высокая — ужать; авто уже выставил %
-                if not self._auto_density_armed and self.opacity_slider.value() > 55:
+                # Ручной сквозь без авто: ужать слишком плотный слайдер
+                if not self._prefs.get("auto_density") and self.opacity_slider.value() > 55:
                     self.opacity_slider.blockSignals(True)
                     self.opacity_slider.setValue(40)
                     self.opacity_slider.blockSignals(False)
                     if hasattr(self, "opacity_value"):
                         self.opacity_value.setText("40%")
                 self._apply_stage_opacity()
-                if not self._auto_density_armed:
+                # Авто-плотность: Ctrl+O тоже включает тик (не только idle-fire)
+                if self._prefs.get("auto_density"):
+                    self._auto_density_armed = True
+                    QTimer.singleShot(40, self._apply_auto_density_now)
+                    self._start_auto_density_adapt()
+                elif not self._auto_density_armed:
                     self.status.setText(
                         "Сквозь · UI скрыт · Ctrl+O — вернуть · Ctrl+[ / ] плотность · Ctrl+Shift+O — скрыть"
                     )
