@@ -1429,6 +1429,7 @@ class OverlayPlayerWindow(QWidget):
         self._auto_density_adapt_timer.timeout.connect(self._on_auto_density_adapt_tick)
         self._auto_density_armed = False  # сквозь включили авто
         self._auto_density_manual_until = 0.0  # Ctrl+[ / ] — не перебивать N сек
+        self._cached_screen_luma: float | None = None  # снимок ДО сквозь (grab при CT мигает)
         self._suppress_opacity_prefs = False  # A2: авто-% не писать в stage_opacity
         self._hk_retry_pending = False
         self._hotkeys_registered: set[int] = set()
@@ -2094,7 +2095,7 @@ class OverlayPlayerWindow(QWidget):
         self._apply_auto_density_now()
 
     def _apply_auto_density_now(self) -> None:
-        """Замер → слайдер + opacity. Без hide — без мигания."""
+        """Замер → слайдер + opacity. При сквозь — без grabWindow (иначе мигание поверх Cursor)."""
         if not self._click_through or not self._stage_mode:
             return
         t0 = time.perf_counter()
@@ -2110,16 +2111,32 @@ class OverlayPlayerWindow(QWidget):
         _auto_density_log(f"{pct}% {tone} slider={cur} {ms:.0f}ms")
 
     def _resolve_auto_density_pct(self) -> tuple[int, str]:
-        """База prefs + яркость краёв стола / обоев (без hide под стеклом)."""
+        """
+        База + яркость. Пока сквозь — только обои/кэш (grabWindow при CT
+        мигает поверх чужого окна: DWM + topmost).
+        """
         base = max(
             _OPACITY_MIN,
             min(_OPACITY_MAX, int(self._prefs.get("auto_density_pct", 45))),
         )
-        luma = _desktop_luminance_outside(self.frameGeometry())
-        src = "стол"
-        if luma is None:
+        luma: float | None = None
+        src = "база"
+        if self._click_through:
             luma = _wallpaper_luminance()
-            src = "обои"
+            if luma is not None:
+                src = "обои"
+            elif self._cached_screen_luma is not None:
+                luma = self._cached_screen_luma
+                src = "кэш"
+        else:
+            luma = _desktop_luminance_outside(self.frameGeometry())
+            if luma is not None:
+                src = "стол"
+                self._cached_screen_luma = luma
+            if luma is None:
+                luma = _wallpaper_luminance()
+                if luma is not None:
+                    src = "обои"
         if luma is None:
             return base, "база (нет замера)"
         pct = _auto_density_pct_from_luma(base, luma)
@@ -2127,11 +2144,13 @@ class OverlayPlayerWindow(QWidget):
         return pct, f"{src} {tone} L{luma:.2f}"
 
     def _on_auto_density_fire(self) -> None:
-        """Idle истёк → сквозь; apply+тик стартует из _set_click_through."""
+        """Idle истёк → снимок стола, потом сквозь (grab только до CT)."""
         if not self._prefs.get("auto_density"):
             return
         if not self._stage_mode or not self._playing or self._click_through:
             return
+        # Важно: grab ДО сквозь — иначе вспышка поверх Cursor/игры
+        self._cached_screen_luma = _desktop_luminance_outside(self.frameGeometry())
         self._auto_density_armed = True
         self._set_click_through(True)
 
