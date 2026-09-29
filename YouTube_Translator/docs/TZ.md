@@ -43,7 +43,7 @@
 | **17** | Overlay: Levan Polka | 022p / P5 | ✅ | Удалён трек из Music/YouTube_DL |
 | **18** | Overlay: Настр. + хоткеи + фон | 022p / P6–P9 | ✅ | Антизависание, плеер-клавиши, play when hidden, remap |
 | **19** | UI backup / запас интерфейса | U | 🟡 | Перед ломкой UI — копия в `backups/ui/`; не переписывать логику с нуля · [part 17](parts/17-ui-backup.md) |
-| **20** | Overlay: авто-плотность (авто-фон) | IDEA-025 / A0–A2 | ⬜ | Stage+play → idle → сквозь + % · только `overlay_player.py` · [part 18](parts/18-overlay-auto-density.md) · очередь в [MAP](../MAP.md) |
+| **20** | Overlay: авто-плотность (авто-фон) | IDEA-025 / **B0** | 🟡 | A0–A3 ✅ · дальше B0→B3 · [part 18](parts/18-overlay-auto-density.md) · [MAP](../MAP.md) |
 
 Легенда: ✅ сделано в коде · 🟡 частично / есть gap · ⬜ не начато / парковка.
 
@@ -67,7 +67,7 @@
 | E — «Полный браузер-клон» | 🚫 | **не в scope** |
 | IDEA-021 | 🟡 F0 | Список + проводник · [part 19](parts/19-dist-files.md) · [MAP](../MAP.md) |
 | IDEA-022 overlay | 🟡→polish ✅ | MVP + UX polish P1–P9 · [part 16](parts/16-overlay-ux-polish.md) |
-| **IDEA-025 авто-плотность** | **⬜** | A0 prefs → A1 idle+CT+% → A2 сброс · [part 18](parts/18-overlay-auto-density.md) · [MAP](../MAP.md) |
+| **IDEA-025 авто-плотность** | **🟡** | A0–A3 ✅ · **B0** следующий · B1–B3 по тесту · [part 18](parts/18-overlay-auto-density.md) · [MAP](../MAP.md) |
 | **U — UI backup / запас** | **🟡** | Копии UI перед крупными правками; контракт UX · [part 17](parts/17-ui-backup.md) |
 
 ---
