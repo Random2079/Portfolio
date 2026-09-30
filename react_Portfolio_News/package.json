@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1",
+    "docs:sync": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync_backend_docs.ps1",
+    "serve": "cd ../Portfolio_News && python -m portfolio_news serve",
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",

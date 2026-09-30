@@ -1,26 +1,24 @@
 # Portfolio News · React (`react_Portfolio_News`)
 
-Новый UI-трек (R0+). **API и ванильный бэкап** — в соседней папке `Portfolio_News/`.
+Живой React UI утреннего терминала. **API и ванильный бэкап** — в соседней
+папке `Portfolio_News/`.
 
-Карта: [`../Portfolio_News/MAP.md`](../Portfolio_News/MAP.md) §7R.
+Документация:
 
-## Утро (один процесс)
+- локальный вход: [`docs/README.md`](docs/README.md)
+- канон: [`../Portfolio_News/MAP.md`](../Portfolio_News/MAP.md)
+- локальное зеркало канона: `docs/backend/` после `npm start` / `npm run docs:sync`
 
-Сначала один раз собрать UI (после правок React — снова):
+## Утро — одна команда
 
-```powershell
-cd ..\react_Portfolio_News
-npm run build
-```
-
-или из `Portfolio_News`: `.\scripts\build_react_ui.ps1`
-
-Потом только API:
+Из этой папки:
 
 ```powershell
-cd ..\Portfolio_News
-python -m portfolio_news serve
+npm start
 ```
+
+Она синхронизирует документацию, собирает React и запускает Python API+UI.
+Остановить сервер: `Ctrl+C`.
 
 - **React:** http://127.0.0.1:8765/app/  
 - **Ваниль (бэкап):** http://127.0.0.1:8765/  
@@ -50,4 +48,8 @@ Vite проксирует `/api` → `:8765`. `api.js` по умолчанию �
 |------|-----|
 | **R0** | Шелл, тема, motion, health + day KPI |
 | **R1** | День топ + позиции / focus (`/api/holdings`, `/api/focus`) |
-| R2… | см. MAP §7R |
+| **R2** | Разбор: график + карточка + KS |
+| **R3** | Новости + F-A |
+| **R4** | Сделки + календарь |
+
+Текущий статус и очередь не дублируются здесь — см. MAP.

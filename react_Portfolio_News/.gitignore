@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Generated mirror of canonical sibling documentation
+docs/backend/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

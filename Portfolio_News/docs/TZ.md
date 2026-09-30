@@ -3,7 +3,7 @@
 **Карта для человека (канон статуса/очереди):** [`MAP.md`](../MAP.md)  
 **Карточка:** [`IDEAS.md`](../../IDEAS.md) → IDEA-003  
 **Зеркало `.cursor/plans/IDEA-003` — устарело; не править, смотри MAP.**  
-**Дата bootstrap 020:** 2026-08-25 · **апдейт «свой БКС»:** 2026-08-25
+**Дата bootstrap 020:** 2026-08-25 · **апдейт React UI:** 2026-09-30
 
 ## Цель
 
@@ -47,7 +47,7 @@
 | K8 | ✅ | Сделки: вся история **с 2023** (журнал Snowball + кэш БКС, дедуп по локальной дате), фильтр по типу (акции/облигации/фонды), периоду и тикеру + **экспорт CSV** (`ops_history.py`, `/api/operations`, `/api/operations.csv`) |
 | K9 | ✅ | Toast на новость **только по бумагам БКС**, антиспам (✅ правила ниже) |
 | **KS** | ✅ | **Сверка / факты** под карточкой: `/api/review/{ticker}` + SQLite кэш; сектор-слоты; BCS/MOEX/calendar + SmartLab multiples + Dohod (оферта/рейтинг/тип купона). FCF/CAPEX/эскроу часто `[НЕТ ДАННЫХ]`. Part [11](parts/11-review-checkpoint.md) |
-| KV | ⬜ | **Визуал + лёгкая анимация** UI: иерархия, motion 2–3; без карнавала; графики не обязательны |
+| R0–R4 | ✅ | Живой React UI в sibling `react_Portfolio_News/`; `/app/`, ваниль `/` = бэкап |
 
 ## Не делаем
 
@@ -76,9 +76,10 @@
 ## Проверка
 
 ```powershell
-cd Portfolio_News
-python -m portfolio_news serve
-# http://127.0.0.1:8765/
+cd react_Portfolio_News
+npm start
+# React: http://127.0.0.1:8765/app/
+# Бэкап: http://127.0.0.1:8765/
 ```
 
 | Что | Ожидание |
@@ -112,7 +113,7 @@ python -m portfolio_news serve
 
 | Вопрос | Выбор |
 |--------|--------|
-| Фокус сейчас | KS ✅; F/KV — по желанию; forecast = IDEA-023 |
+| Фокус сейчас | React MVP + §7N ✅; дальше §7F / privacy / G по MAP; forecast = IDEA-023 |
 | Слой F (2026-09-19) | **A→B**: сначала чистка шума ленты, потом one-shot разбор тикера (чеклист к стратегии). Чат в дашборде — позже, отдельно от разбора (лёгкие вопросы, данные уже в приложении). Без «купи/продай» |
 | Сверка (KS) | Факты + ярлыки чек-поинта; правила живут в `Инвестиции/Investing/rules/` — в UI только структура. Нет «купи/продай». Мультипликаторы без источника = `[НЕТ ДАННЫХ]` |
 | График в разборе | K3 не блокер KS; можно отложить устойчивость графика |
@@ -123,11 +124,11 @@ python -m portfolio_news serve
 | Toast по новостям (K9) | только бумаги БКС; **только с сегодня**; дефолт **digest**; `off` всегда под рукой |
 | БКС токен | только локальный `.env` / `Desktop\Keys\` |
 | Backend | Python 3.12+, FastAPI, Uvicorn, SQLAlchemy 2, SQLite |
-| Frontend **живой** | Vanilla JS + CSS в `portfolio_news/static/dashboard-demo.html`; разделы: **Сегодня** (`#/`) · **Новости** (`#/news`) · **Сделки** (`#/ops`) |
-| Frontend заготовка | `frontend/` Vite + React 19 — **не трогаем**, пока UI не раздуется |
-| Когда React | **после** набора инструментов (K0–K… живые: история, графики, карточки). Сейчас React = overkill. Переезд — отдельный шаг по команде |
-| Графики | CDN/лёгкая lib (Chart.js или uPlot) в vanilla на K3 |
-| Визуал / анимация | слой **KV** в vanilla; без карнавала |
+| Frontend **живой** | sibling `react_Portfolio_News/` (React 19 + Vite), build отдаётся на `/app/` |
+| Frontend бэкап | Vanilla JS + CSS в `portfolio_news/static/dashboard-demo.html` на `/`; freeze, только багфиксы |
+| Старый React-черновик | `Portfolio_News/frontend/` — не канон, не трогаем |
+| Графики | Lightweight Charts в React; API/candles остаются в Python |
+| Визуал / анимация | React UI; без карнавала |
 
 ## Поток (целевой)
 
