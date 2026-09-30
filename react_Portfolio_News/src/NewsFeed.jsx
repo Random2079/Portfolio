@@ -1,27 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { getJson, postJson } from "./api";
+import TickerLogo from "./TickerLogo";
 
-const AI_HIDE_KEY = "pn_ai_hide_noise";
 const NOTIFY_KEY = "pn_notify";
+const HEADLINES_PER_CARD = 3;
 
-const LABEL_RU = { noise: "шум", relevant: "ок", dup: "дубль" };
-
-function readHideNoise() {
-  try {
-    return localStorage.getItem(AI_HIDE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeHideNoise(on) {
-  try {
-    localStorage.setItem(AI_HIDE_KEY, on ? "1" : "0");
-  } catch {
-    /* ignore */
-  }
-}
+const URG_RANK = { high: 3, mid: 2, low: 1 };
 
 function readNotify() {
   try {
@@ -46,29 +31,174 @@ function safeHref(url) {
   return href.startsWith("http://") || href.startsWith("https://") ? href : "";
 }
 
-function AiBadge({ item }) {
-  const label = String(item.ai_label || "").toLowerCase();
-  if (!label) return null;
-  const text = LABEL_RU[label] || label;
+function urgRank(u) {
+  return URG_RANK[String(u || "").toLowerCase()] || 0;
+}
+
+function itemTs(n) {
+  const s = n.published_at || n.created_at || "";
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? 0 : t;
+}
+
+function fmtNewsDate(iso) {
+  const s = String(iso || "").trim();
+  if (!s) return "";
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s.slice(0, 16).replace("T", " ");
+  return d.toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Bucket for §7N floors. Noise/dup never shown. */
+function floorOf(n) {
+  const label = String(n.ai_label || "").toLowerCase();
+  if (label === "noise" || label === "dup") return null;
+  if (label === "relevant") {
+    const u = String(n.ai_urgency || "").toLowerCase();
+    if (u === "high") return "urgent";
+    return "facts";
+  }
+  return "raw";
+}
+
+function groupByTicker(list) {
+  const map = new Map();
+  for (const n of list) {
+    const tid = String(n.ticker_id || "").trim().toUpperCase() || "?";
+    if (!map.has(tid)) map.set(tid, []);
+    map.get(tid).push(n);
+  }
+  const cards = [];
+  for (const [ticker, items] of map) {
+    const sorted = items.slice().sort((a, b) => {
+      const ur = urgRank(b.ai_urgency) - urgRank(a.ai_urgency);
+      if (ur) return ur;
+      return itemTs(b) - itemTs(a);
+    });
+    const maxUrg = Math.max(0, ...sorted.map((x) => urgRank(x.ai_urgency)));
+    const maxTs = Math.max(0, ...sorted.map(itemTs));
+    cards.push({
+      ticker,
+      items: sorted.slice(0, HEADLINES_PER_CARD),
+      total: sorted.length,
+      maxUrg,
+      maxTs,
+    });
+  }
+  cards.sort((a, b) => {
+    if (b.maxUrg !== a.maxUrg) return b.maxUrg - a.maxUrg;
+    return b.maxTs - a.maxTs;
+  });
+  return cards;
+}
+
+function UrgTag({ urgency }) {
+  const u = String(urgency || "").toLowerCase();
+  if (!u) return null;
   return (
-    <>
-      <span className={"ai-badge " + label} title={item.ai_reason || ""}>
-        {text}
-      </span>
-      {label === "relevant" && item.ai_urgency ? (
-        <span className="ai-urg" title={item.ai_reason || ""}>
-          {String(item.ai_urgency)}
-        </span>
-      ) : null}
-    </>
+    <span className={"news-urg news-urg-" + u} title="Срочность F-A">
+      {u}
+    </span>
   );
 }
 
-export default function NewsFeed() {
+function TickerCard({ card, onOpenReview }) {
+  return (
+    <motion.article
+      className="news-card"
+      layout
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18 }}
+    >
+      <header className="news-card-head">
+        <button
+          type="button"
+          className="news-card-who"
+          onClick={() => onOpenReview?.(card.ticker)}
+          title="Открыть разбор на Дне"
+        >
+          <TickerLogo ticker={card.ticker} />
+          <strong>{card.ticker}</strong>
+        </button>
+        <button
+          type="button"
+          className="news-card-go"
+          onClick={() => onOpenReview?.(card.ticker)}
+        >
+          В разбор
+        </button>
+      </header>
+      <ul className="news-card-lines">
+        {card.items.map((n) => {
+          const href = safeHref(n.url);
+          const title = n.title || "(без заголовка)";
+          const when = fmtNewsDate(n.published_at || n.created_at);
+          return (
+            <li key={n.id} className="news-line">
+              <div className="news-line-main">
+                {href ? (
+                  <a href={href} target="_blank" rel="noreferrer">
+                    {title}
+                  </a>
+                ) : (
+                  <span className="feed-title">{title}</span>
+                )}
+                <UrgTag urgency={n.ai_urgency} />
+              </div>
+              <div className="news-line-meta">
+                {[when, n.source].filter(Boolean).join(" · ")}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {card.total > HEADLINES_PER_CARD ? (
+        <p className="news-card-more muted">
+          ещё {card.total - HEADLINES_PER_CARD} по {card.ticker}
+        </p>
+      ) : null}
+    </motion.article>
+  );
+}
+
+function Floor({ title, hint, cards, empty, onOpenReview }) {
+  return (
+    <section className="news-floor">
+      <h3 className="news-floor-title">{title}</h3>
+      {hint ? <p className="news-floor-hint">{hint}</p> : null}
+      {!cards.length ? (
+        <p className="muted pad news-floor-empty">{empty}</p>
+      ) : (
+        <div className="news-cards">
+          <AnimatePresence initial={false}>
+            {cards.map((c) => (
+              <TickerCard
+                key={c.ticker}
+                card={c}
+                onOpenReview={onOpenReview}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * §7N news floors: urgent / facts by ticker cards; noise hidden; raw ≠ urgent.
+ */
+export default function NewsFeed({ onOpenReview }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [hideNoise, setHideNoise] = useState(readHideNoise);
   const [notify, setNotify] = useState(readNotify);
   const [aiReady, setAiReady] = useState(false);
   const [aiHint, setAiHint] = useState("");
@@ -82,7 +212,7 @@ export default function NewsFeed() {
     setLoading(true);
     setError("");
     try {
-      const news = await getJson("/api/news?limit=40");
+      const news = await getJson("/api/news?limit=80");
       setItems(Array.isArray(news) ? news : []);
     } catch (e) {
       setError(String(e.message || e));
@@ -112,17 +242,23 @@ export default function NewsFeed() {
     };
   }, [loadNews, loadAiStatus]);
 
-  const visible = useMemo(() => {
-    if (!hideNoise) return items;
-    return items.filter(
-      (n) => String(n.ai_label || "").toLowerCase() !== "noise"
-    );
-  }, [items, hideNoise]);
-
-  const onHideNoise = (checked) => {
-    setHideNoise(checked);
-    writeHideNoise(checked);
-  };
+  const floors = useMemo(() => {
+    const urgent = [];
+    const facts = [];
+    const raw = [];
+    for (const n of items) {
+      const f = floorOf(n);
+      if (f === "urgent") urgent.push(n);
+      else if (f === "facts") facts.push(n);
+      else if (f === "raw") raw.push(n);
+    }
+    return {
+      urgent: groupByTicker(urgent),
+      facts: groupByTicker(facts),
+      raw: groupByTicker(raw),
+      hasAi: items.some((n) => String(n.ai_label || "").trim()),
+    };
+  }, [items]);
 
   const onNotify = (mode) => {
     setNotify(mode);
@@ -220,6 +356,11 @@ export default function NewsFeed() {
     }
   };
 
+  const emptyFeed = !loading && !error && !items.length;
+  const urgentEmptyHint = !floors.hasAi
+    ? "Без ИИ срочное не угадываем — жми «Прогнать ИИ»."
+    : "Сейчас нет high по фундаменту.";
+
   return (
     <motion.section
       className="news-panel"
@@ -230,8 +371,8 @@ export default function NewsFeed() {
       <div className="news-head">
         <h2>Новости</h2>
         <p className="lead">
-          Лента по бумагам портфеля (BCS). Toast — только сегодняшние, по
-          умолчанию digest.
+          Срочно и факты — карточки по бумагам. Шум скрыт. Клик → разбор на
+          Дне.
         </p>
       </div>
 
@@ -275,14 +416,6 @@ export default function NewsFeed() {
         >
           {aiBusy ? "ИИ…" : "Прогнать ИИ"}
         </button>
-        <label className="ai-hide">
-          <input
-            type="checkbox"
-            checked={hideNoise}
-            onChange={(e) => onHideNoise(e.target.checked)}
-          />
-          <span>Скрыть шум</span>
-        </label>
         <button
           type="button"
           className="feed-refresh"
@@ -302,46 +435,41 @@ export default function NewsFeed() {
         {aiHint ? <span className="ai-hint">{aiHint}</span> : null}
       </div>
 
-      {error ? (
-        <p className="banner err">{error}</p>
-      ) : loading ? (
-        <p className="muted pad">грузим ленту…</p>
-      ) : !visible.length ? (
+      {error ? <p className="banner err">{error}</p> : null}
+      {loading ? <p className="muted pad">грузим ленту…</p> : null}
+      {emptyFeed ? (
         <p className="muted pad">
           Лента пуста — нажми «Искать новости» или CLI: once.
         </p>
-      ) : (
-        <ul className="feed-list">
-          <AnimatePresence initial={false}>
-            {visible.map((n) => {
-              const href = safeHref(n.url);
-              const meta = [n.ticker_id, n.source].filter(Boolean).join(" · ");
-              const title = n.title || "(без заголовка)";
-              return (
-                <motion.li
-                  key={n.id}
-                  layout
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.16 }}
-                  className="feed-item"
-                >
-                  {href ? (
-                    <a href={href} target="_blank" rel="noreferrer">
-                      {title}
-                    </a>
-                  ) : (
-                    <span className="feed-title">{title}</span>
-                  )}
-                  <AiBadge item={n} />
-                  {meta ? <div className="feed-meta">{meta}</div> : null}
-                </motion.li>
-              );
-            })}
-          </AnimatePresence>
-        </ul>
-      )}
+      ) : null}
+
+      {!loading && !error && !emptyFeed ? (
+        <>
+          <Floor
+            title="Срочно / к разбору"
+            hint="relevant · high — бьёт в фундамент"
+            cards={floors.urgent}
+            empty={urgentEmptyHint}
+            onOpenReview={onOpenReview}
+          />
+          <Floor
+            title="Факты / среднее"
+            hint="relevant · mid/low"
+            cards={floors.facts}
+            empty="Пока пусто — после «Прогнать ИИ» сюда попадут mid/low."
+            onOpenReview={onOpenReview}
+          />
+          {floors.raw.length ? (
+            <Floor
+              title="Без разметки ИИ"
+              hint="Сырое — не считаем срочным"
+              cards={floors.raw}
+              empty=""
+              onOpenReview={onOpenReview}
+            />
+          ) : null}
+        </>
+      ) : null}
     </motion.section>
   );
 }

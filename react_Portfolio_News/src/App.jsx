@@ -195,7 +195,7 @@ export default function App() {
         </div>
       ) : null}
 
-      {tab === "news" ? <NewsFeed /> : null}
+      {tab === "news" ? <NewsFeed onOpenReview={selectTicker} /> : null}
       {tab === "ops" ? <OpsPanel /> : null}
       {tab === "calendar" ? <CalendarPanel /> : null}
 
