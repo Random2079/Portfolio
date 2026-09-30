@@ -50,22 +50,20 @@ function ruPlural(n, one, few, many) {
   return many;
 }
 
-function buildParams(kinds, year, tickerQ) {
+function buildParams(kind, year, tickerQ) {
   const p = new URLSearchParams();
-  const on = Object.keys(kinds).filter((k) => kinds[k]);
-  if (on.length && on.length < 3) p.set("kind", on.join(","));
+  if (kind) p.set("kind", kind);
   if (year) p.set("year", year);
   if (tickerQ) p.set("ticker", tickerQ);
   return p;
 }
 
-function csvHref(kinds, year, tickerQ) {
-  const p = buildParams(kinds, year, tickerQ);
+function csvHref(kind, year, tickerQ) {
+  const p = buildParams(kind, year, tickerQ);
   const path = `/api/operations.csv?${p.toString()}`;
   return API_BASE ? `${API_BASE}${path}` : path;
 }
 
-/** Build chip options from ops field; empty selection = all on. */
 function collectChips(ops, idKey, labelKey) {
   const map = new Map();
   for (const o of ops) {
@@ -81,7 +79,6 @@ function collectChips(ops, idKey, labelKey) {
 }
 
 function chipOn(selected, id) {
-  // empty set ⇒ show all
   if (!selected.size) return true;
   return selected.has(id);
 }
@@ -93,8 +90,40 @@ function toggleChip(prev, id) {
   return next;
 }
 
+function SubChips({ label, chips, selected, onToggle, onClear }) {
+  if (!chips.length) return null;
+  return (
+    <div className="ops-subfilters" aria-label={label}>
+      <span className="ops-sub-k">{label}</span>
+      <div className="ops-sub-chips">
+        {chips.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            className={
+              "ops-sub-chip" +
+              (chipOn(selected, c.id) && selected.size ? " on" : "") +
+              (!selected.size ? " soft" : "")
+            }
+            onClick={() => onToggle(c.id)}
+          >
+            {c.label}
+            <span className="n">{c.n}</span>
+          </button>
+        ))}
+        {selected.size ? (
+          <button type="button" className="ops-sub-chip ghost" onClick={onClear}>
+            все
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function OpsPanel() {
-  const [kinds, setKinds] = useState({ equity: true, bond: true, fund: true });
+  /** One asset class at a time — keeps secondary filters readable. */
+  const [kind, setKind] = useState("equity");
   const [year, setYear] = useState("");
   const [tickerInput, setTickerInput] = useState("");
   const [tickerQ, setTickerQ] = useState("");
@@ -125,19 +154,22 @@ export default function OpsPanel() {
     };
   }, [tickerInput]);
 
+  const selectKind = (key) => {
+    if (key === kind) return;
+    setKind(key);
+    setSectorSel(new Set());
+    setBondTypeSel(new Set());
+    setRatingSel(new Set());
+    setFundSel(new Set());
+    setExpanded(false);
+  };
+
   const load = useCallback(async () => {
-    const anyKind = Object.values(kinds).some(Boolean);
-    if (!anyKind) {
-      setSnap(null);
-      setError("");
-      setLoading(false);
-      return;
-    }
     const my = ++seq.current;
     setLoading(true);
     setError("");
     try {
-      const p = buildParams(kinds, year, tickerQ);
+      const p = buildParams(kind, year, tickerQ);
       p.set("limit", "0");
       const data = await getJson(`/api/operations?${p.toString()}`);
       if (my !== seq.current) return;
@@ -153,7 +185,7 @@ export default function OpsPanel() {
     } finally {
       if (my === seq.current) setLoading(false);
     }
-  }, [kinds, year, tickerQ]);
+  }, [kind, year, tickerQ]);
 
   useEffect(() => {
     load();
@@ -167,59 +199,48 @@ export default function OpsPanel() {
   const opsAll = snap?.operations || [];
 
   const sectorChips = useMemo(
-    () => collectChips(opsAll.filter((o) => o.kind === "equity"), "sector_id", "sector_label"),
+    () => collectChips(opsAll, "sector_id", "sector_label"),
     [opsAll]
   );
   const bondTypeChips = useMemo(
-    () =>
-      collectChips(opsAll.filter((o) => o.kind === "bond"), "bond_type", "bond_type_label"),
+    () => collectChips(opsAll, "bond_type", "bond_type_label"),
     [opsAll]
   );
   const ratingChips = useMemo(
-    () =>
-      collectChips(
-        opsAll.filter((o) => o.kind === "bond"),
-        "rating_bucket",
-        "rating_bucket_label"
-      ),
+    () => collectChips(opsAll, "rating_bucket", "rating_bucket_label"),
     [opsAll]
   );
   const fundChips = useMemo(
-    () =>
-      collectChips(
-        opsAll.filter((o) => o.kind === "fund"),
-        "fund_bucket",
-        "fund_bucket_label"
-      ),
+    () => collectChips(opsAll, "fund_bucket", "fund_bucket_label"),
     [opsAll]
   );
 
   const ops = useMemo(() => {
     return opsAll.filter((o) => {
-      const k = o.kind;
-      if (k === "equity") {
+      if (kind === "equity") {
         const id = String(o.sector_id || "").trim();
         if (id && !chipOn(sectorSel, id)) return false;
-      } else if (k === "bond") {
+      } else if (kind === "bond") {
         const bt = String(o.bond_type || "").trim();
         if (bt && !chipOn(bondTypeSel, bt)) return false;
         const rb = String(o.rating_bucket || "").trim();
         if (rb && !chipOn(ratingSel, rb)) return false;
-      } else if (k === "fund") {
+      } else if (kind === "fund") {
         const fb = String(o.fund_bucket || "").trim();
         if (fb && !chipOn(fundSel, fb)) return false;
       }
       return true;
     });
-  }, [opsAll, sectorSel, bondTypeSel, ratingSel, fundSel]);
+  }, [opsAll, kind, sectorSel, bondTypeSel, ratingSel, fundSel]);
 
-  const anyKind = Object.values(kinds).some(Boolean);
   const shownLimit = expanded ? ops.length : Math.min(OPS_PREVIEW, ops.length);
   const shown = ops.slice(0, shownLimit);
   const rest = ops.length - OPS_PREVIEW;
 
+  const kindTitle =
+    KIND_LABELS.find((k) => k.key === kind)?.label || kind;
+
   const lead = useMemo(() => {
-    if (!anyKind) return "Выбери хотя бы один тип бумаг.";
     if (loading && !snap) return "Вся история: журнал Snowball + свежие сделки БКС.";
     if (loading) return "Загрузка…";
     if (error) return `Сделки не загрузились: ${error}`;
@@ -229,21 +250,20 @@ export default function OpsPanel() {
     }
     if (!snap.ok) return snap.error || "Не удалось загрузить сделки.";
     const src = snap.source ? ` · ${snap.source}` : "";
-    if (!opsAll.length) return `Под фильтры ничего не попало${src}`;
+    if (!opsAll.length) return `${kindTitle}: под фильтры ничего не попало${src}`;
     const span = years.length
       ? ` · ${year || `${years[years.length - 1]}–${years[0]}`}`
       : "";
     const sub =
-      ops.length !== opsAll.length ? ` · после секторов ${ops.length}` : "";
+      ops.length !== opsAll.length ? ` · после уточнения ${ops.length}` : "";
     return (
-      `Сделки · показано ${shown.length} из ${ops.length}` +
+      `${kindTitle} · показано ${shown.length} из ${ops.length}` +
       sub +
       span +
       src +
       (snap.error ? ` · ${snap.error}` : "")
     );
   }, [
-    anyKind,
     loading,
     error,
     snap,
@@ -252,11 +272,8 @@ export default function OpsPanel() {
     shown.length,
     years,
     year,
+    kindTitle,
   ]);
-
-  const toggleKind = (key) => {
-    setKinds((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
 
   const toggleExpand = () => {
     const next = !expanded;
@@ -267,11 +284,6 @@ export default function OpsPanel() {
       /* ignore */
     }
   };
-
-  const showEquitySub = kinds.equity && sectorChips.length > 0;
-  const showBondSub =
-    kinds.bond && (bondTypeChips.length > 0 || ratingChips.length > 0);
-  const showFundSub = kinds.fund && fundChips.length > 0;
 
   return (
     <motion.section
@@ -284,14 +296,16 @@ export default function OpsPanel() {
       <p className="lead">{lead}</p>
 
       <div className="ops-filters">
-        <div className="ops-kind-chips" role="group" aria-label="Тип бумаг">
+        <div className="ops-kind-chips" role="radiogroup" aria-label="Тип бумаг">
           {KIND_LABELS.map(({ key, label }) => (
             <button
               key={key}
               type="button"
-              className={"ops-kind-chip" + (kinds[key] ? " on" : "")}
+              role="radio"
+              aria-checked={kind === key}
+              className={"ops-kind-chip" + (kind === key ? " on" : "")}
               data-kind={key}
-              onClick={() => toggleKind(key)}
+              onClick={() => selectKind(key)}
             >
               {label}
             </button>
@@ -320,146 +334,48 @@ export default function OpsPanel() {
           value={tickerInput}
           onChange={(e) => setTickerInput(e.target.value)}
         />
-        <a className="ops-csv-btn" href={csvHref(kinds, year, tickerQ)}>
+        <a className="ops-csv-btn" href={csvHref(kind, year, tickerQ)}>
           Скачать CSV
         </a>
       </div>
 
-      {showEquitySub ? (
-        <div className="ops-subfilters" aria-label="Сектора акций">
-          <span className="ops-sub-k">Сектора</span>
-          <div className="ops-sub-chips">
-            {sectorChips.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className={
-                  "ops-sub-chip" +
-                  (chipOn(sectorSel, c.id) && sectorSel.size ? " on" : "") +
-                  (!sectorSel.size ? " soft" : "")
-                }
-                onClick={() => setSectorSel((prev) => toggleChip(prev, c.id))}
-              >
-                {c.label}
-                <span className="n">{c.n}</span>
-              </button>
-            ))}
-            {sectorSel.size ? (
-              <button
-                type="button"
-                className="ops-sub-chip ghost"
-                onClick={() => setSectorSel(new Set())}
-              >
-                все
-              </button>
-            ) : null}
-          </div>
-        </div>
+      {kind === "equity" ? (
+        <SubChips
+          label="Сектора"
+          chips={sectorChips}
+          selected={sectorSel}
+          onToggle={(id) => setSectorSel((prev) => toggleChip(prev, id))}
+          onClear={() => setSectorSel(new Set())}
+        />
       ) : null}
 
-      {showBondSub ? (
+      {kind === "bond" ? (
         <>
-          {bondTypeChips.length ? (
-            <div className="ops-subfilters" aria-label="Тип облигаций">
-              <span className="ops-sub-k">Тип</span>
-              <div className="ops-sub-chips">
-                {bondTypeChips.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className={
-                      "ops-sub-chip" +
-                      (chipOn(bondTypeSel, c.id) && bondTypeSel.size
-                        ? " on"
-                        : "") +
-                      (!bondTypeSel.size ? " soft" : "")
-                    }
-                    onClick={() =>
-                      setBondTypeSel((prev) => toggleChip(prev, c.id))
-                    }
-                  >
-                    {c.label}
-                    <span className="n">{c.n}</span>
-                  </button>
-                ))}
-                {bondTypeSel.size ? (
-                  <button
-                    type="button"
-                    className="ops-sub-chip ghost"
-                    onClick={() => setBondTypeSel(new Set())}
-                  >
-                    все
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-          {ratingChips.length ? (
-            <div className="ops-subfilters" aria-label="Рейтинг облигаций">
-              <span className="ops-sub-k">Рейтинг</span>
-              <div className="ops-sub-chips">
-                {ratingChips.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className={
-                      "ops-sub-chip" +
-                      (chipOn(ratingSel, c.id) && ratingSel.size ? " on" : "") +
-                      (!ratingSel.size ? " soft" : "")
-                    }
-                    onClick={() =>
-                      setRatingSel((prev) => toggleChip(prev, c.id))
-                    }
-                  >
-                    {c.label}
-                    <span className="n">{c.n}</span>
-                  </button>
-                ))}
-                {ratingSel.size ? (
-                  <button
-                    type="button"
-                    className="ops-sub-chip ghost"
-                    onClick={() => setRatingSel(new Set())}
-                  >
-                    все
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
+          <SubChips
+            label="Тип"
+            chips={bondTypeChips}
+            selected={bondTypeSel}
+            onToggle={(id) => setBondTypeSel((prev) => toggleChip(prev, id))}
+            onClear={() => setBondTypeSel(new Set())}
+          />
+          <SubChips
+            label="Рейтинг"
+            chips={ratingChips}
+            selected={ratingSel}
+            onToggle={(id) => setRatingSel((prev) => toggleChip(prev, id))}
+            onClear={() => setRatingSel(new Set())}
+          />
         </>
       ) : null}
 
-      {showFundSub ? (
-        <div className="ops-subfilters" aria-label="Корзины фондов">
-          <span className="ops-sub-k">Фонды</span>
-          <div className="ops-sub-chips">
-            {fundChips.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className={
-                  "ops-sub-chip" +
-                  (chipOn(fundSel, c.id) && fundSel.size ? " on" : "") +
-                  (!fundSel.size ? " soft" : "")
-                }
-                onClick={() => setFundSel((prev) => toggleChip(prev, c.id))}
-              >
-                {c.label}
-                <span className="n">{c.n}</span>
-              </button>
-            ))}
-            {fundSel.size ? (
-              <button
-                type="button"
-                className="ops-sub-chip ghost"
-                onClick={() => setFundSel(new Set())}
-              >
-                все
-              </button>
-            ) : null}
-          </div>
-        </div>
+      {kind === "fund" ? (
+        <SubChips
+          label="Корзины"
+          chips={fundChips}
+          selected={fundSel}
+          onToggle={(id) => setFundSel((prev) => toggleChip(prev, id))}
+          onClear={() => setFundSel(new Set())}
+        />
       ) : null}
 
       <div className="ops-scroll">
@@ -475,13 +391,7 @@ export default function OpsPanel() {
             </tr>
           </thead>
           <tbody>
-            {!anyKind ? (
-              <tr>
-                <td colSpan={6} className="empty">
-                  Все типы выключены.
-                </td>
-              </tr>
-            ) : loading && !snap ? (
+            {loading && !snap ? (
               <tr>
                 <td colSpan={6} className="empty">
                   Загрузка…
