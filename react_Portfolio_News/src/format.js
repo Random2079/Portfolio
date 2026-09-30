@@ -1,6 +1,6 @@
 /** Shared display helpers (mirror vanilla dashboard). */
 
-export function fmtRub(n, { signed = false, digits = 0 } = {}) {
+export function fmtRub(n, { signed = false, digits = 2 } = {}) {
   if (n == null || Number.isNaN(Number(n))) return "—";
   const v = Number(n);
   const sign = signed && v > 0 ? "+" : "";
@@ -44,12 +44,9 @@ export function fmtDateShort(iso) {
   return s.slice(0, 16);
 }
 
-export function moneyShow(n) {
-  if (n == null || Number.isNaN(Number(n))) return "—";
-  return Number(n).toLocaleString("ru-RU", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 0,
-  });
+/** Alias of fmtRub — vanilla moneyShow always shows 2 fraction digits. */
+export function moneyShow(n, opts) {
+  return fmtRub(n, opts);
 }
 
 export function shortErr(msg) {

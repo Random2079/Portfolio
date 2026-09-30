@@ -13,6 +13,7 @@ import {
 import { fmtPct, fmtRub, pnlClass, qtyFmt } from "./format";
 import TickerLogo from "./TickerLogo";
 import TickerReview from "./TickerReview";
+import CapitalChart from "./CapitalChart";
 import NewsFeed from "./NewsFeed";
 import OpsPanel from "./OpsPanel";
 import CalendarPanel from "./CalendarPanel";
@@ -84,16 +85,16 @@ export default function App() {
   );
   const groups = useMemo(() => groupHoldingsByAssetClass(papers), [papers]);
 
+  /** KPI totals — same as vanilla applyDashboard (holdings snap, not day.total_value). */
   const totalValue = useMemo(() => {
-    if (day && day.total_value != null) return day.total_value;
     if (snap?.total_value != null) return snap.total_value;
-    return sumField(papers, "market_value");
-  }, [day, snap, papers]);
+    return sumField(holdings, "market_value");
+  }, [snap, holdings]);
   const totalPnl = useMemo(() => {
     if (snap?.pnl != null) return snap.pnl;
-    return sumField(papers, "pnl");
-  }, [snap, papers]);
-  const totalCost = useMemo(() => sumField(papers, "cost_value"), [papers]);
+    return sumField(holdings, "pnl");
+  }, [snap, holdings]);
+  const totalCost = useMemo(() => sumField(holdings, "cost_value"), [holdings]);
   const totalPnlPct = useMemo(() => {
     if (snap?.pnl_pct != null) return snap.pnl_pct;
     if (totalPnl != null && totalCost) return (totalPnl / totalCost) * 100;
@@ -340,6 +341,8 @@ export default function App() {
               </ol>
             ) : null}
           </motion.section>
+
+          <CapitalChart />
 
           <motion.section
             className="holdings"

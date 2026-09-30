@@ -202,6 +202,62 @@
   font-weight: 600;
 }
 
+.day-panel .capital-box {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--day-card);
+}
+
+.day-panel .capital-box h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.day-panel .capital-box .lead {
+  margin: 0 0 0.65rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.day-panel .capital-wrap {
+  position: relative;
+  height: 200px;
+  width: 100%;
+}
+
+.day-panel .capital-hover {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.85rem;
+  margin-top: 0.45rem;
+}
+
+.day-panel .capital-hover .hv {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+}
+
+.day-panel .capital-hover .hd {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.day-panel .capital-box .chart-status {
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.day-panel .capital-box .chart-status.err {
+  color: var(--day-down);
+}
+
 .day-panel .day-box {
   position: relative;
   margin-bottom: 1rem;
