@@ -201,9 +201,39 @@
 }
 
 .news-panel .news-card-who .logo-wrap {
+  position: relative;
+  display: inline-flex;
   width: 1.65rem;
   height: 1.65rem;
   flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.news-panel .news-card-who .logo-wrap img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.news-panel .news-card-who .logo-wrap .fb {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: #fff;
+  border-radius: 8px;
+}
+
+.news-panel .news-card-who .logo-wrap.has-img .fb {
+  display: none;
 }
 
 .news-panel .news-card-go {
