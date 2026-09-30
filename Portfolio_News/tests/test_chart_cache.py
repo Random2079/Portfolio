@@ -10,12 +10,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from portfolio_news.chart_cache import (
+    cache_is_fresh,
     cache_covers_from,
     load_chart_cache,
     merge_candle_points,
     resolve_chart_candles,
     save_chart_cache,
     slice_candles_since,
+    today_local,
 )
 from portfolio_news.db import Base
 from portfolio_news.metrics_moex import CandlePoint
@@ -41,6 +43,12 @@ class SliceHelpersTests(unittest.TestCase):
         pts = _pts("2026-08-27", "2026-09-26")
         self.assertFalse(cache_covers_from(pts, "", complete=None))
         self.assertTrue(cache_covers_from(pts, "", complete=True))
+
+    def test_today_candle_expires_quickly(self):
+        now = 10_000.0
+        with patch("portfolio_news.chart_cache.time.time", return_value=now):
+            self.assertTrue(cache_is_fresh(now - 60, today_local()))
+            self.assertFalse(cache_is_fresh(now - 600, today_local()))
 
 
 class ResolveChartCacheTests(unittest.TestCase):

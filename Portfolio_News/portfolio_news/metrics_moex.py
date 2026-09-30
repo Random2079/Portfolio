@@ -157,6 +157,19 @@ def _table(data: dict, name: str) -> list[dict]:
     return [dict(zip(columns, row)) for row in rows]
 
 
+def _row_for_board(rows: list[dict], board: str) -> dict:
+    """Pick the requested MOEX board; ISS may ignore ``board=`` and return all."""
+    wanted = (board or "").strip().upper()
+    if wanted:
+        for row in rows:
+            row_board = str(
+                row.get("BOARDID") or row.get("boardid") or ""
+            ).strip().upper()
+            if row_board == wanted:
+                return row
+    return rows[0] if rows else {}
+
+
 def _f(val: Any) -> Optional[float]:
     if val is None or val == "":
         return None
@@ -355,7 +368,7 @@ def fetch_metric(ticker_id: str, kind: str, name: str = "", isin: str = "") -> M
         md_rows = _table(data, "marketdata")
         sec_rows = _table(data, "securities")
         if md_rows:
-            md = md_rows[0]
+            md = _row_for_board(md_rows, board)
             row.last = _f(md.get("LAST") or md.get("MARKETPRICE") or md.get("LCURRENTPRICE"))
             row.changepct = _f(md.get("LASTTOPREVPRICE") or md.get("CHANGE"))
             row.prevprice = _f(md.get("PREVPRICE") or md.get("LCLOSEPRICE"))
@@ -373,7 +386,7 @@ def fetch_metric(ticker_id: str, kind: str, name: str = "", isin: str = "") -> M
                 row.accruedint = _f(md.get("ACCRUEDINT"))
 
         if sec_rows:
-            sec = sec_rows[0]
+            sec = _row_for_board(sec_rows, board)
             row.shortname = _s(sec.get("SHORTNAME") or sec.get("SECNAME")) or row.shortname
             if not row.isin:
                 row.isin = _s(sec.get("ISIN"))

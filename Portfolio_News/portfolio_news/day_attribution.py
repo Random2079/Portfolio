@@ -90,7 +90,20 @@ def day_delta_rub(
     prevprice: Optional[float] = None,
     changepct: Optional[float] = None,
 ) -> Optional[float]:
-    """₽ change for one position today. Prefer qty×(last−prev)."""
+    """₽ change today. Prefer MOEX's official percent over session close fields."""
+    if changepct is not None and market_value is not None:
+        pct = float(changepct)
+        mv = float(market_value)
+        if pct <= -100:
+            return None
+        # mv = qty×last; last = prev×(1+pct/100) → Δ = mv × pct/(100+pct)
+        return mv * pct / (100.0 + pct)
+    if changepct is not None and quantity is not None and last is not None:
+        pct = float(changepct)
+        if pct <= -100:
+            return None
+        prev = float(last) / (1.0 + pct / 100.0)
+        return float(quantity) * (float(last) - prev)
     if (
         quantity is not None
         and last is not None
@@ -105,19 +118,6 @@ def day_delta_rub(
         and last == prevprice
     ):
         return 0.0
-    if changepct is not None and market_value is not None:
-        pct = float(changepct)
-        mv = float(market_value)
-        if pct <= -100:
-            return None
-        # mv = qty×last; last = prev×(1+pct/100) → Δ = mv × pct/(100+pct)
-        return mv * pct / (100.0 + pct)
-    if changepct is not None and quantity is not None and last is not None:
-        pct = float(changepct)
-        if pct <= -100:
-            return None
-        prev = float(last) / (1.0 + pct / 100.0)
-        return float(quantity) * (float(last) - prev)
     return None
 
 

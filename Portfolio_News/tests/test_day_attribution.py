@@ -32,6 +32,18 @@ class DayDeltaTests(unittest.TestCase):
         rub = day_delta_rub(quantity=None, market_value=1100.0, changepct=10.0)
         self.assertAlmostEqual(rub or 0, 100.0, places=6)
 
+    def test_exchange_pct_wins_over_different_session_close(self):
+        # MOEX LCLOSEPRICE may be a different session basis than LASTTOPREVPRICE.
+        rub = day_delta_rub(
+            quantity=30,
+            market_value=4987.5,
+            last=166.25,
+            prevprice=165.8,
+            changepct=-2.41,
+        )
+        self.assertLess(rub or 0, 0)
+        self.assertAlmostEqual(rub or 0, 4987.5 * -2.41 / 97.59, places=6)
+
 
 class ComputeAttributionTests(unittest.TestCase):
     def test_top_contributors_and_totals(self):
@@ -43,8 +55,18 @@ class ComputeAttributionTests(unittest.TestCase):
         ]
         quotes = {
             "SBER": DayQuote(ticker="SBER", last=280, prevprice=250, changepct=12.0),
-            "GAZP": DayQuote(ticker="GAZP", last=100, prevprice=110, changepct=-9.0909),
-            "LKOH": DayQuote(ticker="LKOH", last=7000, prevprice=6900, changepct=1.449),
+            "GAZP": DayQuote(
+                ticker="GAZP",
+                last=100,
+                prevprice=110,
+                changepct=-9.090909090909092,
+            ),
+            "LKOH": DayQuote(
+                ticker="LKOH",
+                last=7000,
+                prevprice=6900,
+                changepct=1.4492753623188408,
+            ),
         }
         attr = compute_day_attribution(holdings, quotes, top_n=2)
         self.assertTrue(attr.ok)
@@ -62,7 +84,14 @@ class ComputeAttributionTests(unittest.TestCase):
             Holding(ticker="SBER", quantity=1, market_value=100, market_price=100),
             Holding(ticker="NOPE", quantity=1, market_value=50, market_price=50),
         ]
-        quotes = {"SBER": DayQuote(ticker="SBER", last=100, prevprice=90, changepct=11.11)}
+        quotes = {
+            "SBER": DayQuote(
+                ticker="SBER",
+                last=100,
+                prevprice=90,
+                changepct=11.11111111111111,
+            )
+        }
         attr = compute_day_attribution(holdings, quotes, top_n=5)
         self.assertEqual(attr.missing, 1)
         self.assertAlmostEqual(attr.day_rub or 0, 10.0)
@@ -78,7 +107,14 @@ class ComputeAttributionTests(unittest.TestCase):
                 asset_class="bond",
             ),
         ]
-        quotes = {"SBER": DayQuote(ticker="SBER", last=100, prevprice=90, changepct=11.11)}
+        quotes = {
+            "SBER": DayQuote(
+                ticker="SBER",
+                last=100,
+                prevprice=90,
+                changepct=11.11111111111111,
+            )
+        }
         attr = compute_day_attribution(
             holdings, quotes, top_n=5, intentional_skip={"RU000A107RZ0"}
         )

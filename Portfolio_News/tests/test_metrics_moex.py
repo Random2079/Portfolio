@@ -10,6 +10,7 @@ from portfolio_news.metrics_moex import (
     MetricRow,
     clear_secid_cache,
     effective_moex_limit,
+    fetch_metric,
     metric_to_dict,
     parse_coupon_rows,
     parse_dividend_rows,
@@ -36,6 +37,48 @@ class MetricToDictTests(unittest.TestCase):
         self.assertNotIn("yield_", d)
         self.assertEqual(d["yield"], 12.5)
         self.assertEqual(d["ticker_id"], "X")
+
+
+class FetchMetricBoardTests(unittest.TestCase):
+    def test_uses_resolved_board_not_first_iss_row(self):
+        """MOEX may return SMAL before TQBR even with board=TQBR."""
+        raw = {
+            "marketdata": {
+                "columns": [
+                    "BOARDID",
+                    "LAST",
+                    "LASTTOPREVPRICE",
+                    "UPDATETIME",
+                ],
+                "data": [
+                    ["SMAL", 22.015, 12.26, "19:20:39"],
+                    ["TQBR", 20.29, -0.95, "19:24:15"],
+                ],
+            },
+            "securities": {
+                "columns": ["BOARDID", "SHORTNAME", "PREVPRICE", "LOTSIZE"],
+                "data": [
+                    ["SMAL", "ММК", 19.61, 1],
+                    ["TQBR", "ММК", 20.485, 10],
+                ],
+            },
+        }
+        with patch(
+            "portfolio_news.metrics_moex.resolve_secid",
+            return_value=("MAGN", "TQBR"),
+        ), patch(
+            "portfolio_news.metrics_moex._iss_get",
+            return_value=raw,
+        ):
+            row = fetch_metric("MAGN", "equity", "ММК")
+
+        self.assertEqual(row.board, "TQBR")
+        self.assertEqual(row.last, 20.29)
+        self.assertEqual(row.changepct, -0.95)
+        # securities.PREVPRICE can use a different session basis than
+        # marketdata.LASTTOPREVPRICE; don't mix it into day attribution.
+        self.assertIsNone(row.prevprice)
+        self.assertEqual(row.lotsize, 10.0)
 
 
 class ParseTablesTests(unittest.TestCase):

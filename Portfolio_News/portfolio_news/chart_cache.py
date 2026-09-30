@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 _TZ = timezone(timedelta(hours=5))  # Yekaterinburg
 _FRESH_SEC = 6 * 3600  # same-session reuse
+_INTRADAY_FRESH_SEC = 5 * 60  # today's candle is still moving
 
 
 def today_local() -> str:
@@ -136,15 +137,16 @@ def save_chart_cache(
 
 
 def cache_is_fresh(updated_at: float, last_day: str) -> bool:
-    """Fresh if written recently, or last candle is today/yesterday (weekend gap)."""
+    """Historical data is reusable; today's unfinished candle refreshes often."""
     now = time.time()
-    if updated_at and (now - float(updated_at)) <= _FRESH_SEC:
-        return True
+    age = now - float(updated_at) if updated_at else float("inf")
     today = today_local()
     ld = (last_day or "")[:10]
     if not ld:
         return False
     if ld >= today:
+        return age <= _INTRADAY_FRESH_SEC
+    if age <= _FRESH_SEC:
         return True
     # Fri candle on Sat/Sun still ok
     try:
