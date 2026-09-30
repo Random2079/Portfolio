@@ -175,37 +175,6 @@ export default function App() {
         </div>
       </motion.header>
 
-      <nav className="tabs" aria-label="Разделы">
-        <button
-          type="button"
-          className={"tab" + (tab === "home" ? " on" : "")}
-          onClick={() => setTab("home")}
-        >
-          День
-        </button>
-        <button
-          type="button"
-          className={"tab" + (tab === "news" ? " on" : "")}
-          onClick={() => setTab("news")}
-        >
-          Новости
-        </button>
-        <button
-          type="button"
-          className={"tab" + (tab === "ops" ? " on" : "")}
-          onClick={() => setTab("ops")}
-        >
-          Сделки
-        </button>
-        <button
-          type="button"
-          className={"tab" + (tab === "calendar" ? " on" : "")}
-          onClick={() => setTab("calendar")}
-        >
-          Календарь
-        </button>
-      </nav>
-
       {error ? (
         <motion.div
           className="banner err"
@@ -490,6 +459,49 @@ export default function App() {
           ) : null}
         </div>
       ) : null}
+
+      <nav className="tabs" aria-label="Разделы">
+        <button
+          type="button"
+          className={"tab" + (tab === "home" ? " on" : "")}
+          onClick={() => {
+            setTab("home");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        >
+          День
+        </button>
+        <button
+          type="button"
+          className={"tab" + (tab === "news" ? " on" : "")}
+          onClick={() => {
+            setTab("news");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        >
+          Новости
+        </button>
+        <button
+          type="button"
+          className={"tab" + (tab === "ops" ? " on" : "")}
+          onClick={() => {
+            setTab("ops");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        >
+          Сделки
+        </button>
+        <button
+          type="button"
+          className={"tab" + (tab === "calendar" ? " on" : "")}
+          onClick={() => {
+            setTab("calendar");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        >
+          Календарь
+        </button>
+      </nav>
     </div>
   );
 }
