@@ -27,8 +27,10 @@ _SECTORS: dict[str, tuple[str, str]] = {
     "it": ("IT / Tech", "рост, путь к FCF; высокий P/E сам по себе не красный флаг"),
     "dev": ("девелопмент", "контракты/эскроу-пайплайн + NetDebt/EBITDA в рамках цикла"),
     "resources": ("ресурсы / нефть", "FCF, CAPEX, дивидендная политика"),
+    "energy": ("энергетика", "тарифы/генерация, долговая нагрузка, див.%"),
     "banks": ("лизинг / банки", "P/B, ROE; плечо — рабочий инструмент сектора"),
     "retail_telecom": ("ритейл / телеком", "FCF после CAPEX, долговая нагрузка, див.%"),
+    "health": ("медицина / здравоохранение", "рост выручки, маржа, долговая нагрузка"),
     "unknown": ("сектор ?", "сверить отрасль вручную; слоты общие"),
 }
 
@@ -41,17 +43,26 @@ _TICKER_SECTOR: dict[str, str] = {
     "T": "banks",
     "CBOM": "banks",
     "SFIN": "banks",
+    "BSPB": "banks",
+    "SVCB": "banks",
+    "LEAS": "banks",
+    "MOEX": "banks",
+    "SPBE": "banks",
     "MTSS": "retail_telecom",
     "MGNT": "retail_telecom",
     "LENT": "retail_telecom",
     "FIVE": "retail_telecom",
     "RTKM": "retail_telecom",
     "RTKMP": "retail_telecom",
+    "X5": "retail_telecom",
+    "HNFG": "retail_telecom",
+    "BELU": "retail_telecom",
     "YDEX": "it",
     "YNDX": "it",
     "VKCO": "it",
     "POSI": "it",
     "HHRU": "it",
+    "HEAD": "it",
     "OZON": "it",
     "ROSN": "resources",
     "LKOH": "resources",
@@ -68,6 +79,11 @@ _TICKER_SECTOR: dict[str, str] = {
     "MAGN": "resources",
     "PLZL": "resources",
     "ALRS": "resources",
+    "TRNFP": "resources",
+    "IRAO": "energy",
+    "LSNGP": "energy",
+    "LSNG": "energy",
+    "MDMG": "health",
     "SMLT": "dev",
     "PIKK": "dev",
     "SFTL": "dev",
@@ -103,6 +119,18 @@ _SECTOR_SLOTS: dict[str, list[tuple[str, str]]] = {
     ],
     "dev": [
         ("escrow_debt", "Эскроу / долг"),
+        ("netdebt_ebitda", "NetDebt / EBITDA"),
+        ("div_yield", "Див. %"),
+    ],
+    "energy": [
+        ("div_yield", "Див. %"),
+        ("netdebt_ebitda", "NetDebt / EBITDA"),
+        ("pe", "P/E"),
+        ("pb", "P/B"),
+    ],
+    "health": [
+        ("growth", "Рост выручки"),
+        ("pe", "P/E"),
         ("netdebt_ebitda", "NetDebt / EBITDA"),
         ("div_yield", "Див. %"),
     ],
@@ -181,16 +209,20 @@ def resolve_sector(ticker: str, category: str = "") -> dict[str, str]:
     cat = (category or "").strip().lower()
     sid = _TICKER_SECTOR.get(tid, "")
     if not sid and cat:
-        if any(x in cat for x in ("банк", "bank", "финанс", "лизинг")):
+        if any(x in cat for x in ("банк", "bank", "финанс", "лизинг", "биржа")):
             sid = "banks"
-        elif any(x in cat for x in ("нефт", "газ", "металл", "руд", "угол", "энерг")):
+        elif any(x in cat for x in ("нефт", "газ", "металл", "руд", "угол")):
             sid = "resources"
-        elif any(x in cat for x in ("ритейл", "телеком", "связь", "retail")):
+        elif any(x in cat for x in ("энерг", "генерац", "электросет", "энерго")):
+            sid = "energy"
+        elif any(x in cat for x in ("ритейл", "телеком", "связь", "retail", "потреб")):
             sid = "retail_telecom"
         elif any(x in cat for x in ("it", "интернет", "софт", "tech")):
             sid = "it"
         elif any(x in cat for x in ("девелоп", "строи", "недвиж")):
             sid = "dev"
+        elif any(x in cat for x in ("медиц", "здрав", "фарма", "clinic", "health")):
+            sid = "health"
     if not sid:
         sid = "unknown"
     label, look = _SECTORS.get(sid, _SECTORS["unknown"])
