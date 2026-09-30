@@ -6,6 +6,7 @@ import { fmtRub, qtyFmt } from "./format";
 const OPS_PREVIEW = 25;
 const OPS_KIND_TAG = { equity: "акц", bond: "обл", fund: "фонд" };
 const KIND_LABELS = [
+  { key: "", label: "Все" },
   { key: "equity", label: "Акции" },
   { key: "bond", label: "Облигации" },
   { key: "fund", label: "Фонды" },
@@ -122,8 +123,8 @@ function SubChips({ label, chips, selected, onToggle, onClear }) {
 }
 
 export default function OpsPanel() {
-  /** One asset class at a time — keeps secondary filters readable. */
-  const [kind, setKind] = useState("equity");
+  /** "" = all kinds; one class at a time for readable subfilters. */
+  const [kind, setKind] = useState("");
   const [year, setYear] = useState("");
   const [tickerInput, setTickerInput] = useState("");
   const [tickerQ, setTickerQ] = useState("");
@@ -238,7 +239,7 @@ export default function OpsPanel() {
   const rest = ops.length - OPS_PREVIEW;
 
   const kindTitle =
-    KIND_LABELS.find((k) => k.key === kind)?.label || kind;
+    KIND_LABELS.find((k) => k.key === kind)?.label || "Все";
 
   const lead = useMemo(() => {
     if (loading && !snap) return "Вся история: журнал Snowball + свежие сделки БКС.";
