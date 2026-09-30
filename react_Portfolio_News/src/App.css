@@ -1295,6 +1295,67 @@
   border-color: #0f7a5a;
 }
 
+.ops-subfilters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  margin: 0 0 0.65rem;
+}
+
+.ops-sub-k {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  min-width: 4.5rem;
+}
+
+.ops-sub-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.ops-sub-chip {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ops-sub-chip .n {
+  margin-left: 0.35rem;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-sub-chip.soft {
+  color: var(--ink);
+  opacity: 0.85;
+}
+
+.ops-sub-chip.on {
+  color: var(--ink);
+  border-color: rgba(61, 186, 154, 0.45);
+  background: var(--accent-dim);
+}
+
+.ops-sub-chip.ghost {
+  border-style: dashed;
+}
+
+.ops-bucket {
+  font-size: 0.72rem;
+  margin-top: 0.15rem;
+}
+
 .ops-period-wrap {
   display: inline-flex;
   align-items: center;

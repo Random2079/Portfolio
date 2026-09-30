@@ -265,6 +265,9 @@ def build_history(
     jrn = journal_rows() if include_journal else []
     rows = merge_rows(bcs, jrn)
     annotate_kinds(rows, kind_map(session))
+    from portfolio_news.ops_buckets import annotate_buckets
+
+    annotate_buckets(session, rows)
     all_summary = summarize(rows)
     hits = filter_rows(
         rows,
