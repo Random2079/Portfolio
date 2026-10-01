@@ -127,7 +127,7 @@
 2. ~~**pre-AI noise**~~ ✅ denylist паттернов («идея в Профите» / тех.анализ / фьючерсы) + near-dup + short-ticker + **geo/macro keep** (`news_noise.py`) — до DeepSeek; AI-промпт не шумит RU-гео как «макро без бумаги». Не бан всей площадки BCS Profit / Pulse — см. **§7S**  
 3. **§7F F-AI polish** — промпты `ai_noise` / `ai_ticker` (нужны для сортировки срочности); рядом — **DeepSeek usage meter** (план, см. §7F)  
 4. **Privacy** — **запланировано** (§7P), UI ещё нет  
-5. **§7S allowlist каналов** — вручную проверить кандидатов; UI allowlist позже; парсер Pulse не стартовать без решения  
+5. **§7S allowlist каналов** — триаж 2026-10-01 в §7S (предложение v1 + reject); **ждём confirm** → конфиг; UI allowlist позже; парсер Pulse не стартовать без решения  
 6. **G** авто-watch (§7G) / H телефон  
 
 **Сделки:** тип = радио (Все / акции / облиг / фонды) + подфильтры только у одного вида ✅.  
@@ -278,9 +278,18 @@
 - **XHR:** social-api-gateway / feed endpoints — в браузере с cookie; снаружи без сессии → 400 / timeout. Парсер production **не стартовать** без явного решения.  
 - **ToS / хрупкость:** `cdn…/rules-for-using-pulse-platform.pdf`; зеркало `noindex`, неофициально для ботов; сессии/заголовки и смена child-app `social-feed` — легко сломается; юридически серый scrape.
 
-**Кандидаты allowlist:** короткий список никнеймов — в research-чате (ручная проверка истории). В MAP имена не дублируем. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
+**Триаж 2026-10-01 (зеркало профилей, свежие SSR-посты):** user skip (мёртвые/шум) + агент-рекомендация — **ждём confirm пользователя**, парсер/конфиг allowlist **не** внедрять до «ок».
 
-**Дальше:** вручную просмотреть историю кандидатов → короткий allowlist в конфиге → **UI allowlist** (вкл/выкл авторов) позже. Не Telegram-userbot в этом слое. Не полный Pulse-парсер / React UI в этом слое.
+| Вердикт | Ники |
+|---------|------|
+| **allowlist v1 (предложение)** | `Interfax`, `Advokat_Manasyan`, `Investokrat` |
+| **maybe (очередь после v1)** | `T-Investments`, `slavik_capital`, `Karsotel`, `Tamonkin_Dmitriy` |
+| **reject** | user: `RBC_Investments`, `tj_invest`, `brandhamster`, `Pulse_Official`, `Pulse_Authors`, `TraderOrInvestor` · агент: `T-Journal`, `ProCFA`, `CyberWish`, `SamNakopil` |
+| **IR эмитентов** | не в v1; только если тикер реально в БКС-позициях (иначе skip) |
+
+Критерий как у пользователя + Investing `чек-поинт.md`: факты/макро по секторам KS, не идеи «купи» / таргеты / интрадей. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
+
+**Дальше:** confirm → короткий allowlist в конфиге → **UI allowlist** позже. Не Telegram-userbot. Не полный Pulse-парсер / React UI в этом слое.
 
 ---
 
