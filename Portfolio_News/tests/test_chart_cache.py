@@ -88,38 +88,66 @@ class ResolveChartCacheTests(unittest.TestCase):
         fd = (date.today() - timedelta(days=30)).isoformat()
         self.assertTrue(all(p.begin[:10] >= fd for p in pts))
 
-    def test_short_lookback_does_not_shrink_cache(self):
-        full = _pts("2018-01-01", "2020-01-01", "2026-09-01")
+    def test_stale_cache_returns_immediately_without_blocking_iss(self):
+        """Intraday TTL expiry must not block the click on ISS."""
+        full = _pts("2020-01-01", "2026-09-01", "2026-09-20")
         save_chart_cache(
             self.session,
             ticker="BELU",
             candles=full,
             complete=True,
         )
-        short = _pts("2026-09-01")
+
+        def _boom(*_a, **_k):
+            raise AssertionError("fetch_candles must not run in-request")
+
         with patch(
-            "portfolio_news.chart_cache.fetch_candles",
-            return_value=(short, "BELU", "TQBR", ""),
-        ), patch(
             "portfolio_news.chart_cache.cache_is_fresh",
             return_value=False,
+        ), patch(
+            "portfolio_news.chart_cache._schedule_chart_refresh"
+        ) as sched, patch(
+            "portfolio_news.chart_cache.fetch_candles",
+            side_effect=_boom,
         ):
-            # Force cold path by making cache not cover? Actually covers=True and
-            # not fresh → incremental. Make covers fail so full refetch runs.
-            with patch(
-                "portfolio_news.chart_cache.cache_covers_from",
-                return_value=False,
-            ):
-                resolve_chart_candles(
-                    self.session, "BELU", "equity", days=30, force=False
-                )
-        cached = load_chart_cache(self.session, "BELU")
-        n = len((cached or {}).get("candles") or [])
-        self.assertGreaterEqual(n, 3)  # merged, not replaced by 1
-        self.assertTrue((cached or {}).get("complete"))
+            pts, _secid, _board, err, from_cache, stale = resolve_chart_candles(
+                self.session, "BELU", "equity", days=0, force=False
+            )
+        self.assertEqual(len(pts), 3)
+        self.assertTrue(from_cache)
+        self.assertTrue(stale)
+        self.assertEqual(err, "")
+        sched.assert_called_once()
+        self.assertEqual(sched.call_args.kwargs.get("mode"), "tail")
 
-    def test_incremental_does_not_promote_complete_flag(self):
-        """Legacy truncated cache (complete missing/False) must stay incomplete."""
+    def test_truncated_cache_served_stale_schedules_full_refresh(self):
+        short = _pts("2026-08-27", "2026-09-01", "2026-09-20")
+        save_chart_cache(
+            self.session,
+            ticker="BELU",
+            candles=short,
+            complete=False,
+        )
+        with patch(
+            "portfolio_news.chart_cache.cache_is_fresh",
+            return_value=False,
+        ), patch(
+            "portfolio_news.chart_cache._schedule_chart_refresh"
+        ) as sched, patch(
+            "portfolio_news.chart_cache.fetch_candles"
+        ) as fc:
+            pts, _s, _b, _e, from_cache, stale = resolve_chart_candles(
+                self.session, "BELU", "equity", days=0, force=False
+            )
+        self.assertEqual(len(pts), 3)
+        self.assertTrue(from_cache and stale)
+        fc.assert_not_called()
+        self.assertEqual(sched.call_args.kwargs.get("mode"), "full")
+
+    def test_bg_tail_refresh_does_not_promote_complete_flag(self):
+        """Legacy truncated cache must stay incomplete after tail merge."""
+        from portfolio_news import chart_cache as cc
+
         short = _pts("2026-08-27", "2026-09-01", "2026-09-20")
         save_chart_cache(
             self.session,
@@ -128,19 +156,38 @@ class ResolveChartCacheTests(unittest.TestCase):
             complete=False,
         )
         tail = _pts("2026-09-20", "2026-09-26")
-        with patch(
-            "portfolio_news.chart_cache.fetch_candles",
-            return_value=(tail, "BELU", "TQBR", ""),
-        ), patch(
-            "portfolio_news.chart_cache.cache_is_fresh",
-            return_value=False,
-        ), patch(
-            "portfolio_news.chart_cache.cache_covers_from",
-            return_value=True,
+
+        class _SessCtx:
+            def __enter__(self_inner):
+                return self.session
+
+            def __exit__(self_inner, *exc):
+                return False
+
+        with patch.object(cc, "fetch_candles", return_value=(tail, "BELU", "TQBR", "")), patch(
+            "portfolio_news.config.get_settings"
+        ) as gs, patch(
+            "portfolio_news.db.make_session_factory",
+            return_value=lambda: _SessCtx(),
         ):
-            resolve_chart_candles(self.session, "BELU", "equity", days=30)
+            gs.return_value.database_url = "sqlite://"
+            with cc._bg_lock:
+                cc._bg_inflight.discard("BELU")
+            cc._run_chart_refresh(
+                ticker="BELU",
+                kind="equity",
+                isin="",
+                interval=24,
+                mode="tail",
+                last_day="2026-09-20",
+                cached_pts=short,
+                cached_secid="BELU",
+                cached_board="TQBR",
+                cached_complete=False,
+            )
         cached = load_chart_cache(self.session, "BELU")
         self.assertIs(cached.get("complete"), False)
+        self.assertGreaterEqual(len((cached or {}).get("candles") or []), 3)
 
 
 class MergeTests(unittest.TestCase):

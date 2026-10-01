@@ -437,7 +437,7 @@
 | UI React | sibling `react_Portfolio_News/` → `dist/` на `/app/` |
 | API | `portfolio_news/api.py` |
 | Сверка | `review_facts.py`, `fundamentals_smartlab.py`, `bonds_dohod.py`, `funds_cbr_ter.py` |
-| График | `chart_cache.py`, LWC в dashboard |
+| График | `chart_cache.py` (SQLite hit сразу; stale → ISS в фоне), LWC в dashboard / React `PriceChart` |
 | Новости / ИИ | `poll_job.py`, `/api/news`, `ai_noise.py`, `ai_ticker.py`, кэши AI |
 | Конфиг | `config.py`, `.env` (локально) |
 

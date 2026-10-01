@@ -1,12 +1,15 @@
 """K3: SQLite cache for MOEX daily candles (разбор бумаги).
 
 Full ISS history is slow; serve from cache and only refresh the tail.
+Stale cache is returned immediately; ISS refresh runs in a background thread
+so ticker clicks stay snappy (intraday TTL used to block 3–15s on MOEX).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -21,6 +24,9 @@ log = logging.getLogger(__name__)
 _TZ = timezone(timedelta(hours=5))  # Yekaterinburg
 _FRESH_SEC = 6 * 3600  # same-session reuse
 _INTRADAY_FRESH_SEC = 5 * 60  # today's candle is still moving
+
+_bg_lock = threading.Lock()
+_bg_inflight: set[str] = set()
 
 
 def today_local() -> str:
@@ -218,6 +224,130 @@ def _return_sliced(
     )
 
 
+def _run_chart_refresh(
+    *,
+    ticker: str,
+    kind: str,
+    isin: str,
+    interval: int,
+    mode: str,
+    last_day: str,
+    cached_pts: list[CandlePoint],
+    cached_secid: str,
+    cached_board: str,
+    cached_complete: Optional[bool],
+) -> None:
+    """ISS refresh + SQLite save (own session). ``mode``: tail | full."""
+    tid = (ticker or "").strip().upper()
+    try:
+        from portfolio_news.config import get_settings
+        from portfolio_news.db import make_session_factory
+
+        Session = make_session_factory(get_settings().database_url)
+        with Session() as db:
+            if mode == "tail" and last_day:
+                new_pts, secid, board, err = fetch_candles(
+                    tid,
+                    kind,
+                    interval=int(interval) or 24,
+                    from_date=last_day,
+                    limit=80,
+                    isin=isin,
+                    timeout=15.0,
+                )
+                if not new_pts:
+                    if err:
+                        log.info("chart bg tail empty for %s: %s", tid, err)
+                    return
+                merged = merge_candle_points(cached_pts, new_pts)
+                save_chart_cache(
+                    db,
+                    ticker=tid,
+                    candles=merged,
+                    secid=secid or cached_secid,
+                    board=board or cached_board,
+                    kind=kind,
+                    interval=int(interval) or 24,
+                    complete=(
+                        bool(cached_complete)
+                        if cached_complete is not None
+                        else False
+                    ),
+                )
+                return
+
+            points, secid, board, err = fetch_candles(
+                tid,
+                kind,
+                interval=int(interval) or 24,
+                from_date="",
+                limit=0,
+                isin=isin,
+                timeout=45.0,
+            )
+            if not points:
+                if err:
+                    log.info("chart bg full empty for %s: %s", tid, err)
+                return
+            merged = (
+                merge_candle_points(cached_pts, points) if cached_pts else points
+            )
+            save_chart_cache(
+                db,
+                ticker=tid,
+                candles=merged,
+                secid=secid or cached_secid,
+                board=board or cached_board,
+                kind=kind,
+                interval=int(interval) or 24,
+                complete=True,
+            )
+    except Exception:  # noqa: BLE001
+        log.warning("chart bg refresh failed for %s", tid, exc_info=True)
+    finally:
+        with _bg_lock:
+            _bg_inflight.discard(tid)
+
+
+def _schedule_chart_refresh(
+    *,
+    ticker: str,
+    kind: str,
+    isin: str,
+    interval: int,
+    mode: str,
+    last_day: str,
+    cached_pts: list[CandlePoint],
+    cached_secid: str,
+    cached_board: str,
+    cached_complete: Optional[bool],
+) -> None:
+    tid = (ticker or "").strip().upper()
+    if not tid:
+        return
+    with _bg_lock:
+        if tid in _bg_inflight:
+            return
+        _bg_inflight.add(tid)
+    threading.Thread(
+        target=_run_chart_refresh,
+        kwargs={
+            "ticker": tid,
+            "kind": kind,
+            "isin": isin,
+            "interval": interval,
+            "mode": mode,
+            "last_day": last_day,
+            "cached_pts": list(cached_pts),
+            "cached_secid": cached_secid,
+            "cached_board": cached_board,
+            "cached_complete": cached_complete,
+        },
+        name=f"chart-refresh-{tid}",
+        daemon=True,
+    ).start()
+
+
 def resolve_chart_candles(
     session: Session,
     ticker: str,
@@ -233,6 +363,9 @@ def resolve_chart_candles(
     Cache always stores the longest known series (merge, never shrink).
     ``days`` only slices the response; short lookbacks must not overwrite
     a full-history cache.
+
+    When SQLite already has candles, a stale/truncated row is returned at once
+    and ISS is refreshed in the background (unless ``force``).
     """
     from datetime import date, timedelta
 
@@ -242,6 +375,7 @@ def resolve_chart_candles(
     if int(days) > 0:
         from_date = (date.today() - timedelta(days=int(days))).isoformat()
     full_timeout = 45.0
+    iv = int(interval) or 24
 
     cached = load_chart_cache(session, tid)
     cached_pts = points_from_dicts((cached or {}).get("candles") or [])
@@ -268,58 +402,36 @@ def resolve_chart_candles(
             cached_pts, cached_secid, cached_board, "", True, False, from_date
         )
 
-    # Stale (or needs tail) → incremental append; keep full merged series.
-    if cached_pts and not force and last_day and covers:
-        new_pts, secid, board, err = fetch_candles(
-            tid,
-            resolved_kind,
-            interval=int(interval) or 24,
-            from_date=last_day,
-            limit=80,
+    # Have usable cache but stale / incomplete → serve now, refresh ISS off-request.
+    if cached_pts and not force:
+        mode = "tail" if (last_day and covers) else "full"
+        _schedule_chart_refresh(
+            ticker=tid,
+            kind=resolved_kind,
             isin=isin,
-            timeout=15.0,
+            interval=iv,
+            mode=mode,
+            last_day=last_day,
+            cached_pts=cached_pts,
+            cached_secid=cached_secid,
+            cached_board=cached_board,
+            cached_complete=cached_complete,
         )
-        if new_pts:
-            merged = merge_candle_points(cached_pts, new_pts)
-            try:
-                # Never promote None/False → True on tail refresh; only full fetch may.
-                save_chart_cache(
-                    session,
-                    ticker=tid,
-                    candles=merged,
-                    secid=secid or cached_secid,
-                    board=board or cached_board,
-                    kind=resolved_kind,
-                    interval=int(interval) or 24,
-                    complete=bool(cached_complete) if cached_complete is not None else False,
-                )
-            except Exception:  # noqa: BLE001
-                log.warning("chart cache save failed for %s", tid, exc_info=True)
-            return _return_sliced(
-                merged,
-                secid or cached_secid,
-                board or cached_board,
-                "",
-                False,
-                False,
-                from_date,
-            )
-        if cached_pts:
-            return _return_sliced(
-                cached_pts,
-                cached_secid,
-                cached_board,
-                err or "",
-                True,
-                True,
-                from_date,
-            )
+        return _return_sliced(
+            cached_pts,
+            cached_secid,
+            cached_board,
+            "",
+            True,
+            True,
+            from_date,
+        )
 
-    # Cold / force / truncated cache: fetch full history, merge into any remnant.
+    # Cold / force: no cache (or explicit bypass) — must wait on ISS.
     points, secid, board, err = fetch_candles(
         tid,
         resolved_kind,
-        interval=int(interval) or 24,
+        interval=iv,
         from_date="",
         limit=0,
         isin=isin,
@@ -335,7 +447,7 @@ def resolve_chart_candles(
                 secid=secid or cached_secid,
                 board=board or cached_board,
                 kind=resolved_kind,
-                interval=int(interval) or 24,
+                interval=iv,
                 complete=True,
             )
         except Exception:  # noqa: BLE001
