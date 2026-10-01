@@ -41,6 +41,8 @@ _TICKER_DOLLAR = re.compile(
     r"(?:\{\$|\$)([A-Za-zА-Яа-я0-9._-]{1,12})\}?",
     re.UNICODE,
 )
+_STOCK_PATH = re.compile(r"/invest/stocks/[A-Za-z0-9._-]+(?:\?[^)\s]*)?", re.I)
+_MD_STOCK_LINK = re.compile(r"\[[^\]]*\]\(/invest/stocks/[^)]+\)", re.I)
 
 
 @dataclass
@@ -197,29 +199,52 @@ def extract_posts_from_ssr_json(
 
 
 def parse_profile_html(html: str, *, nickname: str, base: str) -> list[_PulsePost]:
-    # Prefer Tramvai state by id — page has several application/json scripts.
+    """Extract posts from profile SSR HTML.
+
+    Prefer ``#__TRAMVAI_STATE__``; else any ``application/json`` blob that contains
+    ``pulseGetProfilePage`` (pages ship several JSON scripts).
+    """
+    candidates: list[str] = []
     m = re.search(
         r'<script[^>]*id=["\']__TRAMVAI_STATE__["\'][^>]*>(.*?)</script>',
         html,
         re.I | re.S,
     )
-    if not m:
-        m = re.search(
-            r'<script[^>]*type=["\']application/json["\'][^>]*>(.*?)</script>',
-            html,
-            re.I | re.S,
-        )
-    if not m:
-        log.warning("pulse SSR: no __TRAMVAI_STATE__ / application/json for %s", nickname)
+    if m:
+        candidates.append(m.group(1))
+    for m in re.finditer(
+        r'<script[^>]*type=["\']application/json["\'][^>]*>(.*?)</script>',
+        html,
+        re.I | re.S,
+    ):
+        blob = m.group(1)
+        if blob not in candidates:
+            candidates.append(blob)
+    if not candidates:
+        log.warning("pulse SSR: no JSON script for %s", nickname)
         return []
-    try:
-        data = json.loads(m.group(1))
-    except json.JSONDecodeError as exc:
-        log.warning("pulse SSR: JSON parse failed for %s: %s", nickname, exc)
-        return []
-    if not isinstance(data, dict):
-        return []
-    return extract_posts_from_ssr_json(data, nickname=nickname, base=base)
+
+    last_err: Exception | None = None
+    for blob in candidates:
+        try:
+            data = json.loads(blob)
+        except json.JSONDecodeError as exc:
+            last_err = exc
+            continue
+        if not isinstance(data, dict):
+            continue
+        posts = extract_posts_from_ssr_json(data, nickname=nickname, base=base)
+        if posts:
+            return posts
+        # Valid JSON but wrong store shape — keep trying other scripts.
+        stores = data.get("stores") if isinstance(data.get("stores"), dict) else None
+        if stores and "seoSsrData" in stores:
+            return posts  # shape known empty feed
+    if last_err:
+        log.warning("pulse SSR: JSON parse failed for %s: %s", nickname, last_err)
+    else:
+        log.warning("pulse SSR: no pulseGetProfilePage feed for %s", nickname)
+    return []
 
 
 def fetch_profile_posts(
@@ -242,6 +267,15 @@ def fetch_profile_posts(
     return parse_profile_html(resp.text, nickname=nickname, base=b)
 
 
+def _strip_ticker_chips(text: str) -> str:
+    """Remove ``$TICKER`` chips and Pulse stock deep-links from prose."""
+    t = text or ""
+    t = _MD_STOCK_LINK.sub(" ", t)
+    t = _STOCK_PATH.sub(" ", t)
+    t = _TICKER_DOLLAR.sub(" ", t)
+    return t
+
+
 def _mentions_ticker_in_text(text: str, ticker_id: str) -> bool:
     hay = text or ""
     tid = (ticker_id or "").strip().upper()
@@ -261,24 +295,25 @@ def post_matches_ticker(
     ticker_id: str,
     search_query: str = "",
 ) -> bool:
-    """Scope filter: instruments and/or textual mention of this ticker."""
+    """Scope filter: name/ticker in title|body, or focused instrument tags.
+
+    Advokat often embeds ``$SBER`` chips for every tagged instrument in title/body —
+    those chips alone must not attach the post to each holdings ticker. Match on
+    chip-stripped prose (issuer name / bare ticker outside chips) or ≤2 instruments.
+    """
     tid = (ticker_id or "").strip().upper()
     if not tid:
         return False
-    title = post.title or ""
-    body = post.body or ""
-    text_blob = f"{title}\n{body}"
-    text_hit = title_matches_ticker(title, tid, search_query) or _mentions_ticker_in_text(
-        text_blob, tid
-    )
+    title_prose = _strip_ticker_chips(post.title or "")
+    body_prose = _strip_ticker_chips(post.body or "")[:800]
+    if title_matches_ticker(title_prose, tid, search_query):
+        return True
+    if title_matches_ticker(body_prose, tid, search_query):
+        return True
     inst = {t.upper() for t in post.instrument_tickers}
-    inst_hit = tid in inst
-    if not inst_hit and not text_hit:
-        return False
-    # Educational multi-tag posts (Advokat often lists 3–4 examples): require text.
-    if inst_hit and len(inst) > 2 and not text_hit:
-        return False
-    return True
+    if tid in inst and len(inst) <= 2:
+        return True
+    return False
 
 
 class PulseAllowlistSource:

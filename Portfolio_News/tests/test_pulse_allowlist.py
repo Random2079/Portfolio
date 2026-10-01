@@ -101,13 +101,13 @@ class ParseTramvaiTests(unittest.TestCase):
         )
         self.assertEqual(posts, [])
 
-    def test_multi_instrument_needs_text(self):
+    def test_multi_instrument_needs_issuer_prose(self):
         posts = extract_posts_from_ssr_json(
             _state(
                 [
                     _simple(
                         "bbb",
-                        "Общий обзор без бумаги",
+                        "Общий обзор без бумаги $SBER $GAZP $LKOH $MTSS",
                         ["SBER", "GAZP", "LKOH", "MTSS"],
                     )
                 ],
@@ -117,6 +117,7 @@ class ParseTramvaiTests(unittest.TestCase):
             base="https://www.tbank-online.com",
         )
         self.assertEqual(len(posts), 1)
+        # Dollar chips alone must not attach multi-tag posts to SBER.
         self.assertFalse(post_matches_ticker(posts[0], "SBER", "Сбербанк"))
 
         posts2 = extract_posts_from_ssr_json(
@@ -124,7 +125,7 @@ class ParseTramvaiTests(unittest.TestCase):
                 [
                     _simple(
                         "ccc",
-                        "Как оспорить решение по [$SBER](/invest/stocks/SBER)",
+                        "Как оспорить решение по Сбербанку после собрания",
                         ["SBER", "GAZP", "LKOH", "MTSS"],
                     )
                 ],
@@ -134,6 +135,17 @@ class ParseTramvaiTests(unittest.TestCase):
             base="https://www.tbank-online.com",
         )
         self.assertTrue(post_matches_ticker(posts2[0], "SBER", "Сбербанк"))
+
+    def test_focused_instruments_ok(self):
+        posts = extract_posts_from_ssr_json(
+            _state(
+                [_simple("ddd", "Юрразбор без имени в тексте", ["SMLT", "RU000A10E6U4"])],
+                nickname="Advokat_Manasyan",
+            ),
+            nickname="Advokat_Manasyan",
+            base="https://www.tbank-online.com",
+        )
+        self.assertTrue(post_matches_ticker(posts[0], "SMLT", "Самолёт"))
 
 
 class PulseAllowlistSourceTests(unittest.TestCase):

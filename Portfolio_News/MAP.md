@@ -294,8 +294,8 @@
 - **Модуль:** `portfolio_news/sources/pulse_allowlist.py` · source tag `pulse_allowlist` · в `default_sources()` рядом с Google/SmartLab.
 - **Fetch:** `{mirror_base}/invest/social/profile/{nickname}/` → парсим `__TRAMVAI_STATE__` → `seoSsrData.pulseGetProfilePage.feed.data.items` (не XHR social-api).
 - **Нормализация:** title (article) / первая строка body (simple) → `RawNews`; URL профиля+post id; `publishedAt` ISO.
-- **Фильтры:** instrument tickers + `title_matches_ticker` / `is_noise_title`; near-dup — как у остальных в `poller._insert_if_new`. Кэш постов на инстанс источника (один раз за poll).
-- **Failure mode (хрупкий SSR):** нет `__TRAMVAI_STATE__` / сломан JSON / нет `pulseGetProfilePage…items` / HTTP fail → warning в лог, пустой список (Google/SmartLab не трогаем). Зеркало `tbank-online.com` неофициальное (`noindex`); смена Tramvai-ключа ломает парсер.
+- **Фильтры:** chip-stripped prose (`title_matches_ticker` / issuer name; игнор `$TICKER` и `/invest/stocks/…` deep-links) **или** ≤2 instrument tags; `is_noise_title`; near-dup — в `poller._insert_if_new`. Кэш постов на инстанс источника (один раз за poll). Investokrat / maybe — не fetch.
+- **Failure mode (хрупкий SSR):** нет usable JSON / нет `pulseGetProfilePage…items` / HTTP fail → warning в лог, пустой список (Google/SmartLab не трогаем). Зеркало `tbank-online.com` неофициальное (`noindex`); смена Tramvai-ключа ломает парсер. Interfax часто без instruments → посты без имени эмитента в title не сядут на holdings.
 
 **Утренние типы источников (канон):**
 
