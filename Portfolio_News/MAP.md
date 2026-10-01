@@ -125,7 +125,7 @@
 
 1. ~~**§7N**~~ ✅ лента: срочно / факты / сырое; карточка → День+разбор  
 2. ~~**pre-AI noise**~~ ✅ denylist Profit/тех.анализ/фьючерсы + near-dup + short-ticker + **geo/macro keep** (`news_noise.py`) — до DeepSeek; AI-промпт не шумит RU-гео как «макро без бумаги»  
-3. **§7F F-AI polish** — промпты `ai_noise` / `ai_ticker` (нужны для сортировки срочности)  
+3. **§7F F-AI polish** — промпты `ai_noise` / `ai_ticker` (нужны для сортировки срочности); рядом — **DeepSeek usage meter** (план, см. §7F)  
 4. **Privacy** — **запланировано** (§7P), UI ещё нет  
 5. **G** авто-watch (§7G) / H телефон  
 
@@ -215,6 +215,15 @@
 1. `kind` + name + bucket (роль) в `ai_noise`  
 2. few-shot  
 3. holding + bond/equity-ветка в `ai_ticker`  
+
+### DeepSeek usage meter — 📋 planned (не кодим сейчас)
+
+Счётчик расхода API рядом с polish, не часть промптов §7F.
+
+- **Предпочтительно:** локальный usage-лог после каждого classify / ticker-review (prompt + completion tokens → оценка `$` по известным ценам DeepSeek).  
+- **Опционально позже:** баланс аккаунта, если DeepSeek API отдаст.  
+- **Опционально:** дневной `$` cap — стоп AI-кнопок при превышении.  
+- **UI:** маленькая status-строка на **Новостях** (не privacy портфеля §7P).  
 
 ---
 
