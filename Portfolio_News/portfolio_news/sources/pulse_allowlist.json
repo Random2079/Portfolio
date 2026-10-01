@@ -1,0 +1,32 @@
+{
+  "mirror_base": "https://www.tbank-online.com",
+  "confirmed": "2026-10-01",
+  "note": "Stub for future Pulse parser. No fetch code yet. Investokrat default OUT of v1 pending user final.",
+  "v1": ["Interfax", "Advokat_Manasyan"],
+  "maybe": [
+    "Investokrat",
+    "T-Investments",
+    "Karsotel",
+    "slavik_capital"
+  ],
+  "maybe_notes": {
+    "Investokrat": "pending user final; Investing triage leans OUT of v1 (opinion frame)",
+    "T-Investments": "post-filter: drop/downgrade analyst targets; keep issuer news/divs/placement",
+    "Karsotel": "develop overlap",
+    "slavik_capital": "banks but opinion-heavy (maybe↓)"
+  },
+  "drop": [
+    "Tamonkin_Dmitriy",
+    "T-Journal",
+    "ProCFA",
+    "CyberWish",
+    "SamNakopil",
+    "Pulse_Official",
+    "Pulse_Authors",
+    "RBC_Investments",
+    "tj_invest",
+    "brandhamster",
+    "TraderOrInvestor"
+  ],
+  "ir_policy": "not in v1; v1.1 only if ticker in live BCS holdings"
+}

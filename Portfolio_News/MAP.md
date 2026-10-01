@@ -127,7 +127,7 @@
 2. ~~**pre-AI noise**~~ ✅ denylist паттернов («идея в Профите» / тех.анализ / фьючерсы) + near-dup + short-ticker + **geo/macro keep** (`news_noise.py`) — до DeepSeek; AI-промпт не шумит RU-гео как «макро без бумаги». Не бан всей площадки BCS Profit / Pulse — см. **§7S**  
 3. **§7F F-AI polish** — промпты `ai_noise` / `ai_ticker` (нужны для сортировки срочности); рядом — **DeepSeek usage meter** (план, см. §7F)  
 4. **Privacy** — **запланировано** (§7P), UI ещё нет  
-5. **§7S allowlist каналов** — триаж 2026-10-01 в §7S (предложение v1 + reject); **ждём confirm** → конфиг; UI allowlist позже; парсер Pulse не стартовать без решения  
+5. **§7S allowlist каналов** — ✅ confirm 2026-10-01 (Investing triage) → stub `sources/pulse_allowlist.json`; **UI allowlist** позже; **парсер Pulse не стартовать** без явного «делаем»  
 6. **G** авто-watch (§7G) / H телефон  
 
 **Сделки:** тип = радио (Все / акции / облиг / фонды) + подфильтры только у одного вида ✅.  
@@ -275,21 +275,37 @@
 
 **Как тянуть данные (если когда-нибудь):**  
 - **HTML scrape** главной / профиля / `…/stocks/TICKER/pulse/` — реально: никнеймы и текст уже в SSR (без логина).  
-- **XHR:** social-api-gateway / feed endpoints — в браузере с cookie; снаружи без сессии → 400 / timeout. Парсер production **не стартовать** без явного решения.  
+- **XHR:** social-api-gateway / feed endpoints — в браузере с cookie; снаружи без сессии → 400 / timeout. Парсер production **не стартовать** без явного «делаем Pulse-парсер».  
 - **ToS / хрупкость:** `cdn…/rules-for-using-pulse-platform.pdf`; зеркало `noindex`, неофициально для ботов; сессии/заголовки и смена child-app `social-feed` — легко сломается; юридически серый scrape.
 
-**Триаж 2026-10-01 (зеркало профилей, свежие SSR-посты):** user skip (мёртвые/шум) + агент-рекомендация — **ждём confirm пользователя**, парсер/конфиг allowlist **не** внедрять до «ок».
+### Confirm 2026-10-01 (Investing chat triage) ✅
 
-| Вердикт | Ники |
-|---------|------|
-| **allowlist v1 (предложение)** | `Interfax`, `Advokat_Manasyan`, `Investokrat` |
-| **maybe (очередь после v1)** | `T-Investments`, `slavik_capital`, `Karsotel`, `Tamonkin_Dmitriy` |
-| **reject** | user: `RBC_Investments`, `tj_invest`, `brandhamster`, `Pulse_Official`, `Pulse_Authors`, `TraderOrInvestor` · агент: `T-Journal`, `ProCFA`, `CyberWish`, `SamNakopil` |
-| **IR эмитентов** | не в v1; только если тикер реально в БКС-позициях (иначе skip) |
+Политика зафиксирована. Stub: `portfolio_news/sources/pulse_allowlist.json` (без fetch-кода).
 
-Критерий как у пользователя + Investing `чек-поинт.md`: факты/макро по секторам KS, не идеи «купи» / таргеты / интрадей. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
+| Вердикт | Ники / правило |
+|---------|----------------|
+| **v1 (hard allowlist)** | `Interfax` (wire) · `Advokat_Manasyan` (legal/bond facts) |
+| **pending user final** | `Investokrat` — Investing: **maybe / лучше OUT of v1** (opinion frame). **Default: OUT of v1**, в maybe. Спросить юзера in/out перед любым bump в v1 |
+| **maybe (не v1)** | `T-Investments` — post-filter: drop/downgrade «аналитики / целевая / повысили оценку»; keep issuer news / divs / placement · `Karsotel` — develop overlap · `slavik_capital` — banks, opinion-heavy (**maybe↓**) · `Investokrat` (см. pending) |
+| **drop** | `Tamonkin_Dmitriy`, `T-Journal`, `ProCFA`, `CyberWish`, `SamNakopil`, `Pulse_Official` / `Pulse_Authors`, мёртвые `RBC_Investments` / `tj_invest` / `brandhamster`, `TraderOrInvestor` |
+| **IR pack** | **не в v1**; только **v1.1** и только если тикер в live BCS holdings |
 
-**Дальше:** confirm → короткий allowlist в конфиге → **UI allowlist** позже. Не Telegram-userbot. Не полный Pulse-парсер / React UI в этом слое.
+**Утренние типы источников (канон):**
+
+| Держать | Не утро / не v1 |
+|---------|-----------------|
+| wire | таргеты / «повысили оценку» |
+| IR / events **своих** бумаг | идеи «купи» / интрадей |
+| legal / bond facts | Pulse Official social |
+| macro CB / tariffs / taxes — **только** если бьёт в сектор / позицию (как geo-keep) | CFA edu noise · foreign IR |
+
+**Macro/geo:** keep только если сектор / regulatory / тикер из checkpoint / holdings — align с существующим geo-keep в `news_noise.py`.
+
+**Вне Pulse (future, не кодить сейчас):** TG **Архивариус**, **Вредные** — daily fact sources; non-Pulse backlog, не этот слой.
+
+Критерий как у пользователя + Investing `чек-поинт.md`: факты/макро по секторам KS, не идеи / таргеты / интрадей. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
+
+**Дальше:** **UI allowlist** позже · парсер Pulse — только по явному старту · не Telegram-userbot.
 
 ---
 
