@@ -32,7 +32,7 @@
 **Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
 **React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
 Если React «пизда» → снова `/` ванили.  
-**Очередь:** React MVP R0–R4 ✅. UI вкладок ≈ ваниль. Капитал на Дне ✅. **§7N** лента Новостей (этажи + карточки) ✅. Сырой **ИИ-слой** → §7F. **Дешёвые pre-AI фильтры** в `news_noise.py` (паттерн «идея в Профите» / тех.анализ / фьючерсы / near-dup / short-ticker + geo-keep) ✅ — **площадка ≠ все авторы**, см. **§7S**. **Privacy** — план §7P, UI позже. Дальше по желанию: §7F / **G** / H / allowlist UI.
+**Очередь:** React MVP R0–R4 ✅. UI вкладок ≈ ваниль. Капитал на Дне ✅. **§7N** лента Новостей (этажи + карточки) ✅. Сырой **ИИ-слой** → §7F. **Дешёвые pre-AI фильтры** в `news_noise.py` (паттерн «идея в Профите» / тех.анализ / фьючерсы / near-dup / short-ticker + geo-keep) ✅ — **площадка ≠ все авторы**, см. **§7S**. **§7S Pulse allowlist v1** ✅ (Interfax + Advokat_Manasyan, SSR mirror). **Privacy** — план §7P, UI позже. Дальше по желанию: §7F / **G** / H / allowlist UI.
 
 ---
 
@@ -127,7 +127,7 @@
 2. ~~**pre-AI noise**~~ ✅ denylist паттернов («идея в Профите» / тех.анализ / фьючерсы) + near-dup + short-ticker + **geo/macro keep** (`news_noise.py`) — до DeepSeek; AI-промпт не шумит RU-гео как «макро без бумаги». Не бан всей площадки BCS Profit / Pulse — см. **§7S**  
 3. **§7F F-AI polish** — промпты `ai_noise` / `ai_ticker` (нужны для сортировки срочности); рядом — **DeepSeek usage meter** (план, см. §7F)  
 4. **Privacy** — **запланировано** (§7P), UI ещё нет  
-5. **§7S allowlist каналов** — ✅ confirm 2026-10-01 (Investing triage) → stub `sources/pulse_allowlist.json`; **UI allowlist** позже; **парсер Pulse не стартовать** без явного «делаем»  
+5. ~~**§7S Pulse allowlist v1**~~ ✅ fetch Interfax + Advokat_Manasyan via SSR mirror (`pulse_allowlist.py` + json); source tag `pulse_allowlist`; Investokrat out. **UI allowlist** позже · maybe/IR pack — не этот слой  
 6. **G** авто-watch (§7G) / H телефон  
 
 **Сделки:** тип = радио (Все / акции / облиг / фонды) + подфильтры только у одного вида ✅.  
@@ -273,14 +273,14 @@
 `https://www.tbank-online.com/invest/pulse/` — зеркало Tramvai (`x-tramvai-resolved-external-host` → tinkoff.ru), **HTTP 200**, SSR HTML ~1.3–2 MB с постами и никнеймами; `x-robots-tag: noindex`. Профили: `/invest/social/profile/{nickname}/` (иногда + UUID). Полки «каналы/медиа» на главной (T-Journal, RBC_Investments, Interfax, ProCFA, tj_invest, IR эмитентов…). Тикеры в постах как `$SBER` / `{$GAZP}`.  
 **По тикеру (HTML):** `/invest/stocks/{TICKER}/pulse/` — тоже SSR 200 (проверено GAZP; SBER/профили иногда timeout). Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, `social-feed`, `pulse-emittent` (бандлы тяжёлые, без сессии не разбирали). Отдельный анонимный JSON «посты по тикеру» без логина **не подтверждён**.
 
-**Как тянуть данные (если когда-нибудь):**  
-- **HTML scrape** главной / профиля / `…/stocks/TICKER/pulse/` — реально: никнеймы и текст уже в SSR (без логина).  
-- **XHR:** social-api-gateway / feed endpoints — в браузере с cookie; снаружи без сессии → 400 / timeout. Парсер production **не стартовать** без явного «делаем Pulse-парсер».  
-- **ToS / хрупкость:** `cdn…/rules-for-using-pulse-platform.pdf`; зеркало `noindex`, неофициально для ботов; сессии/заголовки и смена child-app `social-feed` — легко сломается; юридически серый scrape.
+**Как тянуть данные:**  
+- **HTML scrape** профиля `/invest/social/profile/{nickname}/` — SSR `__TRAMVAI_STATE__` (v1 код).  
+- **XHR:** social-api-gateway — без сессии 400/timeout; **не** используем.  
+- **ToS / хрупкость:** зеркало `noindex`, неофициально; смена child-app / ключа `pulseGetProfilePage` ломает парсер (см. failure mode ниже).
 
 ### Confirm 2026-10-01 (Investing chat triage) ✅
 
-Политика зафиксирована. Stub: `portfolio_news/sources/pulse_allowlist.json` (без fetch-кода).
+Политика зафиксирована. Config: `portfolio_news/sources/pulse_allowlist.json`.
 
 | Вердикт | Ники / правило |
 |---------|----------------|
@@ -288,6 +288,14 @@
 | **maybe (не v1)** | `Investokrat` — **locked OUT of v1** (confirm 2026-10-01 user): opinion-frame / soft ideas поверх фактов; остаётся в maybe на later · `T-Investments` — post-filter: drop/downgrade «аналитики / целевая / повысили оценку»; keep issuer news / divs / placement · `Karsotel` — develop overlap · `slavik_capital` — banks, opinion-heavy (**maybe↓**) |
 | **drop** | `Tamonkin_Dmitriy`, `T-Journal`, `ProCFA`, `CyberWish`, `SamNakopil`, `Pulse_Official` / `Pulse_Authors`, мёртвые `RBC_Investments` / `tj_invest` / `brandhamster`, `TraderOrInvestor` |
 | **IR pack** | **не в v1**; только **v1.1** и только если тикер в live BCS holdings |
+
+### Pulse allowlist v1 — код ✅ (2026-10-01)
+
+- **Модуль:** `portfolio_news/sources/pulse_allowlist.py` · source tag `pulse_allowlist` · в `default_sources()` рядом с Google/SmartLab.
+- **Fetch:** `{mirror_base}/invest/social/profile/{nickname}/` → парсим `__TRAMVAI_STATE__` → `seoSsrData.pulseGetProfilePage.feed.data.items` (не XHR social-api).
+- **Нормализация:** title (article) / первая строка body (simple) → `RawNews`; URL профиля+post id; `publishedAt` ISO.
+- **Фильтры:** instrument tickers + `title_matches_ticker` / `is_noise_title`; near-dup — как у остальных в `poller._insert_if_new`. Кэш постов на инстанс источника (один раз за poll).
+- **Failure mode (хрупкий SSR):** нет `__TRAMVAI_STATE__` / сломан JSON / нет `pulseGetProfilePage…items` / HTTP fail → warning в лог, пустой список (Google/SmartLab не трогаем). Зеркало `tbank-online.com` неофициальное (`noindex`); смена Tramvai-ключа ломает парсер.
 
 **Утренние типы источников (канон):**
 
@@ -304,7 +312,7 @@
 
 Критерий как у пользователя + Investing `чек-поинт.md`: факты/макро по секторам KS, не идеи / таргеты / интрадей. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
 
-**Дальше:** **UI allowlist** позже · парсер Pulse — только по явному старту · не Telegram-userbot.
+**Дальше:** **UI allowlist** · maybe-очередь / IR pack v1.1 · не Telegram-userbot.
 
 ---
 
