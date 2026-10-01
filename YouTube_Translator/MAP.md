@@ -5,8 +5,8 @@
 
 | | |
 |---|---|
-| **Где мы** | IDEA-025 A0–A3 ✅. Дальше **B0 комфорт** (план: [`docs/parts/18-overlay-auto-density.md`](docs/parts/18-overlay-auto-density.md)). |
-| **Фокус** | **025 B0** — lerp + редкий тик + без grab при сквозь; потом B1/B2 только если мало |
+| **Где мы** | IDEA-025 A0–A3 ✅ · план B0 в part 18. **YT adblock** в плеере (interceptor + skip-JS). |
+| **Фокус** | Смоук: ролик с рекламой в плеере SR · или **025 B0** по запросу |
 | **Код scope** | `overlay_player.py` (025); shell UI — `Subtitle_App.py` / `ui_motion.py` |
 
 ---
@@ -42,6 +42,7 @@
 | 8 | 025 B1 кривая/prefs по тесту | ⬜ если B0 мало |
 | 9 | 025 B2 dxcam/DXGI | ⬜ только если B0+B1 мало под игрой |
 | 10 | 021 F1 delete/rename | ⬜ |
+| — | YT плеер: блок рекламы (URL filter + skip JS) | ✅ |
 | — | Дизайн тема + fade+center | ✅ |
 | — | SMTC | ⏸ |
 

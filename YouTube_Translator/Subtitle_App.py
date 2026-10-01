@@ -56,6 +56,7 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWebEngineCore import (
     QWebEnginePage,
     QWebEngineProfile,
+    QWebEngineScript,
     QWebEngineSettings,
     QWebEngineUrlRequestInterceptor,
 )
@@ -849,19 +850,152 @@ _YT_EMBED_ORIGIN = "http://127.0.0.1"
 _YT_EMBED_REFERER = b"https://www.youtube.com/"
 
 
+# Хосты/пути рекламы и трекеров (не трогаем googlevideo — там и ролик, и ads).
+_YT_AD_HOST_FRAGMENTS = (
+    "doubleclick.net",
+    "googlesyndication.com",
+    "googleadservices.com",
+    "googletagservices.com",
+    "googletagmanager.com",
+    "google-analytics.com",
+    "adservice.google",
+    "pagead2.",
+    "ade.googlesyndication",
+    "static.doubleclick",
+    "ad.youtube.com",
+    "ads.youtube.com",
+)
+_YT_AD_PATH_FRAGMENTS = (
+    "/pagead/",
+    "/ptracking",
+    "/api/stats/ads",
+    "/get_midroll_",
+    "/ad_data",
+    "/ads.js",
+    "/youtubei/v1/player/ad_",
+)
+
+
+def _yt_url_looks_like_ad(url: QUrl) -> bool:
+    """True → режем запрос (баннеры/трекеры). Не режем сам видеопоток."""
+    host = (url.host() or "").lower()
+    path = (url.path() or "").lower()
+    full = url.toString().lower()
+    if not host:
+        return False
+    # Логин Google не трогаем
+    if host.startswith("accounts.") or host.startswith("myaccount."):
+        return False
+    if any(frag in host for frag in _YT_AD_HOST_FRAGMENTS):
+        return True
+    # На youtube.com режем только явные ad-пути
+    if "youtube.com" in host or "youtu.be" in host or "youtube-nocookie.com" in host:
+        if any(p in path for p in _YT_AD_PATH_FRAGMENTS):
+            return True
+    if "/pagead/" in full or "googlesyndication" in full:
+        return True
+    return False
+
+
+# JS: скип in-stream ads + CSS-скрытие слотов (не uBlock — WebEngine без расширений).
+_YT_ADBLOCK_JS = r"""
+(function () {
+  if (window.__srYtAdBlock) return;
+  window.__srYtAdBlock = true;
+
+  var style = document.createElement("style");
+  style.id = "sr-yt-adblock-css";
+  style.textContent = [
+    "ytd-ad-slot-renderer,",
+    "ytd-player-legacy-desktop-watch-ads-renderer,",
+    "ytd-action-companion-ad-renderer,",
+    "ytd-display-ad-renderer,",
+    "ytd-promoted-sparkles-web-renderer,",
+    "ytd-in-feed-ad-layout-renderer,",
+    "ytd-banner-promo-renderer,",
+    "#player-ads,",
+    "#masthead-ad,",
+    ".ytp-ad-module,",
+    ".ytp-ad-overlay-container,",
+    ".ytp-ad-progress-list,",
+    "tp-yt-paper-dialog.ytd-popup-container",
+    "{ display: none !important; visibility: hidden !important; height: 0 !important; max-height: 0 !important; overflow: hidden !important; }"
+  ].join("\n");
+  (document.documentElement || document.head || document.body).appendChild(style);
+
+  var SKIP_SEL = [
+    ".ytp-ad-skip-button",
+    ".ytp-ad-skip-button-modern",
+    ".ytp-skip-ad-button",
+    ".ytp-ad-skip-button-container button",
+    "button.ytp-ad-skip-button-modern",
+    ".ytp-ad-overlay-close-button"
+  ].join(",");
+
+  function clickSkip() {
+    var nodes = document.querySelectorAll(SKIP_SEL);
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (!el || el.offsetParent === null && el.getClientRects().length === 0) continue;
+      try { el.click(); return true; } catch (e) {}
+    }
+    return false;
+  }
+
+  function forceEndAd() {
+    var player = document.querySelector(".html5-video-player");
+    if (!player) return;
+    var showing = player.classList.contains("ad-showing")
+      || player.classList.contains("ad-interrupting")
+      || !!document.querySelector(".ad-showing, .ytp-ad-player-overlay, .ytp-ad-text");
+    if (!showing) return;
+    var video = player.querySelector("video") || document.querySelector("video");
+    if (!video) return;
+    try {
+      video.muted = true;
+      var d = video.duration;
+      if (isFinite(d) && d > 0) video.currentTime = Math.max(0, d - 0.15);
+      else video.currentTime = 1e5;
+    } catch (e) {}
+  }
+
+  function tick() {
+    if (clickSkip()) return;
+    forceEndAd();
+  }
+
+  setInterval(tick, 400);
+  try {
+    new MutationObserver(function () { tick(); }).observe(
+      document.documentElement,
+      { childList: true, subtree: true }
+    );
+  } catch (e) {}
+  tick();
+})();
+"""
+
+
 class _YtRefererInterceptor(QWebEngineUrlRequestInterceptor):
-    """Referer только для медиа YouTube. Не трогать Google login (иначе вечная загрузка)."""
+    """Referer для медиа YouTube + блок ad/tracker URL. Google login не трогаем."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.active = True
+        self.adblock = True
 
     def interceptRequest(self, info) -> None:  # noqa: N802 — Qt API
         if not self.active:
             return
-        host = (info.requestUrl().host() or "").lower()
+        url = info.requestUrl()
+        host = (url.host() or "").lower()
         if not host:
             return
+
+        if self.adblock and _yt_url_looks_like_ad(url):
+            info.block(True)
+            return
+
         # Вход Google ходит на gstatic/googleapis — подмена Referer вешает спиннер
         if (
             host.startswith("accounts.")
@@ -882,6 +1016,21 @@ class _YtRefererInterceptor(QWebEngineUrlRequestInterceptor):
             or "ggpht.com" in host
         ):
             info.setHttpHeader(b"Referer", _YT_EMBED_REFERER)
+
+
+def _install_yt_adblock_script(profile: QWebEngineProfile) -> None:
+    """Инъекция skip-ads на каждую загрузку YouTube (MainWorld)."""
+    scripts = profile.scripts()
+    for existing in scripts.toList():
+        if existing.name() == "sr_yt_adblock":
+            scripts.remove(existing)
+    script = QWebEngineScript()
+    script.setName("sr_yt_adblock")
+    script.setSourceCode(_YT_ADBLOCK_JS)
+    script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentReady)
+    script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
+    script.setRunsOnSubFrames(True)
+    scripts.insert(script)
 
 
 def _nav_host_allowed(host: str, allowed: tuple[str, ...]) -> bool:
@@ -2904,9 +3053,10 @@ class SubtitleApp(QMainWindow):
             QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
         )
         self._yt_profile.setHttpUserAgent(_bookmarks_user_agent())
-        # Referer для медиа YouTube (не для Google login — см. interceptor)
+        # Referer для медиа YouTube + блок рекламных URL (не для Google login)
         self._yt_referer_interceptor = _YtRefererInterceptor(self)
         self._yt_profile.setUrlRequestInterceptor(self._yt_referer_interceptor)
+        _install_yt_adblock_script(self._yt_profile)
         settings = self._yt_profile.settings()
         # Жест не блокируем: иначе кадр часто белый. Автоplay гасим через _force_pause_youtube.
         settings.setAttribute(
@@ -4399,6 +4549,11 @@ class SubtitleApp(QMainWindow):
         )
         if ok and is_yt:
             self._player_video_loaded = True
+            # Подстраховка: SPA YouTube иногда переживает DocumentReady без нашего скрипта
+            try:
+                self.web_view.page().runJavaScript(_YT_ADBLOCK_JS)
+            except Exception:  # noqa: BLE001
+                pass
             # Пауза по умолчанию (YT любит сам стартовать)
             self._pause_retries_left = 12
             QTimer.singleShot(200, self._force_pause_youtube)
@@ -4478,7 +4633,7 @@ class SubtitleApp(QMainWindow):
         # Ctrl+Shift+O только прячет Фон — Translator не поднимаем (фокус в Cursor и т.п.)
         self.hide()
         self._set_status(
-            "Статус: overlay «Фон» открыт (← Назад / крестик — сюда; Ctrl+O — сквозь; Ctrl+Shift+O — скрыть Фон)"
+            "Статус: overlay «Фон» открыт (← Назад / крестик — сюда; Ctrl+O — сквозь; Ctrl+Shift+O — свернуть в панель)"
         )
 
     def on_open_dist_files(self) -> None:
