@@ -77,7 +77,7 @@
 
 ```powershell
 cd react_Portfolio_News
-npm start
+.\start.cmd
 # React: http://127.0.0.1:8765/app/
 # Бэкап: http://127.0.0.1:8765/
 ```

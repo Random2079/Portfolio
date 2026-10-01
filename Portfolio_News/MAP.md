@@ -20,7 +20,7 @@
 **Запуск утро:** `python -m portfolio_news serve` →  
 - React: http://127.0.0.1:8765/app/ (нужен `npm run build` в `react_Portfolio_News`)  
 - Ваниль-бэкап: http://127.0.0.1:8765/  
-**Одна команда из React-папки:** `npm start` → sync docs + build + тот же `serve`.  
+**Одна команда из React-папки:** `.\start.cmd` → sync docs + build + тот же `serve` (`npm.cmd`, без блокировки `npm.ps1`).  
 После правок API — **перезапустить serve**. После правок React — `npm run build`, потом refresh (перезапуск serve только если dist не было).
 
 **Репо:** `Portfolio_News/` · React UI: sibling `react_Portfolio_News/` · IDEA-003

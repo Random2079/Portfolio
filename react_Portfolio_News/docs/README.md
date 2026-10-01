@@ -16,10 +16,10 @@ Backend-документация зеркалится локально в `docs/
 Обновить зеркало вручную:
 
 ```powershell
-npm run docs:sync
+npm.cmd run docs:sync
 ```
 
-`npm start` обновляет его автоматически.
+`.\start.cmd` обновляет его автоматически.
 
 ## Поток приложения
 
@@ -40,7 +40,7 @@ React не хранит брокерский токен и не обращает
 Из `react_Portfolio_News`:
 
 ```powershell
-npm start
+.\start.cmd
 ```
 
 Команда:

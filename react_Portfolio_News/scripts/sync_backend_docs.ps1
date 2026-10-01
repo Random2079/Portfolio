@@ -21,7 +21,7 @@ Do not edit files in this folder. Source of truth:
 `../Portfolio_News/MAP.md` and `../Portfolio_News/docs/`.
 
 Refresh from `react_Portfolio_News`:
-`npm run docs:sync`
+`npm.cmd run docs:sync`
 '@ | Set-Content (Join-Path $targetRoot "_GENERATED.md") -Encoding UTF8
 
 Write-Host "Backend docs synced to docs/backend"

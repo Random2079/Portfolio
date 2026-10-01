@@ -7,18 +7,21 @@
 
 - локальный вход: [`docs/README.md`](docs/README.md)
 - канон: [`../Portfolio_News/MAP.md`](../Portfolio_News/MAP.md)
-- локальное зеркало канона: `docs/backend/` после `npm start` / `npm run docs:sync`
+- локальное зеркало канона: `docs/backend/` после `.\start.cmd` / `npm.cmd run docs:sync`
 
 ## Утро — одна команда
 
 Из этой папки:
 
 ```powershell
-npm start
+.\start.cmd
 ```
 
 Она синхронизирует документацию, собирает React и запускает Python API+UI.
 Остановить сервер: `Ctrl+C`.
+
+Используем `.cmd`, потому что стандартная политика Windows PowerShell может
+блокировать `npm.ps1`. Альтернатива: `npm.cmd start`.
 
 - **React:** http://127.0.0.1:8765/app/  
 - **Ваниль (бэкап):** http://127.0.0.1:8765/  
