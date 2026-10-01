@@ -9,7 +9,11 @@ import feedparser
 import requests
 
 from portfolio_news.sources.base import RawNews
-from portfolio_news.sources.news_noise import google_query_exclusions, is_noise_title
+from portfolio_news.sources.news_noise import (
+    google_query_exclusions,
+    is_noise_title,
+    title_matches_ticker,
+)
 
 _HEADERS = {
     "User-Agent": "PortfolioNews/0.1 (+local; personal monitor)",
@@ -72,6 +76,9 @@ class GoogleNewsRuSource:
             if not link or not title:
                 continue
             if is_noise_title(title):
+                continue
+            # Short tickers (≤2): require issuer/name tokens, not bare letter match.
+            if not title_matches_ticker(title, ticker_id, search_query):
                 continue
             out.append(
                 RawNews(

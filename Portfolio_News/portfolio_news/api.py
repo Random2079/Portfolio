@@ -511,9 +511,22 @@ def list_news(
                 .limit(limit)
             )
     rows = list(db.scalars(q).all())
-    from portfolio_news.sources.news_noise import is_noise_title
+    from portfolio_news.sources.news_noise import (
+        is_noise_title,
+        is_near_duplicate_title,
+        remember_title_fingerprint,
+    )
 
     rows = [r for r in rows if not is_noise_title(r.title or "")]
+    # Near-dups (same story, different site tail) — keep newest, skip rest.
+    seen_fps: set[str] = set()
+    deduped: list[NewsItem] = []
+    for r in rows:
+        if is_near_duplicate_title(r.title or "", seen_fps):
+            continue
+        remember_title_fingerprint(r.title or "", seen_fps)
+        deduped.append(r)
+    rows = deduped
     ai_map = _news_ai_map(db, [r.id for r in rows])
     hide_noise = (ai or "").strip().lower() == "hide_noise"
     out: list[NewsOut] = []
@@ -575,6 +588,11 @@ def news_ai_classify(
     from portfolio_news.ai_noise import classify_news_batch
     from portfolio_news.bcs_scope import resolve_bcs_scope
     from portfolio_news.poller import news_is_today_for_toast
+    from portfolio_news.sources.news_noise import (
+        is_noise_title,
+        is_near_duplicate_title,
+        remember_title_fingerprint,
+    )
 
     if not cfg.ai_noise_enabled:
         raise HTTPException(
@@ -611,9 +629,42 @@ def news_ai_classify(
                     filtered.append(n)
             candidates = filtered
 
-    batch = candidates[:limit]
+    # Cheap pre-AI: denylist out; near-dups auto-label `dup` without DeepSeek.
+    skipped = 0
+    batch: list[NewsItem] = []
+    auto_dup_ids: list[int] = []
+    seen_fps: set[str] = set()
+    for n in candidates:
+        if is_noise_title(n.title or ""):
+            skipped += 1
+            continue
+        if is_near_duplicate_title(n.title or "", seen_fps):
+            auto_dup_ids.append(n.id)
+            skipped += 1
+            continue
+        remember_title_fingerprint(n.title or "", seen_fps)
+        batch.append(n)
+        if len(batch) >= limit:
+            break
+
+    now_ts = datetime.utcnow()
+    for nid in auto_dup_ids:
+        cache = db.get(NewsAiCache, nid)
+        if cache is None:
+            cache = NewsAiCache(news_id=nid)
+            db.add(cache)
+        cache.label = "dup"
+        cache.urgency = None
+        cache.reason = "near-dup title (pre-AI)"
+        cache.model = "rules/near-dup"
+        cache.as_of = now_ts
+    if auto_dup_ids:
+        db.commit()
+
     if not batch:
-        return NewsAiClassifyOut(ok=True, classified=0, skipped=0, ids=[])
+        return NewsAiClassifyOut(
+            ok=True, classified=len(auto_dup_ids), skipped=skipped, ids=list(auto_dup_ids)
+        )
 
     payload = [
         {
@@ -630,7 +681,7 @@ def news_ai_classify(
         log.exception("ai-classify failed")
         raise HTTPException(status_code=502, detail=str(exc)[:300]) from exc
 
-    done_ids: list[int] = []
+    done_ids: list[int] = list(auto_dup_ids)
     for row in results:
         nid = int(row["id"])
         cache = db.get(NewsAiCache, nid)
@@ -645,11 +696,11 @@ def news_ai_classify(
         cache.as_of = as_of if isinstance(as_of, datetime) else datetime.utcnow()
         done_ids.append(nid)
     db.commit()
-    skipped = len(batch) - len(done_ids)
+    ai_missed = len(batch) - (len(done_ids) - len(auto_dup_ids))
     return NewsAiClassifyOut(
         ok=True,
         classified=len(done_ids),
-        skipped=max(0, skipped),
+        skipped=max(0, skipped + ai_missed),
         ids=done_ids,
     )
 

@@ -71,13 +71,25 @@ class PollResult:
 
 
 def _insert_if_new(session: Session, ticker_id: str, item: RawNews) -> NewsItem | None:
-    from portfolio_news.sources.news_noise import is_noise_title
+    from portfolio_news.sources.news_noise import is_noise_title, title_fingerprint
 
     if is_noise_title(item.title or ""):
         return None
     exists = session.scalar(select(NewsItem.id).where(NewsItem.url == item.url).limit(1))
     if exists is not None:
         return None
+    # Near-dup: same story + different site/Profit suffix — skip without AI.
+    fp = title_fingerprint(item.title or "")
+    if fp:
+        recent = session.scalars(
+            select(NewsItem.title)
+            .where(NewsItem.ticker_id == ticker_id)
+            .order_by(NewsItem.created_at.desc())
+            .limit(80)
+        ).all()
+        for old_title in recent:
+            if title_fingerprint(old_title or "") == fp:
+                return None
     row = NewsItem(
         ticker_id=ticker_id,
         title=item.title,

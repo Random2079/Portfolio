@@ -8,6 +8,7 @@ import feedparser
 import requests
 
 from portfolio_news.sources.base import RawNews
+from portfolio_news.sources.news_noise import is_noise_title, title_matches_ticker
 
 _HEADERS = {
     "User-Agent": "PortfolioNews/0.1 (+local; personal monitor)",
@@ -62,8 +63,9 @@ class SmartLabRssSource:
             link = (entry.get("link") or "").strip()
             if not title or not link:
                 continue
-            hay = title.lower()
-            if not any(tok in hay for tok in tokens):
+            if is_noise_title(title):
+                continue
+            if not title_matches_ticker(title, ticker_id, search_query):
                 continue
             out.append(
                 RawNews(
