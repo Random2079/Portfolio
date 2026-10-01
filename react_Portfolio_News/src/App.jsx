@@ -11,6 +11,7 @@ import {
   sumField,
 } from "./holdings";
 import { fmtPct, fmtRub, pnlClass, qtyFmt } from "./format";
+import { navHash, navKey, parseNavHash, viewFromState } from "./navHistory";
 import TickerLogo from "./TickerLogo";
 import TickerReview from "./TickerReview";
 import CapitalChart from "./CapitalChart";
@@ -20,16 +21,18 @@ import CalendarPanel from "./CalendarPanel";
 import "./App.css";
 
 export default function App() {
-  const [tab, setTab] = useState("home");
+  const [tab, setTab] = useState(() => parseNavHash().tab);
   const [day, setDay] = useState(null);
   const [snap, setSnap] = useState(null);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(() => parseNavHash().selected);
   const [previewOpen, setPreviewOpen] = useState({});
   const [error, setError] = useState("");
   const [holdingsNote, setHoldingsNote] = useState("");
   const [loading, setLoading] = useState(true);
   const reviewRef = useRef(null);
   const scrollAfterSelect = useRef(false);
+  const navBoot = useRef(true);
+  const navFromPop = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -158,6 +161,39 @@ export default function App() {
     }, 80);
     return () => window.clearTimeout(t);
   }, [selected, tab]);
+
+  /** Browser / mouse Back·Forward via History API (hash under /app/). */
+  useEffect(() => {
+    const view = {
+      tab,
+      selected: tab === "home" ? selected || "" : "",
+    };
+    const key = navKey(view);
+    const hash = navHash(view);
+
+    if (navBoot.current) {
+      navBoot.current = false;
+      window.history.replaceState({ ...view, navKey: key }, "", hash);
+      return;
+    }
+    if (navFromPop.current) {
+      navFromPop.current = false;
+      return;
+    }
+    if (window.history.state?.navKey === key) return;
+    window.history.pushState({ ...view, navKey: key }, "", hash);
+  }, [tab, selected]);
+
+  useEffect(() => {
+    const onPop = (ev) => {
+      const view = viewFromState(ev.state);
+      navFromPop.current = true;
+      setTab(view.tab);
+      setSelected(view.selected || "");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const top = (day && day.top) || [];
 
