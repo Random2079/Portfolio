@@ -1,7 +1,7 @@
 {
   "mirror_base": "https://www.tbank-online.com",
   "confirmed": "2026-10-01",
-  "note": "Stub for future Pulse parser. No fetch code yet. Investokrat default OUT of v1 pending user final.",
+  "note": "Stub for future Pulse parser. No fetch code yet. Investokrat locked OUT of v1 (user confirm 2026-10-01 option 1); stays in maybe.",
   "v1": ["Interfax", "Advokat_Manasyan"],
   "maybe": [
     "Investokrat",
@@ -10,7 +10,7 @@
     "slavik_capital"
   ],
   "maybe_notes": {
-    "Investokrat": "pending user final; Investing triage leans OUT of v1 (opinion frame)",
+    "Investokrat": "locked OUT of v1 (user 2026-10-01); opinion/edu frame; maybe only",
     "T-Investments": "post-filter: drop/downgrade analyst targets; keep issuer news/divs/placement",
     "Karsotel": "develop overlap",
     "slavik_capital": "banks but opinion-heavy (maybe↓)"

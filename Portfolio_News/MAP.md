@@ -285,8 +285,7 @@
 | Вердикт | Ники / правило |
 |---------|----------------|
 | **v1 (hard allowlist)** | `Interfax` (wire) · `Advokat_Manasyan` (legal/bond facts) |
-| **pending user final** | `Investokrat` — Investing: **maybe / лучше OUT of v1** (opinion frame). **Default: OUT of v1**, в maybe. Спросить юзера in/out перед любым bump в v1 |
-| **maybe (не v1)** | `T-Investments` — post-filter: drop/downgrade «аналитики / целевая / повысили оценку»; keep issuer news / divs / placement · `Karsotel` — develop overlap · `slavik_capital` — banks, opinion-heavy (**maybe↓**) · `Investokrat` (см. pending) |
+| **maybe (не v1)** | `Investokrat` — **locked OUT of v1** (confirm 2026-10-01 user): opinion-frame / soft ideas поверх фактов; остаётся в maybe на later · `T-Investments` — post-filter: drop/downgrade «аналитики / целевая / повысили оценку»; keep issuer news / divs / placement · `Karsotel` — develop overlap · `slavik_capital` — banks, opinion-heavy (**maybe↓**) |
 | **drop** | `Tamonkin_Dmitriy`, `T-Journal`, `ProCFA`, `CyberWish`, `SamNakopil`, `Pulse_Official` / `Pulse_Authors`, мёртвые `RBC_Investments` / `tj_invest` / `brandhamster`, `TraderOrInvestor` |
 | **IR pack** | **не в v1**; только **v1.1** и только если тикер в live BCS holdings |
 
