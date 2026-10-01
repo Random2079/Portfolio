@@ -1,8 +1,9 @@
 """K3: SQLite cache for MOEX daily candles (разбор бумаги).
 
-Full ISS history is slow; serve from cache and only refresh the tail.
-Stale cache is returned immediately; ISS refresh runs in a background thread
-so ticker clicks stay snappy (intraday TTL used to block 3–15s on MOEX).
+Full ISS history is slow (often 10–30s). Serve from cache; on stale/truncated
+return immediately and refresh ISS in a background thread. Cold miss fetches
+a ~400d recent window in-request, then completes full history in the background
+(intraday TTL used to block the click on MOEX for 3–15s).
 """
 
 from __future__ import annotations
@@ -427,18 +428,22 @@ def resolve_chart_candles(
             from_date,
         )
 
-    # Cold / force: no cache (or explicit bypass) — must wait on ISS.
+    # Cold / force: no usable cache.
+    # Full ISS history is 10–30s — block only on a recent window, then
+    # complete the series in the background (same path as truncated cache).
+    recent_from = (date.today() - timedelta(days=400)).isoformat()
     points, secid, board, err = fetch_candles(
         tid,
         resolved_kind,
         interval=iv,
-        from_date="",
-        limit=0,
+        from_date="" if force else recent_from,
+        limit=0 if force else 500,
         isin=isin,
-        timeout=full_timeout,
+        timeout=full_timeout if force else 15.0,
     )
     if points:
         merged = merge_candle_points(cached_pts, points) if cached_pts else points
+        is_complete = bool(force)
         try:
             save_chart_cache(
                 session,
@@ -448,17 +453,30 @@ def resolve_chart_candles(
                 board=board or cached_board,
                 kind=resolved_kind,
                 interval=iv,
-                complete=True,
+                complete=is_complete,
             )
         except Exception:  # noqa: BLE001
             log.warning("chart cache save failed for %s", tid, exc_info=True)
+        if not is_complete:
+            _schedule_chart_refresh(
+                ticker=tid,
+                kind=resolved_kind,
+                isin=isin,
+                interval=iv,
+                mode="full",
+                last_day=_day_key(merged[-1].begin) if merged else "",
+                cached_pts=merged,
+                cached_secid=secid or cached_secid,
+                cached_board=board or cached_board,
+                cached_complete=False,
+            )
         return _return_sliced(
             merged,
             secid or cached_secid,
             board or cached_board,
             err or "",
             False,
-            False,
+            not is_complete,
             from_date,
         )
 

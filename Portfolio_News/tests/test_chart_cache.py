@@ -189,6 +189,34 @@ class ResolveChartCacheTests(unittest.TestCase):
         self.assertIs(cached.get("complete"), False)
         self.assertGreaterEqual(len((cached or {}).get("candles") or []), 3)
 
+    def test_cold_miss_fetches_recent_window_schedules_full(self):
+        """Cold path must not block on full ISS history."""
+        recent = _pts("2025-08-01", "2026-09-01", "2026-09-20")
+
+        def _fake_fetch(_tid, _kind, **kwargs):
+            self.assertTrue(kwargs.get("from_date"))
+            self.assertEqual(kwargs.get("limit"), 500)
+            return recent, "NEWX", "TQBR", ""
+
+        with patch(
+            "portfolio_news.chart_cache.fetch_candles",
+            side_effect=_fake_fetch,
+        ), patch(
+            "portfolio_news.chart_cache._schedule_chart_refresh"
+        ) as sched:
+            pts, secid, board, err, from_cache, stale = resolve_chart_candles(
+                self.session, "NEWX", "equity", days=0, force=False
+            )
+        self.assertEqual(len(pts), 3)
+        self.assertFalse(from_cache)
+        self.assertTrue(stale)
+        self.assertEqual(secid, "NEWX")
+        self.assertEqual(err, "")
+        sched.assert_called_once()
+        self.assertEqual(sched.call_args.kwargs.get("mode"), "full")
+        cached = load_chart_cache(self.session, "NEWX")
+        self.assertIs(cached.get("complete"), False)
+
 
 class MergeTests(unittest.TestCase):
     def test_merge_keeps_union(self):
