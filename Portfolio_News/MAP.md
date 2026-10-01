@@ -32,7 +32,7 @@
 **Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
 **React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
 Если React «пизда» → снова `/` ванили.  
-**Очередь:** React MVP R0–R4 ✅. UI вкладок ≈ ваниль. Капитал на Дне ✅. **§7N** лента Новостей (этажи + карточки) ✅. Сырой **ИИ-слой** → §7F. **Дешёвые pre-AI фильтры** в `news_noise.py` (Profit / тех.анализ / фьючерсы / near-dup / short-ticker + geo-keep) ✅. **Privacy** — план §7P, UI позже. Дальше по желанию: §7F / **G** / H.
+**Очередь:** React MVP R0–R4 ✅. UI вкладок ≈ ваниль. Капитал на Дне ✅. **§7N** лента Новостей (этажи + карточки) ✅. Сырой **ИИ-слой** → §7F. **Дешёвые pre-AI фильтры** в `news_noise.py` (паттерн «идея в Профите» / тех.анализ / фьючерсы / near-dup / short-ticker + geo-keep) ✅ — **площадка ≠ все авторы**, см. **§7S**. **Privacy** — план §7P, UI позже. Дальше по желанию: §7F / **G** / H / allowlist UI.
 
 ---
 
@@ -124,10 +124,11 @@
 **React MVP закрыт.** Дальше по желанию (не автостарт):
 
 1. ~~**§7N**~~ ✅ лента: срочно / факты / сырое; карточка → День+разбор  
-2. ~~**pre-AI noise**~~ ✅ denylist Profit/тех.анализ/фьючерсы + near-dup + short-ticker + **geo/macro keep** (`news_noise.py`) — до DeepSeek; AI-промпт не шумит RU-гео как «макро без бумаги»  
+2. ~~**pre-AI noise**~~ ✅ denylist паттернов («идея в Профите» / тех.анализ / фьючерсы) + near-dup + short-ticker + **geo/macro keep** (`news_noise.py`) — до DeepSeek; AI-промпт не шумит RU-гео как «макро без бумаги». Не бан всей площадки BCS Profit / Pulse — см. **§7S**  
 3. **§7F F-AI polish** — промпты `ai_noise` / `ai_ticker` (нужны для сортировки срочности); рядом — **DeepSeek usage meter** (план, см. §7F)  
 4. **Privacy** — **запланировано** (§7P), UI ещё нет  
-5. **G** авто-watch (§7G) / H телефон  
+5. **§7S allowlist каналов** — вручную проверить кандидатов; UI allowlist позже; парсер Pulse не стартовать без решения  
+6. **G** авто-watch (§7G) / H телефон  
 
 **Сделки:** тип = радио (Все / акции / облиг / фонды) + подфильтры только у одного вида ✅.  
 
@@ -185,7 +186,8 @@
 ## 7F. F-AI polish — очередь (ещё не кодим)
 
 **Статус:** F-A/F-B = кнопки + API ✅; **качество ИИ-слоя сырое**. Терминалом пользоваться можно.  
-**Pre-AI (дешёво, без токенов):** ✅ denylist Profit / «Технический анализ» / фьючерсный спам / `#сильный_рост` + near-dup fingerprint (poller drop + GET `/api/news` + auto-`dup` в classify) + short-ticker guard (len≤2 → нужны name-токены) + **geo/macro keep** (война/санкции/… не junk; Profit всё равно drop) в SmartLab/Google.  
+**Pre-AI (дешёво, без токенов):** ✅ denylist **паттернов** («идея в Профите», «Технический анализ», фьючерсный спам, `#сильный_рост`) + near-dup fingerprint (poller drop + GET `/api/news` + auto-`dup` в classify) + short-ticker guard (len≤2 → нужны name-токены) + **geo/macro keep** (война/санкции/… не junk; hard spam-паттерны всё равно drop) в SmartLab/Google.  
+Это **не** «забанить BCS Profit / весь Pulse»: спам-продукт и авторы с реальных новостей — разные вещи (**§7S**).  
 **Не трогать без нужды:** дальше regex в `news_noise.py` только если новый явный junk-паттерн.
 
 ### `ai_noise.py` — чего не хватает
@@ -260,6 +262,22 @@
 2. ✅ Лого + дата в карточке  
 3. ✅ Два этажа + скрытие noise (после F-A); сырое отдельно, не под срочное  
 4. ✅ Группировка по тикеру, сортировка по urgency  
+
+---
+
+## 7S. Источники — allowlist каналов (не бан площадки)
+
+**Подход:** не выкидывать целиком Pulse / BCS Profit / Telegram / Яндекс. Whitelist **каналов/авторов**, которые пишут факты (отчётность, M&A, эмиссии, макро, IR эмитента). Hard denylist в `news_noise.py` на фразы вроде «идея в Профите» — **оставить** (это спам-продукт, не «все авторы BCS»).
+
+**Pulse mirror (research 2026-10-01):**  
+`https://www.tbank-online.com/invest/pulse/` — зеркало Tramvai (`x-tramvai-resolved-external-host` → tinkoff.ru), **HTTP 200**, SSR HTML ~2 MB с постами и никнеймами; `x-robots-tag: noindex`. Профили: `/invest/social/profile/{nickname}/`. Полки «каналы» на главной (RBC, Fomag, IR эмитентов…). Тикеры в постах как `$SBER`; hashtag-роуты `/invest/social/hashtag/…`. Отдельный анонимный «посты по тикеру» JSON без сессии **не подтверждён**.
+
+**Как тянуть данные (если когда-нибудь):**  
+- **HTML scrape** главной / профиля — реально: никнеймы и текст постов уже в SSR.  
+- **XHR:** `…/mybank/api/social-api-gateway/…` и `…/social/api/gateway/feed/v1/feed` — в браузере с cookie/session видны; снаружи без сессии → 400 / timeout. Парсер production **не стартовать** без явного решения.  
+- **ToS / хрупкость:** правила Pulse на CDN (`rules-for-using-pulse-platform.pdf`); зеркало неофициальное для ботов (`noindex`), сессии/заголовки, смена child-app `social-feed` — легко сломается; юридически серый scrape.
+
+**Дальше:** вручную просмотреть историю кандидатов из research-чата → короткий allowlist в конфиге → **UI allowlist** (вкл/выкл авторов) позже. Не Telegram-userbot в этом слое.
 
 ---
 
