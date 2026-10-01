@@ -270,14 +270,17 @@
 **Подход:** не выкидывать целиком Pulse / BCS Profit / Telegram / Яндекс. Whitelist **каналов/авторов**, которые пишут факты (отчётность, M&A, эмиссии, макро, IR эмитента). Hard denylist в `news_noise.py` на фразы вроде «идея в Профите» — **оставить** (это спам-продукт, не «все авторы BCS»).
 
 **Pulse mirror (research 2026-10-01):**  
-`https://www.tbank-online.com/invest/pulse/` — зеркало Tramvai (`x-tramvai-resolved-external-host` → tinkoff.ru), **HTTP 200**, SSR HTML ~2 MB с постами и никнеймами; `x-robots-tag: noindex`. Профили: `/invest/social/profile/{nickname}/`. Полки «каналы» на главной (RBC, Fomag, IR эмитентов…). Тикеры в постах как `$SBER`; hashtag-роуты `/invest/social/hashtag/…`. Отдельный анонимный «посты по тикеру» JSON без сессии **не подтверждён**.
+`https://www.tbank-online.com/invest/pulse/` — зеркало Tramvai (`x-tramvai-resolved-external-host` → tinkoff.ru), **HTTP 200**, SSR HTML ~1.3–2 MB с постами и никнеймами; `x-robots-tag: noindex`. Профили: `/invest/social/profile/{nickname}/` (иногда + UUID). Полки «каналы/медиа» на главной (T-Journal, RBC_Investments, Interfax, ProCFA, tj_invest, IR эмитентов…). Тикеры в постах как `$SBER` / `{$GAZP}`.  
+**По тикеру (HTML):** `/invest/stocks/{TICKER}/pulse/` — тоже SSR 200 (проверено GAZP; SBER/профили иногда timeout). Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, `social-feed`, `pulse-emittent` (бандлы тяжёлые, без сессии не разбирали). Отдельный анонимный JSON «посты по тикеру» без логина **не подтверждён**.
 
 **Как тянуть данные (если когда-нибудь):**  
-- **HTML scrape** главной / профиля — реально: никнеймы и текст постов уже в SSR.  
-- **XHR:** `…/mybank/api/social-api-gateway/…` и `…/social/api/gateway/feed/v1/feed` — в браузере с cookie/session видны; снаружи без сессии → 400 / timeout. Парсер production **не стартовать** без явного решения.  
-- **ToS / хрупкость:** правила Pulse на CDN (`rules-for-using-pulse-platform.pdf`); зеркало неофициальное для ботов (`noindex`), сессии/заголовки, смена child-app `social-feed` — легко сломается; юридически серый scrape.
+- **HTML scrape** главной / профиля / `…/stocks/TICKER/pulse/` — реально: никнеймы и текст уже в SSR (без логина).  
+- **XHR:** social-api-gateway / feed endpoints — в браузере с cookie; снаружи без сессии → 400 / timeout. Парсер production **не стартовать** без явного решения.  
+- **ToS / хрупкость:** `cdn…/rules-for-using-pulse-platform.pdf`; зеркало `noindex`, неофициально для ботов; сессии/заголовки и смена child-app `social-feed` — легко сломается; юридически серый scrape.
 
-**Дальше:** вручную просмотреть историю кандидатов из research-чата → короткий allowlist в конфиге → **UI allowlist** (вкл/выкл авторов) позже. Не Telegram-userbot в этом слое.
+**Кандидаты allowlist:** короткий список никнеймов — в research-чате (ручная проверка истории). В MAP имена не дублируем. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
+
+**Дальше:** вручную просмотреть историю кандидатов → короткий allowlist в конфиге → **UI allowlist** (вкл/выкл авторов) позже. Не Telegram-userbot в этом слое. Не полный Pulse-парсер / React UI в этом слое.
 
 ---
 
@@ -414,7 +417,7 @@
 
 1. §2 — живы ли мы  
 2. §6 — что следующее  
-3. §7 — справка F; **§7N** — лента; **§7F** — polish ИИ; **§7P** — privacy (план); **§7G** — авто-watch  
+3. §7 — справка F; **§7N** — лента; **§7F** — polish ИИ; **§7S** — allowlist каналов; **§7P** — privacy (план); **§7G** — авто-watch  
 4. §4 — что уже ✅  
 
 Всё. Не надо сверять три документа.
