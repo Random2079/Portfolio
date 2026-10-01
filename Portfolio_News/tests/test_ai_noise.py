@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from portfolio_news.ai_noise import (
+    PROMPT_BATCH,
     extract_json_object,
     parse_classify_item,
     parse_classify_response,
@@ -57,6 +58,14 @@ class ParseResponseTests(unittest.TestCase):
     def test_extract_embedded(self):
         data = extract_json_object('blah {"label":"noise","reason":"x"} tail')
         self.assertEqual(data["label"], "noise")
+
+
+class PromptGeoTests(unittest.TestCase):
+    def test_prompt_keeps_ru_geopolitics_relevant(self):
+        # Light guard: do not auto-noise «макро без бумаги»; prefer market geo.
+        self.assertNotIn("макро-страшилка без бумаги", PROMPT_BATCH)
+        self.assertIn("геополитик", PROMPT_BATCH.lower())
+        self.assertIn("MOEX", PROMPT_BATCH)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import unittest
 
 from portfolio_news.sources.google_news_ru import _query_for
 from portfolio_news.sources.news_noise import (
+    is_geo_macro_keep_title,
     is_near_duplicate_title,
     is_noise_title,
     normalize_title_for_dup,
@@ -113,6 +114,41 @@ class NearDupTests(unittest.TestCase):
         )
 
 
+class GeoMacroKeepTests(unittest.TestCase):
+    def test_geo_title_not_noise(self):
+        titles = [
+            "Эскалация конфликта: рынки ждут новых санкций",
+            "Перемирие на Украине: реакция Мосбиржи",
+            "Удар ракеты по инфраструктуре — нефть растёт",
+            "НАТО обсуждает помощь Киеву",
+            "Мобилизация: что это значит для банковского сектора",
+        ]
+        for t in titles:
+            self.assertTrue(is_geo_macro_keep_title(t), msg=t)
+            self.assertFalse(is_noise_title(t), msg=t)
+
+    def test_profit_still_noise_even_with_geo_word(self):
+        # Hard spam wins: geo-keep does not rescue Profit / tech spam.
+        self.assertTrue(
+            is_noise_title("Идея в Профите по SBER: лонг от поддержки после санкций")
+        )
+        self.assertTrue(
+            is_noise_title("Технический анализ акций Газпром: война и уровни - Финам")
+        )
+
+    def test_geo_with_sber_attaches(self):
+        self.assertTrue(
+            title_matches_ticker(
+                "Санкции против банков: что будет со Сбербанком",
+                "SBER",
+                "Сбербанк",
+            )
+        )
+        self.assertFalse(
+            is_noise_title("Санкции против банков: что будет со Сбербанком")
+        )
+
+
 class ShortTickerAttachTests(unittest.TestCase):
     def test_short_ticker_needs_issuer_name(self):
         # Bare letter "t" must not attach Trump/macro SmartLab headlines.
@@ -126,6 +162,23 @@ class ShortTickerAttachTests(unittest.TestCase):
         self.assertTrue(
             title_matches_ticker(
                 "Т-Технологии определит цену допэмиссии",
+                "T",
+                "Т-Технологии",
+            )
+        )
+
+    def test_short_t_geopolitics_still_rejected(self):
+        # Geo-keep does not weaken short-ticker attach guard.
+        self.assertFalse(
+            title_matches_ticker(
+                "Эскалация войны и новые санкции США",
+                "T",
+                "Т-Технологии",
+            )
+        )
+        self.assertFalse(
+            title_matches_ticker(
+                "Trump threatens new tariffs on Europe",
                 "T",
                 "Т-Технологии",
             )

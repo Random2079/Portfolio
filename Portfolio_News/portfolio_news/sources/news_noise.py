@@ -2,6 +2,10 @@
 
 Cheap pre-AI layer: denylist + near-dup fingerprints so DeepSeek is not
 called on Profit/tech-analysis spam or same title with different site tails.
+
+Geopolitics/macro that moves RU markets after 2022 is **not** junk: see
+``is_geo_macro_keep_title`` — it shields titles from soft/accidental drops.
+Hard spam (Profit, tech analysis, betting, futures boards) still drops.
 """
 
 from __future__ import annotations
@@ -56,11 +60,33 @@ _PROFIT_SUFFIX = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
-# Title denylist: if any pattern matches → drop (case-insensitive).
+# RU-focused geopolitics / macro that can move MOEX / oil / banks.
+# Keep lean: override soft accidental drops only; not a second news ontology.
+_GEO_MACRO_KEEP = re.compile(
+    r"""
+    (?:
+        войн\w*
+      | эскалац\w*
+      | перемири\w*
+      | санкци\w*
+      | мобилизац\w*
+      | ракет\w*
+      | \bудар\w*
+      | \bнато\b
+      | \bnato\b
+      | \bмирн(?:ый|ого|ые|ых)\b
+      | \bмир\s+(?:в\s+)?украин
+      | \bмир\s+между
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Hard junk: always drop even if geo keywords overlap (Profit spam etc.).
 # Avoid bare «ставка/прогноз» — ловят ЦБ и отчёты.
 # FCF/капитализация — только dump-страницы SmartLab, не новости про отчёт.
 # Futures: «Фьючерс на …» / board codes — not corporate bond news.
-_TITLE_NOISE = re.compile(
+_TITLE_NOISE_HARD = re.compile(
     r"""
     (?:
         \bкэф(?:ы|а|ов)?\b
@@ -110,11 +136,28 @@ def google_query_exclusions(kind: str) -> str:
     return _GOOGLE_MINUS_EQUITY
 
 
+def is_geo_macro_keep_title(title: str) -> bool:
+    """True if title looks like RU-relevant geopolitics/macro (keep, not junk)."""
+    t = (title or "").strip()
+    if not t:
+        return False
+    return bool(_GEO_MACRO_KEEP.search(t))
+
+
 def is_noise_title(title: str) -> bool:
+    """True → drop before DB / AI.
+
+    Hard spam (Profit, betting, quote dumps, futures boards) always drops.
+    Geo/macro keep shields from soft/accidental denylist hits — not from Profit.
+    """
     t = (title or "").strip()
     if not t:
         return True
-    return bool(_TITLE_NOISE.search(t))
+    if _TITLE_NOISE_HARD.search(t):
+        return True
+    if is_geo_macro_keep_title(t):
+        return False
+    return False
 
 
 def normalize_title_for_dup(title: str) -> str:

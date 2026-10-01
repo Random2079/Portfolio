@@ -29,11 +29,15 @@ PROMPT_BATCH = """\
 Классифицируй каждую новость для инвестора с портфелем (тикер уже известен).
 
 Метки label:
-- noise — мусор / кликбейт / не про эмитента / макро-страшилка без бумаги / реклама
-- relevant — стоит глянуть (факт, отчёт, оферта, рейтинг, корпоративка по тикеру)
+- noise — мусор / кликбейт / реклама / тех.спам / ставка/форум / не рыночный шум
+- relevant — стоит глянуть: факт, отчёт, оферта, рейтинг, корпоративка по тикеру;
+  ИЛИ геополитика/макро по России (война, эскалация, мир/перемирие, санкции, удары),
+  если может двинуть рынок широко (MOEX / нефть / банки) — даже «без одной бумаги».
+  Не ставь noise только потому что «макро без тикера».
 - dup — смысл уже был / повтор той же истории другими словами
 
 urgency только если label=relevant: low | mid | high.
+Для рыночно-значимой геополитики по РФ предпочитай mid или high.
 reason — коротко по-русски, ≤120 символов. Без торговых советов.
 
 Верни ТОЛЬКО JSON:
@@ -118,12 +122,18 @@ def parse_classify_response(raw: str | dict) -> list[dict]:
     raise ValueError("expected items[] or label")
 
 
-def _call_deepseek(api_key: str, user_content: str, *, timeout: int = 90) -> str:
+def _call_deepseek(
+    api_key: str,
+    user_content: str,
+    *,
+    system: str | None = None,
+    timeout: int = 90,
+) -> str:
     payload = json.dumps(
         {
             "model": DEEPSEEK_MODEL,
             "messages": [
-                {"role": "system", "content": PROMPT_SYSTEM},
+                {"role": "system", "content": system or PROMPT_SYSTEM},
                 {"role": "user", "content": user_content},
             ],
             "temperature": 0.2,
