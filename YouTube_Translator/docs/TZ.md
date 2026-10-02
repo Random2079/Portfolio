@@ -33,6 +33,7 @@
 | 5 | Мягкий размер окна / Aero Snap | W | ✅ | Download 580×380 soft-lock; плеер/закладки — resize + Snap; clamp on-screen |
 | 6 | Split 📥 vs ✨ ИИ + Отмена | D6 | ✅ | 📥 = субы текущего URL без ИИ; ✨ = разбор текущего id; ✕ Отмена видна при busy |
 | 7 | Скачивание музыки (MP3) | M | ✅ | Кнопка на download и в плеере → `Music\YouTube_DL` |
+| **21** | Обои mp4+mp3 для Фона | M+ | ✅ | **🎞↓** → mp4+mp3 в `YouTube_DL` · [part 20](parts/20-overlay-wallpaper-download.md) |
 | 8 | ui_motion (микроанимации) | G | ✅ | Hover/press + BusyPulse на Скачать / ИИ |
 | 9 | Файлы `dist/` внутри приложения | IDEA-021 | 🟡 F0 | Список + проводник ✅ · delete/rename ⬜ · [part 19](parts/19-dist-files.md) |
 | 10 | Overlay музыка/mp4 поверх окон | IDEA-022 | 🟡 MVP | Кнопка **🎞 Фон** → `overlay_player.py`: каталог, play+визуал, opacity, click-through |
@@ -62,6 +63,7 @@
 | D6 — Split 📥 / ✨ + Отмена | ✅ | 📥 без ИИ; ✨ синхронизирует текущий id (карточка №1) |
 | W — Размер окна / Snap / clamp | ✅ | soft-lock download; не ломать `WS_THICKFRAME` |
 | M — Музыка MP3 | ✅ | download + player |
+| **M+ — Обои mp4+mp3** | **✅** | **🎞↓** · [part 20](parts/20-overlay-wallpaper-download.md) |
 | F — Закладки | ✅ | `bookmarks.json`, Chrome `--app=` fallback |
 | G — ui_motion | ✅ | `ui_motion.py` |
 | E — «Полный браузер-клон» | 🚫 | **не в scope** |
@@ -187,6 +189,7 @@ python Subtitle_App.py
 | 17 | [17-ui-backup.md](parts/17-ui-backup.md) | `backups/ui/`, `overlay_player.py` | **№19 / U** |
 | 18 | [18-overlay-auto-density.md](parts/18-overlay-auto-density.md) | `overlay_player.py` | **№20 / IDEA-025** |
 | 19 | [19-dist-files.md](parts/19-dist-files.md) | `Subtitle_App.py` | **№9 / IDEA-021 F0** |
+| 20 | [20-overlay-wallpaper-download.md](parts/20-overlay-wallpaper-download.md) | `Subtitle_App.py` | **№21 / M+** |
 
 ---
 

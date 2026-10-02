@@ -18,6 +18,7 @@
 | 17 | [UI backup / запас интерфейса](17-ui-backup.md) | `backups/ui/`, `overlay_player.py` | **№19 / U** | 🟡 |
 | 18 | [Авто-плотность Фона](18-overlay-auto-density.md) | `overlay_player.py` | **№20 / IDEA-025** | ⬜ |
 | 19 | [Файлы dist](19-dist-files.md) | `Subtitle_App.py` | **№9 / IDEA-021** | 🟡 F0 |
+| 20 | [Обои mp4+mp3](20-overlay-wallpaper-download.md) | `Subtitle_App.py` | M+ / 022 feed | ✅ |
 
 Очередь/план слоя: [`../../MAP.md`](../../MAP.md).
 

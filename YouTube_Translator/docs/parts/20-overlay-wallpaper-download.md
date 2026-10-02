@@ -1,0 +1,44 @@
+# 🎞↓ Обои mp4+mp3 в YouTube_DL
+
+| | |
+|---|---|
+| **Код** | [`../../Subtitle_App.py`](../../Subtitle_App.py) — `download_overlay_media`, кнопки **🎞↓** |
+| **Слой** | M+ / IDEA-022 feed |
+| **Статус** | ✅ MVP |
+| **Навигация** | [INDEX](INDEX.md) · [TZ](../TZ.md) · [MAP](../../MAP.md) · [музыка MP3](10-music-download.md) · [Фон](12-overlay-music.md) |
+
+---
+
+## Зачем
+
+Каталог для **🎞 Фон** наполняли вручную (`_скачать_yt.bat` / чат). Теперь: вставил URL в SR → **🎞↓** → `mp4`+`mp3` с одним stem в `Music\YouTube_DL`.
+
+## Поведение
+
+| Где | Кнопка |
+|-----|--------|
+| Экран скачивания | **🎞↓** — URL из поля |
+| Плеер | **🎞↓** — текущий ролик (WebView / folder id) |
+
+Пайплайн (как bat):
+
+1. `yt-dlp --impersonate Chrome-136` + cookies (`~/.subtitle_ripper/` или `Music\YouTube_DL\www.youtube.com_cookies.txt`)
+2. mp4: `-f bv*+ba/b` → merge; при «Only images» — retry `299+140/…`
+3. mp3: `-x --audio-format mp3` с тем же `-o … [%(id)s].%(ext)s`
+
+Отмена — ✕ при busy (`overlay` / `overlay_player`).
+
+Off impersonate: `SUBTITLE_RIPPER_IMPERSONATE=0`.
+
+## Не в scope (этот слой)
+
+- Автопоиск AMV по названию трека / «копилка» без URL
+- Замена ↓ MP3 (отдельная кнопка остаётся)
+
+## Проверка
+
+```powershell
+cd YouTube_Translator
+python -m pytest test_overlay_download.py -q
+# UI: URL → 🎞↓ → пара файлов в Music\YouTube_DL → 🎞 Фон играет
+```

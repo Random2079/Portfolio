@@ -5,8 +5,8 @@
 
 | | |
 |---|---|
-| **Где мы** | IDEA-025 A0–A3 ✅ · план B0 в part 18. **YT adblock** в плеере (interceptor + skip-JS). |
-| **Фокус** | Смоук: ролик с рекламой в плеере SR · или **025 B0** по запросу |
+| **Где мы** | IDEA-025 A0–A3 ✅ · план B0 в part 18. **YT adblock** в плеере. **🎞↓ обои mp4+mp3** ✅ (part 20). |
+| **Фокус** | Смоук 🎞↓ · или **025 B0** по запросу |
 | **Код scope** | `overlay_player.py` (025); shell UI — `Subtitle_App.py` / `ui_motion.py` |
 
 ---
@@ -42,6 +42,7 @@
 | 8 | 025 B1 кривая/prefs по тесту | ⬜ если B0 мало |
 | 9 | 025 B2 dxcam/DXGI | ⬜ только если B0+B1 мало под игрой |
 | 10 | 021 F1 delete/rename | ⬜ |
+| — | **🎞↓ обои mp4+mp3 → YouTube_DL** | ✅ part 20 |
 | — | YT плеер: блок рекламы (URL filter + skip JS) | ✅ |
 | — | Дизайн тема + fade+center | ✅ |
 | — | SMTC | ⏸ |

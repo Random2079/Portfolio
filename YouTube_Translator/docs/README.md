@@ -29,5 +29,6 @@
 | 17 UI backup / запас | `backups/ui/`, контракт UX · карточка №19 |
 | 18 Авто-плотность (IDEA-025) | `overlay_player.py` · карточка №20 · A0–A2 |
 | 19 Файлы dist (IDEA-021) | `Subtitle_App.py` · карточка №9 · F0 |
+| 20 Обои mp4+mp3 (M+) | `Subtitle_App.py` · кнопка **🎞↓** · карточка №21 |
 
 Вход для человека (быстрый старт): [../README.md](../README.md). Очередь — [MAP](../MAP.md).
