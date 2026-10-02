@@ -4,7 +4,7 @@
 |---|---|
 | **Код** | [`../../Subtitle_App.py`](../../Subtitle_App.py) (`download_overlay_media`, fmt) · [`../../overlay_player.py`](../../overlay_player.py) (`scan_media`, список) |
 | **Слой** | IDEA-022 catalog / M+ follow-up |
-| **Статус** | ⬜ план · **C0 следующий** |
+| **Статус** | ✅ C0 · ✅ C1 · ⬜ C2 следующий |
 | **Канон очереди** | [`../../MAP.md`](../../MAP.md) |
 | **Навигация** | [INDEX](INDEX.md) · [TZ](../TZ.md) · [part 20 🎞↓](20-overlay-wallpaper-download.md) · [Фон 12](12-overlay-music.md) |
 
@@ -39,34 +39,28 @@
 
 ## Чанки (лестница)
 
-### C0 — Качество 🎞↓ → max ⬜ **СТАРТ**
+### C0 — Качество 🎞↓ → max ✅
 
-**Делаем**
-- Уточнить `-f` под max: например  
-  `bestvideo*[height<=2160]+bestaudio/bestvideo*+bestaudio/best`  
-  или `bv*+ba/b` + `--format-sort res,fps,vbr,abr` / `+size` по политике yt-dlp.
-- После качки (или в статусе): кратко что скачалось (height / ext) — хотя бы в лог/status.
-- Тест: `test_overlay_download.py` обновить под новый fmt.
-- Обновить [part 20](20-overlay-wallpaper-download.md) одной строкой «канон max».
+**Сделано**
+- `-f bestvideo*[height<=2160]+bestaudio/bestvideo*+bestaudio/best` + `-S res,fps,vbr,abr`
+- DASH fallback с тем же max
+- После качки: статус / return с `WxH · filename` (ffprobe)
+- Тест: `test_overlay_download.py`; смоук Alan Walker Faded → **1920x1080**
 
 **Не делаем:** UI каталога, сортировка.
 
-**Смоук:** 🎞↓ → файл; в свойствах / `ffprobe` или статус — высокое разрешение (не 360p по ошибке).
+---
+
+### C1 — Порядок: дата старый → новый ✅
+
+**Сделано**
+- `scan_media(..., sort=)` — `date_asc` (канон) / `date_desc` / `name`
+- Prefs `catalog_sort` (дефолт `date_asc`); `_reload_list` читает prefs
+- Тест: `test_scan_media_sort.py` (mtime + dedupe)
 
 ---
 
-### C1 — Порядок: дата старый → новый ⬜
-
-**Делаем**
-- `scan_media` / финальный sort: `st_mtime` (или `st_ctime` если mtime врёт) **ascending** = старые сверху.
-- Prefs опц.: `catalog_sort = date_asc | date_desc | name` (дефолт **date_asc**).
-- Не ломать dedupe по `[id]`.
-
-**Смоук:** два файла разной даты — старый выше нового.
-
----
-
-### C2 — Каталог: карточки пары + превью + название ⬜
+### C2 — Каталог: карточки пары + превью + название ⬜ **СТАРТ**
 
 **Зачем:** не «проводник», а медиатека Фона.
 

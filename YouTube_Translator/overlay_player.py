@@ -397,6 +397,7 @@ _DEFAULT_PREFS = {
     "auto_density_pct": 45,
     "auto_density_idle_sec": 4,
     "auto_density_adapt_sec": 1,
+    "catalog_sort": "date_asc",  # date_asc | date_desc | name
     "hotkeys": dict(_DEFAULT_HOTKEYS),
 }
 
@@ -624,6 +625,10 @@ def load_overlay_prefs() -> dict:
             data["auto_density_idle_sec"] = max(1, min(120, int(raw["auto_density_idle_sec"])))
         if "auto_density_adapt_sec" in raw:
             data["auto_density_adapt_sec"] = max(1, min(60, int(raw["auto_density_adapt_sec"])))
+        if "catalog_sort" in raw:
+            cs = str(raw.get("catalog_sort") or "date_asc").strip().lower()
+            if cs in ("date_asc", "date_desc", "name"):
+                data["catalog_sort"] = cs
         hk = raw.get("hotkeys")
         if isinstance(hk, dict):
             for key, default in _DEFAULT_HOTKEYS.items():
@@ -682,14 +687,17 @@ def default_music_dirs() -> list[str]:
     return out
 
 
-def scan_media(folder: str) -> list[Path]:
-    """Список треков без дублей: один stem → видео важнее; тот же YouTube [id] → одна запись."""
+def scan_media(folder: str, *, sort: str = "date_asc") -> list[Path]:
+    """Список треков без дублей: один stem → видео важнее; тот же YouTube [id] → одна запись.
+
+    sort: date_asc (старые сверху) | date_desc | name
+    """
     root = Path(folder)
     if not root.is_dir():
         return []
     by_key: dict[str, Path] = {}
     try:
-        entries = sorted(root.iterdir(), key=lambda p: p.name.lower())
+        entries = list(root.iterdir())
     except OSError:
         return []
 
@@ -700,14 +708,18 @@ def scan_media(folder: str) -> list[Path]:
             return cur
         if prev_vid and not cur_vid:
             return prev
-        # оба видео или оба аудио — более длинное имя часто «полное» (Gojo x Miku),
-        # но для id предпочитаем уже выбранное видео; иначе больший файл
         try:
             if cur.stat().st_size > prev.stat().st_size:
                 return cur
         except OSError:
             pass
         return prev
+
+    def _mtime(p: Path) -> float:
+        try:
+            return float(p.stat().st_mtime)
+        except OSError:
+            return 0.0
 
     for entry in entries:
         if not entry.is_file() or entry.suffix.lower() not in MEDIA_EXTS:
@@ -722,7 +734,15 @@ def scan_media(folder: str) -> list[Path]:
             by_key[key] = entry
         else:
             by_key[key] = _prefer(prev, entry)
-    return sorted(by_key.values(), key=lambda p: p.name.lower())
+
+    items = list(by_key.values())
+    mode = (sort or "date_asc").strip().lower()
+    if mode == "name":
+        return sorted(items, key=lambda p: p.name.lower())
+    if mode == "date_desc":
+        return sorted(items, key=_mtime, reverse=True)
+    # date_asc — канон C1: старый → новый
+    return sorted(items, key=_mtime)
 
 
 def resolve_play_path(path: Path) -> Path:
@@ -1796,7 +1816,8 @@ class OverlayPlayerWindow(QWidget):
     def _reload_list(self) -> None:
         self.folder_label.setText(self._folder)
         self.list.clear()
-        files = scan_media(self._folder)
+        sort = str(self._prefs.get("catalog_sort") or "date_asc")
+        files = scan_media(self._folder, sort=sort)
         for path in files:
             # Показываем stem без расширения и без [youtubeId]
             title = _clean_media_title(path.stem)

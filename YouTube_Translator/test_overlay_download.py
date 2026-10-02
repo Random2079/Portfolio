@@ -27,6 +27,8 @@ class OverlayDownloadCmdTests(unittest.TestCase):
         self.assertIn("--merge-output-format", cmd)
         self.assertIn("mp4", cmd)
         self.assertIn(app._OVERLAY_FMT_DEFAULT, cmd)
+        self.assertIn("-S", cmd)
+        self.assertIn(app._OVERLAY_FMT_SORT, cmd)
         self.assertIn("dQw4w9WgXcQ", joined)
 
     def test_video_cmd_dash_fmt(self) -> None:
@@ -47,7 +49,16 @@ class OverlayDownloadCmdTests(unittest.TestCase):
             r"C:\out",
         )
         self.assertIn("-x", cmd)
+        self.assertIn("--audio-format", cmd)
         self.assertIn("mp3", cmd)
+        self.assertIn("--audio-quality", cmd)
+        aq = cmd.index("--audio-quality")
+        self.assertEqual(cmd[aq + 1], "0")
+
+    def test_default_fmt_prefers_max_res(self) -> None:
+        self.assertIn("bestvideo", app._OVERLAY_FMT_DEFAULT)
+        self.assertIn("height<=2160", app._OVERLAY_FMT_DEFAULT)
+        self.assertEqual(app._OVERLAY_FMT_SORT, "res,fps,vbr,abr")
 
     def test_dash_retry_heuristic(self) -> None:
         self.assertTrue(app._ytdlp_stderr_suggests_dash_retry("Only images available"))

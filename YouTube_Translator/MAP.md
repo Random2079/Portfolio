@@ -5,9 +5,9 @@
 
 | | |
 |---|---|
-| **Где мы** | Фокус: **Фон catalog C0–C3** ([part 21](docs/parts/21-overlay-catalog-quality.md)). Наушник multi-tap — **⏸**. |
-| **Фокус** | **`делаем C0`** — max quality 🎞↓ · потом C1 дата · C2 карточки · C3 random |
-| **Код scope** | `Subtitle_App.py` (C0) · `overlay_player.py` (C1–C3) |
+| **Где мы** | Catalog: **C0+C1 ✅** · дальше **C2** карточки ([part 21](docs/parts/21-overlay-catalog-quality.md)). Наушник multi-tap — **⏸**. |
+| **Фокус** | **`делаем C2`** — карточки пары + thumb · потом C3 random |
+| **Код scope** | `overlay_player.py` (C2–C3) · `Subtitle_App.py` (C0 ✅) |
 
 ---
 
@@ -32,9 +32,9 @@
 
 | # | Что | Статус |
 |---|-----|--------|
-| **1** | **C0** 🎞↓ max quality (+ статус/лог факта) | ⬜ **следующий** |
-| **2** | **C1** каталог: сортировка дата старый→новый | ⬜ |
-| **3** | **C2** каталог: карточки пары mp4/mp3 + thumb + title | ⬜ |
+| **1** | **C0** 🎞↓ max quality (+ статус/лог факта) | ✅ |
+| **2** | **C1** каталог: сортировка дата старый→новый | ✅ |
+| **3** | **C2** каталог: карточки пары mp4/mp3 + thumb + title | ⬜ **следующий** |
 | **4** | **C3** random / shuffle | ⏸ после C1–C2 |
 | — | Наушник multi-tap + SMTC | ⏸ (новые наушники) |
 | — | 025 B0 авто-плотность комфорт | ⏸ |
@@ -48,11 +48,11 @@
 
 ## Аудит качества 🎞↓ (кратко)
 
-| | Сейчас | Цель C0 |
+| | Сейчас | Цель |
 |--|--------|---------|
-| Video | `bv*+ba/b` (+ DASH retry) | явный max + format-sort; не ниже текущего |
+| Video | `bestvideo*[height<=2160]+bestaudio` + `-S res,fps,vbr,abr` | ✅ C0 |
 | Audio mp3 | `--audio-quality 0` | оставить |
-| Список Фон | алфавит | C1: mtime asc |
+| Список Фон | `catalog_sort=date_asc` (mtime) | ✅ C1 |
 | UI | QList текст | C2: пара + превью |
 
 ---

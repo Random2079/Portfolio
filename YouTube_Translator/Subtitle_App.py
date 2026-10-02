@@ -38,6 +38,7 @@ import time
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QEvent, QObject, QSize, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import (
@@ -1163,15 +1164,25 @@ def _overlay_media_out_tmpl(out_dir: str) -> str:
     return os.path.join(out_dir, "%(title).200B [%(id)s].%(ext)s")
 
 
-# Обычный merge; fallback — явный DASH (MV «Only images» / storyboard-only progressive).
-_OVERLAY_FMT_DEFAULT = "bv*+ba/b"
-_OVERLAY_FMT_DASH = "299+140/298+140/137+140/bestvideo*+bestaudio/best"
+# Max quality: явный bestvideo+bestaudio + сортировка по разрешению/fps.
+# height<=2160 — потолок 4K (не тащим 8K зря); fallback без лимита.
+_OVERLAY_FMT_DEFAULT = (
+    "bestvideo*[height<=2160]+bestaudio/"
+    "bestvideo*+bestaudio/best"
+)
+_OVERLAY_FMT_SORT = "res,fps,vbr,abr"
+# Fallback — явный DASH (MV «Only images» / storyboard-only progressive).
+_OVERLAY_FMT_DASH = (
+    "299+140/298+140/137+140/"
+    "bestvideo*[height<=2160]+bestaudio/"
+    "bestvideo*+bestaudio/best"
+)
 
 
 def build_overlay_video_ytdlp_cmd(
     url: str, out_dir: str, *, fmt: str = _OVERLAY_FMT_DEFAULT
 ) -> list[str]:
-    """mp4 для 🎞 Фон (как _скачать_yt.bat): impersonate + merge."""
+    """mp4 для 🎞 Фон: max res/fps + merge в mp4."""
     tmpl = _overlay_media_out_tmpl(out_dir)
     return ytdlp_argv(
         *_ytdlp_impersonate_args(),
@@ -1182,6 +1193,8 @@ def build_overlay_video_ytdlp_cmd(
         "8",
         "-f",
         fmt,
+        "-S",
+        _OVERLAY_FMT_SORT,
         "--merge-output-format",
         "mp4",
         "-o",
@@ -2123,6 +2136,79 @@ def _ytdlp_stderr_suggests_dash_retry(text: str) -> bool:
     return any(n in low for n in needles)
 
 
+def _find_overlay_mp4_for_id(out_dir: str, video_id: str) -> Path | None:
+    """Свежий mp4 с [id] в имени (после 🎞↓)."""
+    root = Path(out_dir)
+    if not root.is_dir() or not video_id:
+        return None
+    needle = f"[{video_id}]"
+    matches: list[Path] = []
+    try:
+        for p in root.iterdir():
+            if (
+                p.is_file()
+                and p.suffix.lower() in {".mp4", ".webm", ".mkv", ".mov", ".m4v"}
+                and needle in p.name
+            ):
+                matches.append(p)
+    except OSError:
+        return None
+    if not matches:
+        return None
+    matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return matches[0]
+
+
+def _ffprobe_video_wh(path: Path) -> tuple[int, int] | None:
+    """(width, height) или None."""
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe or not path.is_file():
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=p=0:s=x",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            creationflags=0x08000000 if os.name == "nt" else 0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    raw = (proc.stdout or "").strip()
+    if "x" not in raw:
+        return None
+    try:
+        w_s, h_s = raw.split("x", 1)
+        w, h = int(w_s), int(h_s)
+        if w > 0 and h > 0:
+            return w, h
+    except ValueError:
+        return None
+    return None
+
+
+def _overlay_quality_line(out_dir: str, video_id: str) -> str:
+    """Короткая строка для статуса: 1920x1080 · name.mp4."""
+    mp4 = _find_overlay_mp4_for_id(out_dir, video_id)
+    if mp4 is None:
+        return ""
+    wh = _ffprobe_video_wh(mp4)
+    if wh:
+        return f"{wh[0]}x{wh[1]} · {mp4.name}"
+    return mp4.name
+
+
 def download_overlay_media(
     url: str,
     status_cb: StatusCb | None = None,
@@ -2132,8 +2218,10 @@ def download_overlay_media(
     """
     Скачивает mp4 + mp3 в Music/YouTube_DL для overlay «Фон».
     Тот же stem `[id]` — overlay_player играет mp4 рядом с mp3.
+    При успехе второй элемент: путь out_dir; в status — разрешение mp4.
     """
-    if not get_video_id(url):
+    vid = get_video_id(url)
+    if not vid:
         return False, "Не похоже на YouTube-ссылку — проверь URL"
 
     if shutil.which("ffmpeg") is None:
@@ -2156,7 +2244,7 @@ def download_overlay_media(
             cancel_event=cancel_event,
         )
 
-    _emit(status_cb, "Статус: скачиваю обои (mp4)…")
+    _emit(status_cb, "Статус: скачиваю обои (mp4 max)…")
     try:
         result = _run(
             build_overlay_video_ytdlp_cmd(url, target),
@@ -2174,7 +2262,7 @@ def download_overlay_media(
     if result.returncode != 0:
         details = (result.stderr or result.stdout or "").strip()
         if _ytdlp_stderr_suggests_dash_retry(details):
-            _emit(status_cb, "Статус: mp4 retry (DASH 299+140)…")
+            _emit(status_cb, "Статус: mp4 retry (DASH max)…")
             try:
                 result = _run(
                     build_overlay_video_ytdlp_cmd(
@@ -2195,6 +2283,10 @@ def download_overlay_media(
     if cancel_event is not None and cancel_event.is_set():
         return False, "Отменено пользователем"
 
+    qline = _overlay_quality_line(target, vid)
+    if qline:
+        _emit(status_cb, f"Статус: mp4 готов · {qline}")
+
     _emit(status_cb, "Статус: скачиваю обои (mp3)…")
     try:
         result = _run(
@@ -2214,6 +2306,9 @@ def download_overlay_media(
         details = (result.stderr or result.stdout or "").strip()
         return False, details or f"yt-dlp mp3 код {result.returncode}"
 
+    if qline:
+        _emit(status_cb, f"Статус: обои готовы · {qline}")
+        return True, f"{target}\n{qline}"
     return True, target
 
 

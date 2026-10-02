@@ -23,7 +23,7 @@
 Пайплайн (как bat):
 
 1. `yt-dlp --impersonate Chrome-136` + cookies (`~/.subtitle_ripper/` или `Music\YouTube_DL\www.youtube.com_cookies.txt`)
-2. mp4: `-f bv*+ba/b` → merge (**цель max** — см. [part 21 C0](21-overlay-catalog-quality.md)); при «Only images» — retry `299+140/…`
+2. mp4: **канон max** `bestvideo*[height<=2160]+bestaudio/…` + `-S res,fps,vbr,abr` ([part 21 C0](21-overlay-catalog-quality.md)); при «Only images» — retry DASH `299+140/…`
 3. mp3: `-x --audio-format mp3 --audio-quality 0` (уже max) с тем же `-o … [%(id)s].%(ext)s`
 
 Отмена — ✕ при busy (`overlay` / `overlay_player`).
