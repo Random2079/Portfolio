@@ -26,7 +26,8 @@ PROMPT_SYSTEM = (
 )
 
 PROMPT_BATCH = """\
-Классифицируй каждую новость для инвестора с портфелем (тикер уже известен).
+Классифицируй каждую новость для инвестора с портфелем.
+Дан только заголовок, без текста статьи: не разгоняй urgency из кликбейта.
 
 Метки label:
 - noise — мусор / кликбейт / реклама / тех.спам / ставка/форум / не рыночный шум
@@ -37,7 +38,11 @@ PROMPT_BATCH = """\
 - dup — смысл уже был / повтор той же истории другими словами
 
 urgency только если label=relevant: low | mid | high.
-Для рыночно-значимой геополитики по РФ предпочитай mid или high.
+high — только жёсткое событие из заголовка: оферта/техдефолт/дефолт/ковенанты,
+суд/иск/банкротство, допэмиссия/SPO, санкции/налог/регуляторный удар прямо по тикеру/сектору.
+Отчётность, дивиденды, размещение, макро/гео без явного удара — обычно mid/low, не high.
+Слова «срочно», «обвал», «ракета», «важно» сами по себе не high.
+Для рыночно-значимой геополитики по РФ предпочитай mid; high только при явной связи с рынком/сектором.
 reason — коротко по-русски, ≤120 символов. Без торговых советов.
 
 Верни ТОЛЬКО JSON:
@@ -47,9 +52,60 @@ reason — коротко по-русски, ≤120 символов. Без т�
   ]
 }}
 
+Примеры:
+- title="Лукойл опубликовал отчёт МСФО" → relevant, mid
+- title="Эмитент допустил техдефолт по облигациям" → relevant, high
+- title="Акции могут вырасти на 30%, идея аналитика" → noise, low/null
+- title="Суд взыскал с эмитента крупный долг" → relevant, high
+
 Новости:
 {payload}
 """
+
+_HIGH_EVENT_RE = re.compile(
+    r"\b("
+    r"тех\s*дефолт|техническ\w*\s+дефолт|дефолт|ковенант\w*|оферт\w*|"
+    r"суд\w*|иск\w*|банкрот\w*|реструктуризац\w*|"
+    r"допэмисс\w*|spo|размыти\w*|"
+    r"санкци\w*|замороз\w*|арест\w*|"
+    r"налог\w*|пошлин\w*|тариф\w*|цб|ключев\w+\s+ставк\w*"
+    r")\b",
+    re.I,
+)
+
+_CLICKBAIT_HIGH_RE = re.compile(
+    r"\b(срочно|молния|ракета|обвал|паника|шок|важно|пора брать|идея|таргет)\b",
+    re.I,
+)
+
+
+def high_allowed_from_title(title: str, *, kind: str = "") -> bool:
+    """Guardrail: title-only F-A must not put `high` on pure clickbait."""
+    t = (title or "").strip()
+    if not t:
+        return False
+    if _HIGH_EVENT_RE.search(t):
+        return True
+    if _CLICKBAIT_HIGH_RE.search(t):
+        return False
+    return False
+
+
+def calibrate_urgency(row: dict, item: dict) -> dict:
+    """Post-model guard so News feed urgency matches F-B's stricter semantics."""
+    if row.get("label") != "relevant" or row.get("urgency") != "high":
+        return row
+    if high_allowed_from_title(
+        str(item.get("title") or ""),
+        kind=str(item.get("kind") or ""),
+    ):
+        return row
+    out = dict(row)
+    out["urgency"] = "mid"
+    reason = str(out.get("reason") or "").strip()
+    suffix = "high снят: в заголовке нет жёсткого события"
+    out["reason"] = (reason + "; " + suffix if reason else suffix)[:120]
+    return out
 
 
 def _now_local() -> datetime:
@@ -171,7 +227,7 @@ def classify_news_batch(
     *,
     model: str = DEEPSEEK_MODEL,
 ) -> list[dict]:
-    """Classify a batch. Each item: {id, ticker, title, source?}.
+    """Classify a batch. Each item: {id, ticker, title, source?, kind?, name?, role?}.
 
     Returns list of {id, label, urgency, reason, model, as_of}.
     """
@@ -187,8 +243,21 @@ def classify_news_batch(
         ticker = str(it.get("ticker") or "").strip()
         title = str(it.get("title") or "").strip()
         source = str(it.get("source") or "").strip()
+        kind = str(it.get("kind") or "").strip()
+        name = str(it.get("name") or "").strip()
+        role = str(it.get("role") or "").strip()
         lines.append(
-            f"- id={nid} ticker={ticker} source={source or '—'} title={title}"
+            " ".join(
+                [
+                    f"- id={nid}",
+                    f"ticker={ticker}",
+                    f"kind={kind or '—'}",
+                    f"name={name or '—'}",
+                    f"role={role or '—'}",
+                    f"source={source or '—'}",
+                    f"title={title}",
+                ]
+            )
         )
     user = PROMPT_BATCH.format(payload="\n".join(lines))
     raw = _call_deepseek(key, user)
@@ -201,7 +270,7 @@ def classify_news_batch(
         if nid not in by_id:
             log.warning("ai_noise: missing id=%s in model response", nid)
             continue
-        row = dict(by_id[nid])
+        row = calibrate_urgency(dict(by_id[nid]), it)
         row["model"] = model
         row["as_of"] = as_of
         out.append(row)
@@ -215,10 +284,23 @@ def classify_news_item(
     ticker: str,
     title: str,
     source: str = "",
+    kind: str = "",
+    name: str = "",
+    role: str = "",
 ) -> dict:
     rows = classify_news_batch(
         api_key,
-        [{"id": news_id, "ticker": ticker, "title": title, "source": source}],
+        [
+            {
+                "id": news_id,
+                "ticker": ticker,
+                "title": title,
+                "source": source,
+                "kind": kind,
+                "name": name,
+                "role": role,
+            }
+        ],
     )
     if not rows:
         raise RuntimeError("модель не вернула классификацию")

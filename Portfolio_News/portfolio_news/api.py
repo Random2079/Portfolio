@@ -554,6 +554,21 @@ def _news_ai_map(db: Session, ids: list[int]) -> dict[int, NewsAiCache]:
 
 
 def _news_to_out(row: NewsItem, cache: Optional[NewsAiCache] = None) -> NewsOut:
+    ai_label = cache.label if cache and cache.label else None
+    ai_urgency = cache.urgency if cache else None
+    ai_reason = cache.reason if cache and cache.reason else None
+    # Old cache rows may contain pre-§7F `high`; guard display too, not only new writes.
+    if ai_label == "relevant" and ai_urgency == "high":
+        from portfolio_news.ai_noise import high_allowed_from_title
+
+        if not high_allowed_from_title(row.title or ""):
+            ai_urgency = "mid"
+            suffix = "high снят: в заголовке нет жёсткого события"
+            ai_reason = (
+                (str(ai_reason or "").strip() + "; " + suffix)
+                if ai_reason
+                else suffix
+            )[:120]
     return NewsOut(
         id=row.id,
         ticker_id=row.ticker_id,
@@ -563,9 +578,9 @@ def _news_to_out(row: NewsItem, cache: Optional[NewsAiCache] = None) -> NewsOut:
         published_at=row.published_at,
         created_at=row.created_at,
         notified=row.notified,
-        ai_label=(cache.label if cache and cache.label else None),
-        ai_urgency=(cache.urgency if cache else None),
-        ai_reason=(cache.reason if cache and cache.reason else None),
+        ai_label=ai_label,
+        ai_urgency=ai_urgency,
+        ai_reason=ai_reason,
         ai_model=(cache.model if cache and cache.model else None),
         ai_as_of=(cache.as_of if cache else None),
     )
@@ -688,15 +703,38 @@ def news_ai_classify(
             ok=True, classified=len(auto_dup_ids), skipped=skipped, ids=list(auto_dup_ids)
         )
 
-    payload = [
-        {
-            "id": n.id,
-            "ticker": n.ticker_id,
-            "title": n.title,
-            "source": n.source or "",
-        }
-        for n in batch
-    ]
+    tickers = {
+        t.id: t
+        for t in db.scalars(
+            select(Ticker).where(Ticker.id.in_({n.ticker_id for n in batch}))
+        ).all()
+    }
+
+    def _role(t: Optional[Ticker]) -> str:
+        if t is None:
+            return ""
+        kind = (t.kind or "").strip().lower()
+        cat = (t.category or "").strip()
+        if kind == "bond":
+            return f"bond · {cat}" if cat else "bond"
+        if kind == "fund":
+            return f"fund · {cat}" if cat else "fund"
+        return cat or "equity"
+
+    payload = []
+    for n in batch:
+        t = tickers.get(n.ticker_id)
+        payload.append(
+            {
+                "id": n.id,
+                "ticker": n.ticker_id,
+                "title": n.title,
+                "source": n.source or "",
+                "kind": (t.kind if t else "") or "",
+                "name": (t.name if t else "") or "",
+                "role": _role(t),
+            }
+        )
     try:
         results = classify_news_batch(api_key, payload)
     except Exception as exc:  # noqa: BLE001 — surface to UI

@@ -6,7 +6,9 @@ import unittest
 
 from portfolio_news.ai_noise import (
     PROMPT_BATCH,
+    calibrate_urgency,
     extract_json_object,
+    high_allowed_from_title,
     parse_classify_item,
     parse_classify_response,
 )
@@ -66,6 +68,24 @@ class PromptGeoTests(unittest.TestCase):
         self.assertNotIn("макро-страшилка без бумаги", PROMPT_BATCH)
         self.assertIn("геополитик", PROMPT_BATCH.lower())
         self.assertIn("MOEX", PROMPT_BATCH)
+        self.assertIn("Слова «срочно»", PROMPT_BATCH)
+
+
+class UrgencyCalibrationTests(unittest.TestCase):
+    def test_clickbait_high_demoted_to_mid(self):
+        row = {"label": "relevant", "urgency": "high", "reason": "срочно"}
+        out = calibrate_urgency(row, {"title": "Срочно: акция может вырасти"})
+        self.assertEqual(out["urgency"], "mid")
+        self.assertIn("high снят", out["reason"])
+
+    def test_hard_event_keeps_high(self):
+        row = {"label": "relevant", "urgency": "high", "reason": "суд"}
+        out = calibrate_urgency(row, {"title": "Суд взыскал с эмитента крупный долг"})
+        self.assertEqual(out["urgency"], "high")
+
+    def test_high_guard_patterns(self):
+        self.assertTrue(high_allowed_from_title("Облигации допустили технический дефолт"))
+        self.assertFalse(high_allowed_from_title("Важная идея аналитика по акциям"))
 
 
 if __name__ == "__main__":

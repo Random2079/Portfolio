@@ -194,12 +194,12 @@
 
 | # | Что |
 |---|-----|
-| 1 | `kind` (stock/bond/fund) в промпт |
-| 2 | имя эмитента |
-| 3 | 1 строка роли (ядро AAA / хвост ВДО / акция) |
+| 1 | ✅ `kind` (stock/bond/fund) в промпт |
+| 2 | ✅ имя эмитента |
+| 3 | ✅ 1 строка роли (category / bond / fund / equity) |
 | 4 | 3–4 few-shot (`noise` / `relevant` / `dup`) |
 | 5 | явный `dup` (тот же event / смысл за 48ч) |
-| 6 | не ставить `high` только из кликбейта «срочно» |
+| 6 | ✅ не ставить `high` только из кликбейта «срочно» — post-model guard demote `high→mid`, если в заголовке нет жёсткого события |
 | позже | snippet 1–2 предложения (title-only врёт) |
 
 ### `ai_ticker.py` — чего не хватает
@@ -214,8 +214,8 @@
 
 ### Порядок допила (когда «делаем F-AI»)
 
-1. `kind` + name + bucket (роль) в `ai_noise`  
-2. few-shot  
+1. ✅ `kind` + name + bucket (роль) в `ai_noise` + строгий `high` guard  
+2. few-shot / dup calibration  
 3. holding + bond/equity-ветка в `ai_ticker`  
 
 ### DeepSeek usage meter — ✅ (2026-10-02)
