@@ -322,6 +322,9 @@ _HOTKEY_MEDIA_PREV = 0x0233
 VK_MEDIA_NEXT_TRACK = 0xB0
 VK_MEDIA_PREV_TRACK = 0xB1
 VK_MEDIA_PLAY_PAUSE = 0xB3
+# Одна кнопка наушника: 1× play/pause · 2× next · 3× prev
+_MEDIA_TAP_WINDOW_MS = 480
+_MEDIA_TAP_MAX = 3
 _SEEK_MS = 5000
 _VOLUME_STEP = 5
 _OPACITY_STEP = 5
@@ -1440,6 +1443,12 @@ class OverlayPlayerWindow(QWidget):
         self._hotkey_thread_id: int | None = None
         self._last_hk_id: int | None = None
         self._last_hk_t: float = 0.0
+        self._media_tap_count = 0
+        self._last_headset_edge_t = 0.0  # SMTC+RegisterHotKey дублируют одно нажатие
+        self._media_tap_timer = QTimer(self)
+        self._media_tap_timer.setSingleShot(True)
+        self._media_tap_timer.timeout.connect(self._flush_media_taps)
+        self._smtc = None  # OverlaySmtc | None — лениво
         self._player: QMediaPlayer | None = None
         self._audio: QAudioOutput | None = None
         self.hotkey_pressed.connect(self._on_global_hotkey)
@@ -2478,8 +2487,10 @@ class OverlayPlayerWindow(QWidget):
                 self._apply_catalog_opacity()
             self._apply_output_volume()
             if not was:
-                # Подцепить VK_MEDIA_* пока играет
+                # Подцепить VK_MEDIA_* + SMTC пока играет
                 QTimer.singleShot(0, self._register_hotkeys)
+                QTimer.singleShot(0, self._ensure_smtc)
+            self._sync_smtc_playing(True)
             self._arm_auto_density_timer()
             if self._auto_density_armed and self._click_through:
                 self._start_auto_density_adapt()
@@ -2488,6 +2499,7 @@ class OverlayPlayerWindow(QWidget):
             if state == QMediaPlayer.PlaybackState.StoppedState:
                 self.pulse.stop()
                 self._playing = False
+                self._sync_smtc_playing(False)
                 # A2: Stopped при смене трека — не снимать авто-сквозь / не мигать 100%
                 keep_auto_ct = bool(
                     self._stage_mode
@@ -2505,6 +2517,7 @@ class OverlayPlayerWindow(QWidget):
                     QTimer.singleShot(0, self._register_hotkeys)
             elif state == QMediaPlayer.PlaybackState.PausedState:
                 self._playing = True
+                self._sync_smtc_playing(False)
                 self._stop_auto_density_timer(exit_ct_if_armed=False)
                 if not self._stage_mode:
                     self._apply_catalog_opacity()
@@ -3102,6 +3115,7 @@ class OverlayPlayerWindow(QWidget):
         QTimer.singleShot(0, self._sync_topmost_state)
         QTimer.singleShot(0, self._register_hotkeys)
         QTimer.singleShot(0, self._install_shortcuts)
+        QTimer.singleShot(50, self._ensure_smtc)
 
     def hideEvent(self, event) -> None:  # noqa: N802
         # Не стопаем музыку. В скрытом режиме оставляем только AIMP-style
@@ -3118,6 +3132,9 @@ class OverlayPlayerWindow(QWidget):
         self._sync_chrome_host_geometry()
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._media_tap_timer.stop()
+        self._media_tap_count = 0
+        self._clear_smtc()
         self._stop()
         self._unregister_hotkeys()
         try:
@@ -3151,8 +3168,7 @@ class OverlayPlayerWindow(QWidget):
             priority.append((_HOTKEY_CLICK, hk.get("click_through", "Ctrl+O")))
             priority.append((_HOTKEY_OPACITY_UP, hk.get("opacity_up", "Ctrl+]")))
             priority.append((_HOTKEY_OPACITY_DOWN, hk.get("opacity_down", "Ctrl+[")))
-        # Тест наушников: play/pause/next/prev — только пока Фон играет или в stage
-        # (чтобы меньше драться с YouTube, когда overlay просто открыт в каталоге).
+        # Наушник / VK_MEDIA_*: играем или stage — перехват у других приложений
         media_entries: list[tuple[int, str, int, int]] = []
         if self._playing or self._stage_mode:
             media_entries = [
@@ -3160,8 +3176,15 @@ class OverlayPlayerWindow(QWidget):
                 (_HOTKEY_MEDIA_NEXT, "MediaNext", MOD_NOREPEAT, VK_MEDIA_NEXT_TRACK),
                 (_HOTKEY_MEDIA_PREV, "MediaPrev", MOD_NOREPEAT, VK_MEDIA_PREV_TRACK),
             ]
-        entries = []
+        # Media — первыми в списке RegisterHotKey (меньше шанс 1409 на «занято»)
+        entries: list[tuple[int, str, int, int]] = []
         seen_vk: set[tuple[int, int]] = set()
+        for hk_id, spec, mods, vk in media_entries:
+            key = (int(mods), int(vk))
+            if key in seen_vk:
+                continue
+            seen_vk.add(key)
+            entries.append((int(hk_id), str(spec), int(mods), int(vk)))
         for hk_id, spec in priority:
             parsed = _parse_hotkey(spec, allow_repeat=(hk_id in _REPEATABLE_HOTKEY_IDS))
             if not parsed:
@@ -3170,12 +3193,6 @@ class OverlayPlayerWindow(QWidget):
             # Одиночные клавиши (Esc/Space) глобально не регистрируем — кроме media_* ниже.
             if (mods & ~MOD_NOREPEAT) == 0 and hk_id not in _MEDIA_HOTKEY_IDS:
                 continue
-            key = (int(mods), int(vk))
-            if key in seen_vk:
-                continue
-            seen_vk.add(key)
-            entries.append((int(hk_id), str(spec), int(mods), int(vk)))
-        for hk_id, spec, mods, vk in media_entries:
             key = (int(mods), int(vk))
             if key in seen_vk:
                 continue
@@ -3281,8 +3298,114 @@ class OverlayPlayerWindow(QWidget):
         self._hotkey_thread_id = None
         return True
 
+    def _on_headset_play_tap(self) -> None:
+        """1× play/pause · 2× next · 3× prev (одна кнопка наушника)."""
+        now = time.monotonic()
+        # Одно физ. нажатие часто приходит и от RegisterHotKey, и от SMTC
+        if (now - self._last_headset_edge_t) < 0.14:
+            return
+        self._last_headset_edge_t = now
+        self._media_tap_count = min(_MEDIA_TAP_MAX, self._media_tap_count + 1)
+        self._media_tap_timer.start(_MEDIA_TAP_WINDOW_MS)
+
+    def _flush_media_taps(self) -> None:
+        n = self._media_tap_count
+        self._media_tap_count = 0
+        if n <= 0:
+            return
+        if n == 1:
+            self._toggle_play()
+            if hasattr(self, "status"):
+                self.status.setText("Наушник · play/pause")
+            return
+        if n == 2:
+            self._play_next()
+            if hasattr(self, "status"):
+                self.status.setText("Наушник · next (2×)")
+            return
+        self._play_prev()
+        if hasattr(self, "status"):
+            self.status.setText("Наушник · prev (3×)")
+
+    def _ensure_smtc(self) -> None:
+        """SMTC: Windows отдаёт кнопки наушников активной медиа-сессии (не только RegisterHotKey)."""
+        if sys.platform != "win32":
+            return
+        try:
+            from overlay_smtc import OverlaySmtc, smtc_available
+        except Exception:
+            return
+        if not smtc_available():
+            return
+        if self._smtc is not None and getattr(self._smtc, "active", False):
+            self._sync_smtc_playing(
+                bool(
+                    self._player is not None
+                    and self._player.playbackState()
+                    == QMediaPlayer.PlaybackState.PlayingState
+                )
+            )
+            return
+        try:
+            hwnd = int(self.winId()) if self.winId() else 0
+        except Exception:
+            hwnd = 0
+        if not hwnd:
+            return
+        smtc = OverlaySmtc()
+        # emit → Qt-поток (winrt callback может быть с другого потока)
+        ok = smtc.bind(
+            hwnd,
+            on_play_pause=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_PLAY),
+            on_next=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_NEXT),
+            on_prev=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_PREV),
+        )
+        if ok:
+            self._smtc = smtc
+            playing = bool(
+                self._player is not None
+                and self._player.playbackState()
+                == QMediaPlayer.PlaybackState.PlayingState
+            )
+            title = None
+            if self._last_play_path:
+                try:
+                    title = _clean_media_title(Path(self._last_play_path).stem)
+                except Exception:
+                    title = None
+            smtc.set_playing(playing, title=title)
+
+    def _sync_smtc_playing(self, playing: bool) -> None:
+        if self._smtc is None:
+            return
+        title = None
+        if self._last_play_path:
+            try:
+                title = _clean_media_title(Path(self._last_play_path).stem)
+            except Exception:
+                title = None
+        try:
+            self._smtc.set_playing(playing, title=title)
+        except Exception:
+            pass
+
+    def _clear_smtc(self) -> None:
+        if self._smtc is None:
+            return
+        try:
+            self._smtc.clear()
+        except Exception:
+            pass
+        self._smtc = None
+
     def _on_global_hotkey(self, hotkey_id: int) -> None:
         now = time.monotonic()
+        # Наушник play: без антидребезга 80мс — иначе 2×/3× слипнутся
+        if hotkey_id == _HOTKEY_MEDIA_PLAY:
+            self._last_hk_id = hotkey_id
+            self._last_hk_t = now
+            self._on_headset_play_tap()
+            return
         # Seek/громкость/плотность — зажатие; остальное антидребезг
         gap = 0.02 if hotkey_id in _REPEATABLE_HOTKEY_IDS else 0.08
         if self._last_hk_id == hotkey_id and (now - self._last_hk_t) < gap:
@@ -3303,12 +3426,16 @@ class OverlayPlayerWindow(QWidget):
             self._toggle_click_through()
             return
         if hotkey_id in (_HOTKEY_NEXT, _HOTKEY_MEDIA_NEXT):
+            self._media_tap_timer.stop()
+            self._media_tap_count = 0
             self._play_next()
             return
         if hotkey_id in (_HOTKEY_PREV, _HOTKEY_MEDIA_PREV):
+            self._media_tap_timer.stop()
+            self._media_tap_count = 0
             self._play_prev()
             return
-        if hotkey_id in (_HOTKEY_STOP, _HOTKEY_MEDIA_PLAY):
+        if hotkey_id == _HOTKEY_STOP:
             self._toggle_play()
             return
         if hotkey_id == _HOTKEY_SEEK_BACK:

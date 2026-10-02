@@ -5,9 +5,9 @@
 
 | | |
 |---|---|
-| **Где мы** | IDEA-025 A0–A3 ✅ · план B0 в part 18. **YT adblock** в плеере. **🎞↓ обои mp4+mp3** ✅ (part 20). |
-| **Фокус** | Смоук 🎞↓ · или **025 B0** по запросу |
-| **Код scope** | `overlay_player.py` (025); shell UI — `Subtitle_App.py` / `ui_motion.py` |
+| **Где мы** | IDEA-025 A0–A3 ✅ · YT adblock ✅ · **наушник multi-tap** (1 play / 2 next / 3 prev) + SMTC. |
+| **Фокус** | Смоук наушника · или **025 B0** по запросу |
+| **Код scope** | `overlay_player.py` (025); `overlay_smtc.py`; shell — `Subtitle_App.py` |
 
 ---
 
@@ -43,9 +43,10 @@
 | 9 | 025 B2 dxcam/DXGI | ⬜ только если B0+B1 мало под игрой |
 | 10 | 021 F1 delete/rename | ⬜ |
 | — | **🎞↓ обои mp4+mp3 → YouTube_DL** | ✅ part 20 |
+| — | Наушник: 1× play / 2× next / 3× prev + SMTC | ✅ смоук |
 | — | YT плеер: блок рекламы (URL filter + skip JS) | ✅ |
 | — | Дизайн тема + fade+center | ✅ |
-| — | SMTC | ⏸ |
+| — | SMTC (модуль) | ✅ wired в overlay |
 
 ---
 
