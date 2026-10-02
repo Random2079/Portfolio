@@ -1,7 +1,7 @@
 # MAP — Portfolio_News (IDEA-003)
 
 **Это главная карта для тебя.** Один файл: что есть, что дальше, как устроено, что нельзя.  
-Обновлено: **2026-10-01**.
+Обновлено: **2026-10-02**.
 
 Остальные `docs/TZ.md`, `docs/parts/*`, `.cursor/WHERE_WE_ARE.md`, `.cursor/plans/*` — техника или **указатели сюда**.  
 Статус / очередь / план следующего слоя **не дублировать** в parts и plans.  
@@ -32,7 +32,7 @@
 **Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
 **React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
 Если React «пизда» → снова `/` ванили.  
-**Очередь:** React MVP R0–R4 ✅. UI вкладок ≈ ваниль. Капитал на Дне ✅. **§7N** лента Новостей (этажи + карточки) ✅. Сырой **ИИ-слой** → §7F. **Дешёвые pre-AI фильтры** в `news_noise.py` (паттерн «идея в Профите» / тех.анализ / фьючерсы / near-dup / short-ticker + geo-keep) ✅ — **площадка ≠ все авторы**, см. **§7S**. **§7S Pulse allowlist v1** ✅ (Interfax + Advokat_Manasyan, SSR mirror). **Privacy** — план §7P, UI позже. Дальше по желанию: §7F / **G** / H / allowlist UI.
+**Очередь:** React MVP R0–R4 ✅. UI вкладок ≈ ваниль. Капитал на Дне ✅. **§7N** лента Новостей (этажи + карточки) ✅. Сырой **ИИ-слой** → §7F. **Дешёвые pre-AI фильтры** в `news_noise.py` (паттерн «идея в Профите» / тех.анализ / фьючерсы / near-dup / short-ticker + geo-keep) ✅ — **площадка ≠ все авторы**, см. **§7S**. **§7S Pulse allowlist v1** ✅ + **Pulse news-by-ticker** ✅ (equity `/news/` SSR). **Privacy** — план §7P, UI позже. Дальше по желанию: §7F / **G** / H / allowlist UI · облиг→эмитент later.
 
 ---
 
@@ -127,7 +127,8 @@
 2. ~~**pre-AI noise**~~ ✅ denylist паттернов («идея в Профите» / тех.анализ / фьючерсы) + near-dup + short-ticker + **geo/macro keep** (`news_noise.py`) — до DeepSeek; AI-промпт не шумит RU-гео как «макро без бумаги». Не бан всей площадки BCS Profit / Pulse — см. **§7S**  
 3. **§7F F-AI polish** — промпты `ai_noise` / `ai_ticker` (нужны для сортировки срочности); рядом — **DeepSeek usage meter** ✅ (баланс + токены на Новостях, см. §7F)  
 4. **Privacy** — **запланировано** (§7P), UI ещё нет  
-5. ~~**§7S Pulse allowlist v1**~~ ✅ fetch Interfax + Advokat_Manasyan via SSR mirror (`pulse_allowlist.py` + json); source tag `pulse_allowlist`; Investokrat out. **UI allowlist** позже · maybe/IR pack — не этот слой  
+5. ~~**§7S Pulse allowlist v1**~~ ✅ fetch Interfax + Advokat_Manasyan via SSR mirror (`pulse_allowlist.py` + json); source tag `pulse_allowlist`; Investokrat out.  
+5b. ~~**§7S Pulse news-by-ticker**~~ ✅ equity only: `/invest/stocks/{TICKER}/news/` → `investSocialNewsByTicker` (`pulse_news_ticker.py`, tag `pulse_news_ticker`); drop-list nicknames + target-title soft filter; bonds/funds позже. **UI allowlist** / maybe/IR pack — не этот слой  
 6. **G** авто-watch (§7G) / H телефон  
 
 **Сделки:** тип = радио (Все / акции / облиг / фонды) + подфильтры только у одного вида ✅.  
@@ -272,12 +273,16 @@
 
 **Pulse mirror (research 2026-10-01):**  
 `https://www.tbank-online.com/invest/pulse/` — зеркало Tramvai (`x-tramvai-resolved-external-host` → tinkoff.ru), **HTTP 200**, SSR HTML ~1.3–2 MB с постами и никнеймами; `x-robots-tag: noindex`. Профили: `/invest/social/profile/{nickname}/` (иногда + UUID). Полки «каналы/медиа» на главной (T-Journal, RBC_Investments, Interfax, ProCFA, tj_invest, IR эмитентов…). Тикеры в постах как `$SBER` / `{$GAZP}`.  
-**По тикеру (HTML):** `/invest/stocks/{TICKER}/pulse/` — тоже SSR 200 (проверено GAZP; SBER/профили иногда timeout). Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, `social-feed`, `pulse-emittent` (бандлы тяжёлые, без сессии не разбирали). Отдельный анонимный JSON «посты по тикеру» без логина **не подтверждён**.
+**По тикеру (HTML):**  
+- `/invest/stocks/{TICKER}/pulse/` — SSR 200, но **посты пустые** (`pulsePostsInit.state={}`); соцлента только через social-api (без сессии → «Сервис временно недоступен»). **Не** источник v1.  
+- `/invest/stocks/{TICKER}/news/` — SSR 200 + child-app JSON **`investSocialNewsByTicker[TICKER].items`** (новости T-Investments / Interfax / …) — **это** путь для покрытия своих акций (**§7S 5b** ✅).  
+Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 
 **Как тянуть данные:**  
-- **HTML scrape** профиля `/invest/social/profile/{nickname}/` — SSR `__TRAMVAI_STATE__` (v1 код).  
-- **XHR:** social-api-gateway — без сессии 400/timeout; **не** используем.  
-- **ToS / хрупкость:** зеркало `noindex`, неофициально; смена child-app / ключа `pulseGetProfilePage` ломает парсер (см. failure mode ниже).
+- **HTML scrape** профиля `/invest/social/profile/{nickname}/` — SSR `__TRAMVAI_STATE__` (allowlist v1).  
+- **HTML scrape** `/invest/stocks/{TICKER}/news/` — `investSocialNewsByTicker` (news-by-ticker, equity).  
+- **XHR:** social-api-gateway — без сессии Error; **не** используем.  
+- **ToS / хрупкость:** зеркало `noindex`, неофициально; смена child-app / ключа `pulseGetProfilePage` / `investSocialNewsByTicker` ломает парсер.
 
 ### Confirm 2026-10-01 (Investing chat triage) ✅
 
@@ -298,6 +303,15 @@
 - **Фильтры:** chip-stripped prose (`title_matches_ticker` / issuer name; игнор `$TICKER` и `/invest/stocks/…` deep-links) **или** ≤2 instrument tags; `is_noise_title`; near-dup — в `poller._insert_if_new`. Кэш постов на инстанс источника (один раз за poll). Investokrat / maybe — не fetch.
 - **Failure mode (хрупкий SSR):** нет usable JSON / нет `pulseGetProfilePage…items` / HTTP fail → warning в лог, пустой список (Google/SmartLab не трогаем). Зеркало `tbank-online.com` неофициальное (`noindex`); смена Tramvai-ключа ломает парсер. Interfax часто без instruments → посты без имени эмитента в title не сядут на holdings.
 
+### Pulse news-by-ticker — код ✅ (2026-10-02)
+
+- **Модуль:** `portfolio_news/sources/pulse_news_ticker.py` · source tag `pulse_news_ticker` · в `default_sources()`.
+- **Зачем:** allowlist авторов не кроет тонкие позиции (X5 / LSNGP / TRNFP / CHMF…), пока Interfax/Advokat не написали; вкладка новостей бумаги даёт ленту **по тикеру**.
+- **Fetch:** `{mirror_base}/invest/stocks/{TICKER}/news/` → child-app JSON → `stores.investSocialNewsByTicker[TICKER].items`.
+- **Scope:** только `kind=equity` (не bond/fund; ISIN/`RU000*` skip). Облиги → эмитент — later.
+- **Фильтры:** тикер в `content.instruments`; `is_noise_title`; nicknames из `pulse_allowlist.json` **drop**; soft-drop «целевая цена / повысили оценку»; broad digest (>3 instruments без имени/тикера в title) → skip. Кэш HTML-parse на тикер в рамках инстанса poll.
+- **Failure mode:** нет `investSocialNewsByTicker` / HTTP fail → [] (остальные источники живы).
+
 **Утренние типы источников (канон):**
 
 | Держать | Не утро / не v1 |
@@ -313,7 +327,7 @@
 
 Критерий как у пользователя + Investing `чек-поинт.md`: факты/макро по секторам KS, не идеи / таргеты / интрадей. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
 
-**Дальше:** **UI allowlist** · maybe-очередь / IR pack v1.1 · не Telegram-userbot.
+**Дальше:** **UI allowlist** · maybe-очередь / IR pack v1.1 · bond→company map · не Telegram-userbot.
 
 ---
 

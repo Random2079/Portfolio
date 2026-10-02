@@ -1,7 +1,7 @@
 {
   "mirror_base": "https://www.tbank-online.com",
   "confirmed": "2026-10-01",
-  "note": "v1 fetch via pulse_allowlist.py (SSR application/json → seoSsrData.pulseGetProfilePage). Investokrat locked OUT of v1 (user confirm 2026-10-01); stays in maybe.",
+  "note": "v1 fetch via pulse_allowlist.py (SSR application/json → seoSsrData.pulseGetProfilePage). Investokrat locked OUT of v1 (user confirm 2026-10-01); stays in maybe. Equity coverage: pulse_news_ticker.py scrapes /invest/stocks/{TICKER}/news/ → investSocialNewsByTicker (not social posts-by-ticker — those need session).",
   "v1": ["Interfax", "Advokat_Manasyan"],
   "maybe": [
     "Investokrat",
