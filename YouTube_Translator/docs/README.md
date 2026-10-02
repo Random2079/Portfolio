@@ -22,7 +22,7 @@
 | 07 **ИИ текущего ролика (№1)** | `Subtitle_App.py` (`on_ai_analyze` ↔ WebView URL) |
 | 08 Split / cancel | `Subtitle_App.py` (📥 / ✨ / ✕) |
 | 09 Window / Snap | `Subtitle_App.py` (soft-lock) |
-| 10 Music | `Subtitle_App.py` (audio yt-dlp) |
+| 10 Music → обои | `Subtitle_App.py` (🎞↓; MP3-only UI убран) |
 | 11 Parked 021 / статус 022 | `IDEAS.md` · 022 → part 12 |
 | 12 Overlay (IDEA-022) | `overlay_player.py`, кнопка «Фон» в `Subtitle_App.py` |
 | 16 Overlay UX polish | `overlay_player.py` (P1–P9) |

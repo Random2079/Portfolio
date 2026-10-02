@@ -32,7 +32,7 @@
 | 4 | Закладки + Cloudflare honesty | F | ✅ | Aniwaves; если WebView режет — «Открыть в Chrome» `--app=` |
 | 5 | Мягкий размер окна / Aero Snap | W | ✅ | Download 580×380 soft-lock; плеер/закладки — resize + Snap; clamp on-screen |
 | 6 | Split 📥 vs ✨ ИИ + Отмена | D6 | ✅ | 📥 = субы текущего URL без ИИ; ✨ = разбор текущего id; ✕ Отмена видна при busy |
-| 7 | Скачивание музыки (MP3) | M | ✅ | Кнопка на download и в плеере → `Music\YouTube_DL` |
+| 7 | Скачивание музыки (MP3) | M | ✅→superseded | UI ↓ MP3 убран; качка через **🎞↓** (№21 / part 20) |
 | **21** | Обои mp4+mp3 для Фона | M+ | ✅ | **🎞↓** → mp4+mp3 в `YouTube_DL` · [part 20](parts/20-overlay-wallpaper-download.md) |
 | 8 | ui_motion (микроанимации) | G | ✅ | Hover/press + BusyPulse на Скачать / ИИ |
 | 9 | Файлы `dist/` внутри приложения | IDEA-021 | 🟡 F0 | Список + проводник ✅ · delete/rename ⬜ · [part 19](parts/19-dist-files.md) |
@@ -62,7 +62,7 @@
 | D5 — Театр / fullscreen | ✅ | ⛶, Esc, T, F11 |
 | D6 — Split 📥 / ✨ + Отмена | ✅ | 📥 без ИИ; ✨ синхронизирует текущий id (карточка №1) |
 | W — Размер окна / Snap / clamp | ✅ | soft-lock download; не ломать `WS_THICKFRAME` |
-| M — Музыка MP3 | ✅ | download + player |
+| M — Музыка MP3 | ✅→M+ | UI MP3-only убран; см. M+ / part 20 |
 | **M+ — Обои mp4+mp3** | **✅** | **🎞↓** · [part 20](parts/20-overlay-wallpaper-download.md) |
 | F — Закладки | ✅ | `bookmarks.json`, Chrome `--app=` fallback |
 | G — ui_motion | ✅ | `ui_motion.py` |
@@ -165,7 +165,7 @@ python Subtitle_App.py
 
 **Регрессия**
 
-5. ⛶ / Esc / T / F11; 🔖 Закладки + Chrome fallback; 🎵 MP3; **🎞 Фон** overlay; экран скачивания soft-lock + Snap в плеере.
+5. ⛶ / Esc / T / F11; 🔖 Закладки + Chrome fallback; **🎞↓** обои; **🎞 Фон** overlay; экран скачивания soft-lock + Snap в плеере.
 
 ---
 

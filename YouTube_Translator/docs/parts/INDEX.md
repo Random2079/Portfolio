@@ -11,7 +11,7 @@
 | 07 | [**ИИ текущего ролика**](07-player-ai-current-video.md) | `Subtitle_App.py`, `ai_analyze.py` | **№1** | ✅ |
 | 08 | [Split 📥 / ✨ + Отмена](08-split-download-ai-cancel.md) | `Subtitle_App.py` | №6 | ✅ |
 | 09 | [Window size / Snap](09-window-size-snap.md) | `Subtitle_App.py` | №5 / W | ✅ |
-| 10 | [Music MP3](10-music-download.md) | `Subtitle_App.py` | №7 / M | ✅ |
+| 10 | [Music → обои](10-music-download.md) | `Subtitle_App.py` | №7 / M → 20 | ✅ superseded |
 | 11 | [Parked 021 / статус 022](11-parked-021-022.md) | — | №9–10 | 021 ⬜ · 022 → 12 |
 | 12 | [Overlay музыка/mp4](12-overlay-music.md) | `overlay_player.py` | №10 / IDEA-022 | 🟡 |
 | 16 | [Overlay UX polish P1–P9](16-overlay-ux-polish.md) | `overlay_player.py`, `Subtitle_App.py` | №13–18 | ✅ |

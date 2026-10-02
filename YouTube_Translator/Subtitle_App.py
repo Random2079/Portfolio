@@ -13,7 +13,7 @@ YouTube Subtitle Ripper — GUI (CustomTkinter) + yt-dlp.
   1.  имена / метаданные yt-dlp     — id, title, auto vs manual субы
   1b. разбор SRT                   — сегменты → склейка → plain / timed
   2.  download_and_split           — весь пайплайн скачивания (мозг)
-  2b. download_audio               — MP3 через yt-dlp (Music/YouTube_DL)
+  2b. download_overlay_media       — mp4+mp3 в Music/YouTube_DL (🎞↓)
   2c. overlay_player (IDEA-022)    — фон: каталог mp3/mp4, opacity, click-through
   2d. dist files (IDEA-021 F0)     — список dist/субтитры_* + открыть в проводнике
   3.  SubtitleApp                  — окно, кнопки, поток, буфер
@@ -1163,30 +1163,6 @@ def _overlay_media_out_tmpl(out_dir: str) -> str:
     return os.path.join(out_dir, "%(title).200B [%(id)s].%(ext)s")
 
 
-def build_audio_ytdlp_cmd(url: str, out_dir: str) -> list[str]:
-    """Аргументы yt-dlp для аудио (MP3), как download_music.py."""
-    tmpl = _overlay_media_out_tmpl(out_dir)
-    return ytdlp_argv(
-        "--no-warnings",
-        "--retries",
-        "8",
-        "--fragment-retries",
-        "8",
-        *_ytdlp_player_client_extra(),
-        "-f",
-        "bestaudio/best",
-        "-x",
-        "--audio-format",
-        "mp3",
-        "--audio-quality",
-        "192K",
-        "-o",
-        tmpl,
-        "--",
-        url,
-    )
-
-
 # Обычный merge; fallback — явный DASH (MV «Only images» / storyboard-only progressive).
 _OVERLAY_FMT_DEFAULT = "bv*+ba/b"
 _OVERLAY_FMT_DASH = "299+140/298+140/137+140/bestvideo*+bestaudio/best"
@@ -2135,56 +2111,6 @@ def download_and_split(
     return True
 
 
-def download_audio(
-    url: str,
-    status_cb: StatusCb | None = None,
-    out_dir: str | None = None,
-    cancel_event: threading.Event | None = None,
-) -> tuple[bool, str]:
-    """
-    Скачивает аудио в MP3 через yt-dlp (как YouTube_DL/download_music.py).
-    Возвращает (ok, путь_к_папке_или_текст_ошибки).
-    """
-    if not get_video_id(url):
-        return False, "Не похоже на YouTube-ссылку — проверь URL"
-
-    if shutil.which("ffmpeg") is None:
-        _emit(
-            status_cb,
-            "Предупреждение: ffmpeg не в PATH — MP3 может не получиться",
-        )
-
-    creation_flags = 0x08000000 if os.name == "nt" else 0
-    target = out_dir or default_audio_output_dir()
-    os.makedirs(target, exist_ok=True)
-
-    _emit(status_cb, "Статус: скачиваю аудио (MP3)…")
-    cmd = build_audio_ytdlp_cmd(url, target)
-    try:
-        result = _run_ytdlp_with_heartbeat(
-            cmd,
-            creation_flags,
-            timeout=600,
-            status_cb=status_cb,
-            status_prefix="Статус: аудио",
-            cancel_event=cancel_event,
-        )
-    except DownloadCancelled:
-        return False, "Отменено пользователем"
-    except FileNotFoundError:
-        return False, "yt-dlp не установлен или не найден в PATH"
-    except PermissionError as exc:
-        return False, f"Windows запретил запуск yt-dlp: {exc}"
-    except subprocess.TimeoutExpired:
-        return False, "Таймаут скачивания аудио (600с)"
-
-    if result.returncode != 0:
-        details = (result.stderr or result.stdout or "").strip()
-        return False, details or f"yt-dlp завершился с кодом {result.returncode}"
-
-    return True, target
-
-
 def _ytdlp_stderr_suggests_dash_retry(text: str) -> bool:
     low = (text or "").lower()
     needles = (
@@ -2823,7 +2749,7 @@ class SubtitleApp(QMainWindow):
             self.ru_btn,
             self.en_btn,
             self.download_btn,
-            self.audio_btn,
+            self.wallpaper_btn,
             self.overlay_btn,
             self.player_btn,
             self.bookmarks_btn,
@@ -2832,7 +2758,7 @@ class SubtitleApp(QMainWindow):
             self.analyze_btn,
             self.ai_btn,
             self.load_video_btn,
-            self.player_audio_btn,
+            self.player_wallpaper_btn,
             self.dist_files_btn,
             self.ai_invest_btn,
             self.ai_general_btn,
@@ -3080,7 +3006,7 @@ class SubtitleApp(QMainWindow):
 
         self.cancel_busy_btn = QPushButton("✕ Отмена")
         self.cancel_busy_btn.setProperty("fallback", True)
-        self.cancel_busy_btn.setToolTip("Остановить скачивание субтитров или аудио")
+        self.cancel_busy_btn.setToolTip("Остановить скачивание субтитров или обоев")
         self.cancel_busy_btn.clicked.connect(self.on_cancel_download)
         self.cancel_busy_btn.setVisible(False)
         layout.addWidget(self.cancel_busy_btn)
@@ -3090,12 +3016,6 @@ class SubtitleApp(QMainWindow):
         self.download_btn.clicked.connect(self.on_download)
         apply_primary_glow(self.download_btn)
         btn_row.addWidget(self.download_btn)
-
-        self.audio_btn = QPushButton("↓ MP3")
-        self.audio_btn.setProperty("fallback", True)
-        self.audio_btn.setToolTip("Скачать аудио (MP3) в Music\\YouTube_DL")
-        self.audio_btn.clicked.connect(self.on_download_audio)
-        btn_row.addWidget(self.audio_btn)
 
         self.wallpaper_btn = QPushButton("🎞↓")
         self.wallpaper_btn.setProperty("fallback", True)
@@ -3130,7 +3050,6 @@ class SubtitleApp(QMainWindow):
             self.en_btn,
             self.cancel_busy_btn,
             self.download_btn,
-            self.audio_btn,
             self.wallpaper_btn,
             self.overlay_btn,
             self.player_btn,
@@ -3187,12 +3106,6 @@ class SubtitleApp(QMainWindow):
         self.ai_btn.clicked.connect(self.on_ai_analyze)
         apply_primary_glow(self.ai_btn, strong=True)
         row1.addWidget(self.ai_btn)
-
-        self.player_audio_btn = QPushButton("🎵")
-        self.player_audio_btn.setProperty("fallback", True)
-        self.player_audio_btn.setToolTip("Скачать аудио текущего видео (MP3)")
-        self.player_audio_btn.clicked.connect(self.on_download_audio_from_player)
-        row1.addWidget(self.player_audio_btn)
 
         self.player_wallpaper_btn = QPushButton("🎞↓")
         self.player_wallpaper_btn.setProperty("fallback", True)
@@ -3354,7 +3267,7 @@ class SubtitleApp(QMainWindow):
             self.analyze_btn,
             self.ai_btn,
             self.load_video_btn,
-            self.player_audio_btn,
+            self.player_wallpaper_btn,
             self.dist_files_btn,
             self.player_cancel_btn,
             self.ai_invest_btn,
@@ -3555,7 +3468,7 @@ class SubtitleApp(QMainWindow):
                 tip = (
                     "Отменить ИИ-разбор"
                     if ai_ctx
-                    else "Остановить скачивание субтитров или аудио"
+                    else "Остановить скачивание субтитров или обоев"
                 )
                 self.cancel_busy_btn.setToolTip(tip)
                 self.cancel_busy_btn.setProperty("cancel_busy", ai_ctx or self._busy)
@@ -3585,7 +3498,6 @@ class SubtitleApp(QMainWindow):
         self._busy = busy
         for widget in (
             self.download_btn,
-            self.audio_btn,
             self.wallpaper_btn,
             self.player_btn,
             self.bookmarks_btn,
@@ -3593,8 +3505,6 @@ class SubtitleApp(QMainWindow):
             self.en_btn,
         ):
             widget.setDisabled(busy)
-        if hasattr(self, "player_audio_btn"):
-            self.player_audio_btn.setDisabled(busy)
         if hasattr(self, "player_wallpaper_btn"):
             self.player_wallpaper_btn.setDisabled(busy)
         if hasattr(self, "analyze_btn"):
@@ -3631,9 +3541,7 @@ class SubtitleApp(QMainWindow):
             return
         self._cancel_event.set()
         msg = "Отмена…"
-        if self._cancel_context.startswith("audio") or self._cancel_context.startswith(
-            "overlay"
-        ):
+        if self._cancel_context.startswith("overlay"):
             if "player" in self._cancel_context:
                 self._set_player_status_core(msg)
             else:
@@ -4802,19 +4710,6 @@ class SubtitleApp(QMainWindow):
         )
         thread.start()
 
-    def on_download_audio(self) -> None:
-        if self._busy:
-            return
-        self._cancel_auto_player()
-        url = self.url_input.text().strip()
-        if not url:
-            self._set_status("Статус: вставь ссылку")
-            return
-        if not get_video_id(url):
-            self._set_status("Статус: не похоже на YouTube-ссылку — проверь URL")
-            return
-        self._start_audio_download(url, from_player=False)
-
     def on_download_wallpaper(self) -> None:
         if self._busy:
             return
@@ -4895,19 +4790,6 @@ class SubtitleApp(QMainWindow):
         shutdown_player_httpd()
         super().closeEvent(event)
 
-    def on_download_audio_from_player(self) -> None:
-        if self._busy:
-            return
-        url = self.url_input.text().strip()
-        if not url and self._current_player_folder:
-            vid = _extract_id_from_folder(self._current_player_folder)
-            if vid:
-                url = f"https://www.youtube.com/watch?v={vid}"
-        if not url or not get_video_id(url):
-            self._set_player_status_core("Статус: нет ссылки на видео для аудио")
-            return
-        self._start_audio_download(url, from_player=True)
-
     def on_download_wallpaper_from_player(self) -> None:
         if self._busy:
             return
@@ -4926,19 +4808,6 @@ class SubtitleApp(QMainWindow):
 
         self._get_current_youtube_url(_on_href)
 
-    def _start_audio_download(self, url: str, *, from_player: bool) -> None:
-        if from_player:
-            self._set_player_status_core("Статус: старт скачивания аудио…")
-        else:
-            self._set_status("Статус: старт скачивания аудио…")
-        self._begin_download_task("audio_player" if from_player else "audio")
-        self._set_busy(True)
-        threading.Thread(
-            target=self._audio_download_worker,
-            args=(url, from_player),
-            daemon=True,
-        ).start()
-
     def _start_overlay_download(self, url: str, *, from_player: bool) -> None:
         if from_player:
             self._set_player_status_core("Статус: старт обоев (mp4+mp3)…")
@@ -4953,38 +4822,6 @@ class SubtitleApp(QMainWindow):
             args=(url, from_player),
             daemon=True,
         ).start()
-
-    def _audio_download_worker(self, url: str, from_player: bool) -> None:
-        err_buf = io.StringIO()
-        last_status = "Статус: работаю…"
-        result_path = ""
-
-        def status_cb(message: str) -> None:
-            nonlocal last_status
-            last_status = message
-            if from_player:
-                self._player_status_signal.emit(message)
-            else:
-                self._status_signal.emit(message)
-
-        try:
-            with redirect_stdout(io.StringIO()), redirect_stderr(err_buf):
-                ok, result_path = download_audio(
-                    url,
-                    status_cb=status_cb,
-                    cancel_event=self._cancel_event,
-                )
-        except Exception as exc:  # noqa: BLE001
-            ok = False
-            err_buf.write(str(exc))
-
-        if self._cancel_event.is_set():
-            self._done_signal.emit(False, "__cancelled__", self._cancel_context, "")
-            return
-
-        marker = f"__audio__{'player' if from_player else 'download'}"
-        payload = result_path if ok else err_buf.getvalue()
-        self._done_signal.emit(ok, marker, payload, last_status)
 
     def _overlay_download_worker(self, url: str, from_player: bool) -> None:
         err_buf = io.StringIO()
@@ -5097,7 +4934,7 @@ class SubtitleApp(QMainWindow):
             self._pending_ai_after_subs = False
             ctx = error_text or ""
             msg = "Статус: скачивание отменено"
-            if ctx.startswith("audio") or ctx.startswith("overlay"):
+            if ctx.startswith("overlay"):
                 if "player" in ctx:
                     self._set_player_status_core(msg)
                 else:
@@ -5107,25 +4944,6 @@ class SubtitleApp(QMainWindow):
             else:
                 self._set_status(msg)
             return
-
-        # ── аудио ──────────────────────────────────────────────────────────
-        if url.startswith("__audio__"):
-            from_player = url == "__audio__player"
-            if not ok:
-                msg = (error_text or "").strip() or "Неизвестная ошибка yt-dlp"
-                if from_player:
-                    self._set_player_status_core(f"Аудио: ошибка — {msg}")
-                else:
-                    self._set_status(f"Ошибка аудио:\n{msg}")
-                return
-            out_dir = error_text
-            done_msg = f"Аудио готово! MP3 в:\n{out_dir}\n{timing_hint}"
-            if from_player:
-                self._set_player_status_core(done_msg)
-            else:
-                self._set_status(done_msg)
-            return
-        # ───────────────────────────────────────────────────────────────────
 
         # ── обои mp4+mp3 ───────────────────────────────────────────────────
         if url.startswith("__overlay__"):
