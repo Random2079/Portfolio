@@ -422,6 +422,15 @@ export default function NewsFeed({ onOpenReview }) {
         ) : null}
         <button
           type="button"
+          className="feed-refresh"
+          onClick={loadNews}
+          disabled={loading || pollBusy}
+          title="Перечитать ленту из БД — без нового опроса источников"
+        >
+          Обновить ленту
+        </button>
+        <button
+          type="button"
           className="ai-btn"
           onClick={runAiClassify}
           disabled={!aiReady || aiBusy || pollBusy}
@@ -457,14 +466,6 @@ export default function NewsFeed({ onOpenReview }) {
             {fmtUsd(aiMeter.today_usd)}
           </span>
         ) : null}
-        <button
-          type="button"
-          className="feed-refresh"
-          onClick={loadNews}
-          disabled={loading || pollBusy}
-        >
-          Обновить
-        </button>
         {statusText ? (
           <span
             className={"poll-status" + (statusErr ? " err" : "")}
