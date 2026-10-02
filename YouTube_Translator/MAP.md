@@ -5,9 +5,9 @@
 
 | | |
 |---|---|
-| **Где мы** | Catalog: **C0+C1 ✅** · дальше **C2** карточки ([part 21](docs/parts/21-overlay-catalog-quality.md)). Наушник multi-tap — **⏸**. |
-| **Фокус** | **`делаем C2`** — карточки пары + thumb · потом C3 random |
-| **Код scope** | `overlay_player.py` (C2–C3) · `Subtitle_App.py` (C0 ✅) |
+| **Где мы** | Catalog: **C0+C1 ✅** · дальше **C2** карточки → **C2b** delete/rename → C3 ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
+| **Фокус** | **`делаем C2`** — карточки (превью+play) · manage отдельно C2b |
+| **Код scope** | `overlay_player.py` (C2 → C2b → C3) · `Subtitle_App.py` (C0 ✅) |
 
 ---
 
@@ -35,12 +35,13 @@
 | **1** | **C0** 🎞↓ max quality (+ статус/лог факта) | ✅ |
 | **2** | **C1** каталог: сортировка дата старый→новый | ✅ |
 | **3** | **C2** каталог: карточки пары mp4/mp3 + thumb + title | ⬜ **следующий** |
-| **4** | **C3** random / shuffle | ⏸ после C1–C2 |
+| **4** | **C2b** каталог: удалить пару с диска + переименовать файлы | ⬜ после C2 |
+| **5** | **C3** random / shuffle | ⏸ после C2b |
 | — | Наушник multi-tap + SMTC | ⏸ (новые наушники) |
 | — | 025 B0 авто-плотность комфорт | ⏸ |
 | — | 🎞↓ обои mp4+mp3 MVP | ✅ part 20 |
 | — | YT adblock в плеере | ✅ |
-| — | 021 F1 delete/rename | ⬜ |
+| — | 021 F1 delete/rename (`dist/`) | ⬜ отдельно от Фон C2b |
 
 План/ТЗ чанков: [`docs/parts/21-overlay-catalog-quality.md`](docs/parts/21-overlay-catalog-quality.md).
 
@@ -53,7 +54,7 @@
 | Video | `bestvideo*[height<=2160]+bestaudio` + `-S res,fps,vbr,abr` | ✅ C0 |
 | Audio mp3 | `--audio-quality 0` | оставить |
 | Список Фон | `catalog_sort=date_asc` (mtime) | ✅ C1 |
-| UI | QList текст | C2: пара + превью |
+| UI | QList текст | C2: пара + превью · C2b: del/rename |
 
 ---
 
@@ -68,4 +69,4 @@
 - Плотность `<100%` только со сквозь.
 - Пуш только по просьбе.
 - Не возвращать morph size+pos на shell; не /embed/ top-level (Error 153).
-- Не склеивать C0+C1+C2 в один проход.
+- Не склеивать C0+C1+C2+C2b в один проход.
