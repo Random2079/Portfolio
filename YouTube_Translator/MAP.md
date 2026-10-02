@@ -5,9 +5,9 @@
 
 | | |
 |---|---|
-| **Где мы** | IDEA-025 A0–A3 ✅ · YT adblock ✅ · **наушник multi-tap** (1 play / 2 next / 3 prev) + SMTC. |
-| **Фокус** | Смоук наушника · или **025 B0** по запросу |
-| **Код scope** | `overlay_player.py` (025); `overlay_smtc.py`; shell — `Subtitle_App.py` |
+| **Где мы** | Фокус: **Фон catalog C0–C3** ([part 21](docs/parts/21-overlay-catalog-quality.md)). Наушник multi-tap — **⏸**. |
+| **Фокус** | **`делаем C0`** — max quality 🎞↓ · потом C1 дата · C2 карточки · C3 random |
+| **Код scope** | `Subtitle_App.py` (C0) · `overlay_player.py` (C1–C3) |
 
 ---
 
@@ -32,33 +32,34 @@
 
 | # | Что | Статус |
 |---|-----|--------|
-| 1 | Хоткеи: клиппинг текста + Mouse4/5 | ✅ |
-| 2 | **025 A0** prefs + галка | ✅ |
-| 3 | **025 A1** idle → сквозь + % | ✅ |
-| 4 | Смоук A0/A1 | ✅ (юзер: работает стабильно) |
-| 5 | 025 A2 сброс / hold opacity | ✅ |
-| 6 | 025 A3 плотность от яркости стола | ✅ (база; grab-при-CT убран) |
-| 7 | **025 B0** комфорт: lerp + тик без вспышек | ⬜ **следующий** |
-| 8 | 025 B1 кривая/prefs по тесту | ⬜ если B0 мало |
-| 9 | 025 B2 dxcam/DXGI | ⬜ только если B0+B1 мало под игрой |
-| 10 | 021 F1 delete/rename | ⬜ |
-| — | **🎞↓ обои mp4+mp3 → YouTube_DL** | ✅ part 20 |
-| — | Наушник: 1× play / 2× next / 3× prev + SMTC | ✅ смоук |
-| — | YT плеер: блок рекламы (URL filter + skip JS) | ✅ |
-| — | Дизайн тема + fade+center | ✅ |
-| — | SMTC (модуль) | ✅ wired в overlay |
+| **1** | **C0** 🎞↓ max quality (+ статус/лог факта) | ⬜ **следующий** |
+| **2** | **C1** каталог: сортировка дата старый→новый | ⬜ |
+| **3** | **C2** каталог: карточки пары mp4/mp3 + thumb + title | ⬜ |
+| **4** | **C3** random / shuffle | ⏸ после C1–C2 |
+| — | Наушник multi-tap + SMTC | ⏸ (новые наушники) |
+| — | 025 B0 авто-плотность комфорт | ⏸ |
+| — | 🎞↓ обои mp4+mp3 MVP | ✅ part 20 |
+| — | YT adblock в плеере | ✅ |
+| — | 021 F1 delete/rename | ⬜ |
+
+План/ТЗ чанков: [`docs/parts/21-overlay-catalog-quality.md`](docs/parts/21-overlay-catalog-quality.md).
+
+---
+
+## Аудит качества 🎞↓ (кратко)
+
+| | Сейчас | Цель C0 |
+|--|--------|---------|
+| Video | `bv*+ba/b` (+ DASH retry) | явный max + format-sort; не ниже текущего |
+| Audio mp3 | `--audio-quality 0` | оставить |
+| Список Фон | алфавит | C1: mtime asc |
+| UI | QList текст | C2: пара + превью |
 
 ---
 
 ## Смоук / план авто-плотности
 
-Канон цели и лестница B0→B3: [`docs/parts/18-overlay-auto-density.md`](docs/parts/18-overlay-auto-density.md).
-
-✅ A0/A1: idle → сквозь.  
-✅ A2/A3 база в коде; урок: `grabWindow` при сквозь = вспышка на чужом окне.  
-⬜ **B0:** комфорт без нового capture — команда `делаем B0`.
-
-Опц.: угол экрана → Плеер/Назад (fade+center); Sign in WebView → обратно на ролик.
+Канон B0→B3: [`docs/parts/18-overlay-auto-density.md`](docs/parts/18-overlay-auto-density.md) — **⏸** пока catalog C*.
 
 ---
 
@@ -67,3 +68,4 @@
 - Плотность `<100%` только со сквозь.
 - Пуш только по просьбе.
 - Не возвращать morph size+pos на shell; не /embed/ top-level (Error 153).
+- Не склеивать C0+C1+C2 в один проход.
