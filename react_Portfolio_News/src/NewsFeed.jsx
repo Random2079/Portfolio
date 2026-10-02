@@ -55,6 +55,18 @@ function fmtNewsDate(iso) {
 }
 
 /** Bucket for §7N floors. Noise/dup never shown. */
+function fmtTokens(n) {
+  const v = Number(n) || 0;
+  if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + "M";
+  if (v >= 1000) return Math.round(v / 1000) + "k";
+  return String(v);
+}
+
+function fmtUsd(n) {
+  const v = Number(n) || 0;
+  return v >= 1 ? v.toFixed(2) : v.toFixed(3);
+}
+
 function floorOf(n) {
   const label = String(n.ai_label || "").toLowerCase();
   if (label === "noise" || label === "dup") return null;
@@ -202,6 +214,7 @@ export default function NewsFeed({ onOpenReview }) {
   const [notify, setNotify] = useState(readNotify);
   const [aiReady, setAiReady] = useState(false);
   const [aiHint, setAiHint] = useState("");
+  const [aiMeter, setAiMeter] = useState(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [pollBusy, setPollBusy] = useState(false);
   const [statusText, setStatusText] = useState("");
@@ -222,15 +235,19 @@ export default function NewsFeed({ onOpenReview }) {
     }
   }, []);
 
-  const loadAiStatus = useCallback(async () => {
+  const loadAiStatus = useCallback(async (refreshBalance = false) => {
     try {
-      const st = await getJson("/api/news/ai-status");
+      const st = await getJson(
+        "/api/news/ai-status" + (refreshBalance ? "?refresh_balance=true" : "")
+      );
       const ready = !!(st && st.ready);
       setAiReady(ready);
       setAiHint(ready ? "" : st?.hint || "ИИ выкл");
+      setAiMeter(st?.has_key ? st : null);
     } catch {
       setAiReady(false);
       setAiHint("статус ИИ недоступен");
+      setAiMeter(null);
     }
   }, []);
 
@@ -352,7 +369,7 @@ export default function NewsFeed({ onOpenReview }) {
       setStatus("ИИ: " + String(e.message || e), true);
     } finally {
       setAiBusy(false);
-      await loadAiStatus();
+      await loadAiStatus(true);
     }
   };
 
@@ -416,6 +433,30 @@ export default function NewsFeed({ onOpenReview }) {
         >
           {aiBusy ? "ИИ…" : "Прогнать ИИ"}
         </button>
+        {aiMeter ? (
+          <span
+            className="ai-meter"
+            title={
+              "Месяц: " +
+              (aiMeter.month_calls || 0) +
+              " вызовов · " +
+              fmtTokens(aiMeter.month_tokens) +
+              " ток · ≈$" +
+              fmtUsd(aiMeter.month_usd) +
+              " (оценка по прайсу; баланс — с DeepSeek)"
+            }
+          >
+            {aiMeter.balance != null
+              ? "DeepSeek " +
+                fmtUsd(aiMeter.balance) +
+                " " +
+                (aiMeter.balance_currency || "") +
+                " · "
+              : "баланс ? · "}
+            сегодня {fmtTokens(aiMeter.today_tokens)} ток ≈ $
+            {fmtUsd(aiMeter.today_usd)}
+          </span>
+        ) : null}
         <button
           type="button"
           className="feed-refresh"

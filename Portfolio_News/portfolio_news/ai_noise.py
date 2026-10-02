@@ -128,6 +128,7 @@ def _call_deepseek(
     *,
     system: str | None = None,
     timeout: int = 90,
+    kind: str = "news_classify",
 ) -> str:
     payload = json.dumps(
         {
@@ -155,6 +156,9 @@ def _call_deepseek(
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"DeepSeek HTTP {exc.code}: {detail[:300]}") from exc
+    from portfolio_news.ai_usage import record_usage
+
+    record_usage(kind, body.get("usage") if isinstance(body, dict) else None)
     try:
         return body["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:

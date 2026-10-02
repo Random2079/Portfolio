@@ -116,6 +116,14 @@ class NewsAiStatusOut(BaseModel):
     has_key: bool
     ready: bool
     hint: str = ""
+    balance: Optional[float] = None
+    balance_currency: str = ""
+    today_calls: int = 0
+    today_tokens: int = 0
+    today_usd: float = 0.0
+    month_calls: int = 0
+    month_tokens: int = 0
+    month_usd: float = 0.0
 
 
 class TickerAiReviewIn(BaseModel):
@@ -564,8 +572,13 @@ def _news_to_out(row: NewsItem, cache: Optional[NewsAiCache] = None) -> NewsOut:
 
 
 @app.get("/api/news/ai-status", response_model=NewsAiStatusOut)
-def news_ai_status(cfg: Settings = Depends(get_cfg)):
-    """F-A: whether button classify is ready (flag + key)."""
+def news_ai_status(
+    refresh_balance: bool = Query(False, description="Bypass 5-min balance cache"),
+    cfg: Settings = Depends(get_cfg),
+):
+    """F-A: whether button classify is ready (flag + key) + DeepSeek usage meter."""
+    from portfolio_news.ai_usage import fetch_balance, summarize_usage
+
     has_key = bool((cfg.deepseek_api_key or "").strip())
     enabled = bool(cfg.ai_noise_enabled)
     ready = enabled and has_key
@@ -575,7 +588,16 @@ def news_ai_status(cfg: Settings = Depends(get_cfg)):
         hint = "задай DEEPSEEK_API_KEY в Portfolio_News/.env"
     else:
         hint = ""
-    return NewsAiStatusOut(enabled=enabled, has_key=has_key, ready=ready, hint=hint)
+    bal = fetch_balance(cfg.deepseek_api_key, force=refresh_balance) if has_key else None
+    return NewsAiStatusOut(
+        enabled=enabled,
+        has_key=has_key,
+        ready=ready,
+        hint=hint,
+        balance=(bal or {}).get("total"),
+        balance_currency=str((bal or {}).get("currency") or ""),
+        **summarize_usage(),
+    )
 
 
 @app.post("/api/news/ai-classify", response_model=NewsAiClassifyOut)

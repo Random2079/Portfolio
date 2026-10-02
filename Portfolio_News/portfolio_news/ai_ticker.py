@@ -126,7 +126,7 @@ def review_ticker_news(
         ks_labels=(ks_labels or "—").strip() or "—",
         news_block="\n".join(lines[:25]),
     )
-    raw = _call_deepseek(key, user, system=PROMPT_SYSTEM)
+    raw = _call_deepseek(key, user, system=PROMPT_SYSTEM, kind="ticker_review")
     parsed = parse_ticker_review(raw, default_ticker=tid)
     parsed["ticker"] = tid
     parsed["model"] = model

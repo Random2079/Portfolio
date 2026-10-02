@@ -125,7 +125,7 @@
 
 1. ~~**§7N**~~ ✅ лента: срочно / факты / сырое; карточка → День+разбор  
 2. ~~**pre-AI noise**~~ ✅ denylist паттернов («идея в Профите» / тех.анализ / фьючерсы) + near-dup + short-ticker + **geo/macro keep** (`news_noise.py`) — до DeepSeek; AI-промпт не шумит RU-гео как «макро без бумаги». Не бан всей площадки BCS Profit / Pulse — см. **§7S**  
-3. **§7F F-AI polish** — промпты `ai_noise` / `ai_ticker` (нужны для сортировки срочности); рядом — **DeepSeek usage meter** (план, см. §7F)  
+3. **§7F F-AI polish** — промпты `ai_noise` / `ai_ticker` (нужны для сортировки срочности); рядом — **DeepSeek usage meter** ✅ (баланс + токены на Новостях, см. §7F)  
 4. **Privacy** — **запланировано** (§7P), UI ещё нет  
 5. ~~**§7S Pulse allowlist v1**~~ ✅ fetch Interfax + Advokat_Manasyan via SSR mirror (`pulse_allowlist.py` + json); source tag `pulse_allowlist`; Investokrat out. **UI allowlist** позже · maybe/IR pack — не этот слой  
 6. **G** авто-watch (§7G) / H телефон  
@@ -218,14 +218,15 @@
 2. few-shot  
 3. holding + bond/equity-ветка в `ai_ticker`  
 
-### DeepSeek usage meter — 📋 planned (не кодим сейчас)
+### DeepSeek usage meter — ✅ (2026-10-02)
 
 Счётчик расхода API рядом с polish, не часть промптов §7F.
 
-- **Предпочтительно:** локальный usage-лог после каждого classify / ticker-review (prompt + completion tokens → оценка `$` по известным ценам DeepSeek).  
-- **Опционально позже:** баланс аккаунта, если DeepSeek API отдаст.  
-- **Опционально:** дневной `$` cap — стоп AI-кнопок при превышении.  
-- **UI:** маленькая status-строка на **Новостях** (не privacy портфеля §7P).  
+- **Лог:** `ai_usage.py` — после каждого `_call_deepseek` (classify / ticker-review) строка в `data/ai_usage.jsonl` (tokens + оценка `$` по прайсу в константах).  
+- **Баланс:** DeepSeek `GET /user/balance`, кэш 5 мин; после «Прогнать ИИ» — свежий.  
+- **API:** поля в `GET /api/news/ai-status` (`balance`, `today_*`, `month_*`).  
+- **UI:** строка рядом с «Прогнать ИИ» на **Новостях**; месяц — в tooltip.  
+- **Позже (по желанию):** дневной `$` cap — стоп AI-кнопок при превышении.  
 
 ---
 

@@ -67,7 +67,12 @@ class ResolveChartCacheTests(unittest.TestCase):
         self.session.close()
 
     def test_fresh_cache_slices_days_without_refetch(self):
-        full = _pts("2020-01-01", "2026-08-01", "2026-09-01", "2026-09-20")
+        from datetime import date, timedelta
+
+        def ago(n: int) -> str:
+            return (date.today() - timedelta(days=n)).isoformat()
+
+        full = _pts("2020-01-01", ago(60), ago(20), ago(5))
         save_chart_cache(
             self.session,
             ticker="BELU",
@@ -81,11 +86,8 @@ class ResolveChartCacheTests(unittest.TestCase):
                 self.session, "BELU", "equity", days=30
             )
             fc.assert_not_called()
-        self.assertEqual(len(pts), 2)  # Aug+Sep within ~30d of "today" may vary
-        # At least all returned are >= from_date
-        from datetime import date, timedelta
-
-        fd = (date.today() - timedelta(days=30)).isoformat()
+        self.assertEqual(len(pts), 2)
+        fd = ago(30)
         self.assertTrue(all(p.begin[:10] >= fd for p in pts))
 
     def test_stale_cache_returns_immediately_without_blocking_iss(self):

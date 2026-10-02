@@ -130,6 +130,12 @@
   color: var(--down);
 }
 
+.news-panel .ai-meter {
+  font-size: 0.74rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .news-panel .ai-hint {
   font-size: 0.72rem;
   color: var(--muted);
