@@ -4,7 +4,7 @@
 |---|---|
 | **Код** | [`../../Subtitle_App.py`](../../Subtitle_App.py) (`download_overlay_media`, fmt) · [`../../overlay_player.py`](../../overlay_player.py) (`scan_media`, список) |
 | **Слой** | IDEA-022 catalog / M+ follow-up |
-| **Статус** | ✅ C0 · ✅ C1 · ❌ C2 · ✅ C2b · ✅ C2c мини-проводник · ⏸ C3 |
+| **Статус** | ✅ C0 · ✅ C1 · ❌ C2 · ✅ C2b · ✅ C2c · ✅ C3 shuffle |
 | **Канон очереди** | [`../../MAP.md`](../../MAP.md) |
 | **Навигация** | [INDEX](INDEX.md) · [TZ](../TZ.md) · [part 20 🎞↓](20-overlay-wallpaper-download.md) · [Фон 12](12-overlay-music.md) |
 
@@ -88,11 +88,13 @@
 
 ---
 
-### C3 — Случайный трек / shuffle ⏸ позже
+### C3 — Случайный трек / shuffle ✅
 
-- Кнопка или хоткей «random next».
-- Режим shuffle очереди (опц. prefs).
-- После C2b (manage уже есть).
+**Сделано**
+- Toggle shuffle на транспорте + prefs `catalog_shuffle` (и чекбокс в Настр.)
+- **Ctrl+Shift+R** — разовый random (не текущий)
+- Shuffle вкл: «след.» / Ctrl+Shift+1 / конец трека → random
+- Тест: `test_catalog_shuffle.py` (`pick_random_playlist_index`)
 
 ---
 
@@ -102,11 +104,10 @@
 C0 (качество) ── ✅
 C1 (дата)     ── ✅
 C2 (карточки) ── ❌ откат
-C2b (manage)  ── ✅ в обычном списке
-C3 (random)   ── по запросу
+C2b (manage)  ── ✅
+C2c (explorer)── ✅ мини-проводник
+C3 (random)   ── ✅
 ```
-
-Порядок: **C0 → C1 → C2b** (C2 карточки сняты).
 
 ---
 

@@ -5,8 +5,8 @@
 
 | | |
 |---|---|
-| **Где мы** | Catalog ✅ · seek-зоны ±5с · drag-порядок · без скачка списка · C3 random по запросу ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
-| **Фокус** | C3 random — по запросу · или полировка |
+| **Где мы** | Catalog ✅ C3 shuffle · 2× край ±5с · 1× play/pause · drag-порядок ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
+| **Фокус** | полировка · 021 F1 dist · ⏸ наушник / B0 |
 | **Код scope** | `overlay_player.py` |
 
 ---
@@ -37,7 +37,7 @@
 | **3** | **C2** тяжёлые карточки | ❌ откат |
 | **4** | **C2b** удалить/переименовать | ✅ ПКМ / F2 / Del |
 | **5** | **C2c** мини-проводник: кадр+дата+бейджи | ✅ 1A/2A/3A |
-| **6** | **C3** random / shuffle | ⏸ по запросу |
+| **6** | **C3** random / shuffle | ✅ shuffle toggle · Ctrl+Shift+R |
 | — | Наушник multi-tap + SMTC | ⏸ (новые наушники) |
 | — | 025 B0 авто-плотность комфорт | ⏸ |
 | — | 🎞↓ обои mp4+mp3 MVP | ✅ part 20 |

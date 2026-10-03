@@ -22,11 +22,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QEvent, QSize, QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import QByteArray, QEvent, QPoint, QSize, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QCursor,
+    QDrag,
     QFont,
     QGuiApplication,
     QIcon,
@@ -47,6 +48,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -159,6 +161,12 @@ _SVG_ICONS: dict[str, str] = {
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
         f'stroke="{_SVG_STROKE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
         f'<polyline points="15 18 9 12 15 6"/></svg>'
+    ),
+    "shuffle": (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+        f'stroke="{_SVG_STROKE}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        f'<path d="M16 3h5v5"/><path d="M4 20L21 3"/>'
+        f'<path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>'
     ),
 }
 
@@ -405,6 +413,7 @@ _DEFAULT_HOTKEYS = {
     "hide_show": "Ctrl+Shift+O",
     "next_track": "Ctrl+Shift+1",
     "prev_track": "Ctrl+Shift+2",
+    "random_track": "Ctrl+Shift+R",
     "stop_track": "Ctrl+Shift+F1",
     "opacity_up": "Ctrl+]",
     "opacity_down": "Ctrl+[",
@@ -431,10 +440,11 @@ _DEFAULT_PREFS = {
     "auto_density_adapt_sec": 1,
     "catalog_sort": "date_asc",  # date_asc | date_desc | name | manual
     "catalog_order": {},  # abs folder → [track keys]
+    "catalog_shuffle": False,  # next / конец трека → случайный
     "hotkeys": dict(_DEFAULT_HOTKEYS),
 }
 
-_SEEK_ZONE_FRAC = 0.18  # края кадра: ← −5с · → +5с
+_SEEK_ZONE_FRAC = 0.18  # края кадра: 2× ← −5с · 2× → +5с
 
 # YouTube-id в скобках: [dQw4w9WgXcQ], [Ci_zad39Uhw]
 _YT_ID_BRACKET_RE = re.compile(r"\s*\[[a-zA-Z0-9_-]{10,13}\]\s*")
@@ -670,6 +680,8 @@ def load_overlay_prefs() -> dict:
                 if isinstance(fk, str) and isinstance(keys, list):
                     co[fk] = [str(k) for k in keys if k]
             data["catalog_order"] = co
+        if "catalog_shuffle" in raw:
+            data["catalog_shuffle"] = bool(raw["catalog_shuffle"])
         hk = raw.get("hotkeys")
         if isinstance(hk, dict):
             for key, default in _DEFAULT_HOTKEYS.items():
@@ -759,6 +771,24 @@ def apply_catalog_order(files: list[Path], order: list[str] | None) -> list[Path
     return out
 
 
+def pick_random_playlist_index(
+    count: int,
+    current: int | None = None,
+    *,
+    rng: random.Random | None = None,
+) -> int:
+    """Случайный индекс; при count>1 не повторяет current."""
+    if count <= 0:
+        return 0
+    r = rng or random
+    if count == 1:
+        return 0
+    if current is None or current < 0 or current >= count:
+        return int(r.randrange(count))
+    pool = [i for i in range(count) if i != current]
+    return int(r.choice(pool))
+
+
 def scan_media(folder: str, *, sort: str = "date_asc") -> list[Path]:
     """Список треков без дублей: один stem → видео важнее; тот же YouTube [id] → одна запись.
 
@@ -821,6 +851,30 @@ class CatalogListWidget(QListWidget):
     """Список с InternalMove; сигнал после drop для сохранения порядка."""
 
     order_changed = Signal()
+
+    def startDrag(self, supportedActions) -> None:  # noqa: N802
+        """Pixmap со строки (thumb+title) — иначе Qt тащит пустой item (текст '')."""
+        items = self.selectedItems()
+        if not items:
+            return
+        item = items[0]
+        mime = self.mimeData(items)
+        if mime is None:
+            return
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        row = self.itemWidget(item)
+        if isinstance(row, QWidget):
+            pix = row.grab()
+            if not pix.isNull():
+                drag.setPixmap(pix)
+                drag.setHotSpot(QPoint(min(36, pix.width() // 3), pix.height() // 2))
+            row.setVisible(False)
+        try:
+            drag.exec(supportedActions, Qt.DropAction.MoveAction)
+        finally:
+            if isinstance(row, QWidget):
+                row.setVisible(True)
 
     def dropEvent(self, event) -> None:  # noqa: N802
         super().dropEvent(event)
@@ -1618,6 +1672,13 @@ class OverlaySettingsDialog(QDialog):
         )
         self.preview_sound.setChecked(bool(prefs.get("preview_sound", True)))
         top.addRow(self.preview_sound)
+        self.catalog_shuffle = QCheckBox("Shuffle: следующий / конец трека — случайный")
+        self.catalog_shuffle.setToolTip(
+            "Вкл: Ctrl+Shift+1 и «след.» берут случайный трек (не текущий). "
+            "Ctrl+Shift+R — разовый random в любой момент."
+        )
+        self.catalog_shuffle.setChecked(bool(prefs.get("catalog_shuffle", False)))
+        top.addRow(self.catalog_shuffle)
         self.volume_spin = QSpinBox()
         self.volume_spin.setRange(0, 100)
         self.volume_spin.setSuffix(" %")
@@ -1688,6 +1749,7 @@ class OverlaySettingsDialog(QDialog):
             "vol_down": "Громкость − (глоб.)",
             "next_track": "След. трек",
             "prev_track": "Пред. трек",
+            "random_track": "Случайный трек",
             "stop_track": "Play/Pause (глоб.)",
             "opacity_up": "Прозрачность +",
             "opacity_down": "Прозрачность −",
@@ -1784,6 +1846,7 @@ class OverlaySettingsDialog(QDialog):
             "play_when_hidden": self.play_hidden.isChecked(),
             "catalog_preview": self.catalog_preview.isChecked(),
             "preview_sound": self.preview_sound.isChecked(),
+            "catalog_shuffle": self.catalog_shuffle.isChecked(),
             "volume": int(self.volume_spin.value()),
             "auto_density": self.auto_density.isChecked(),
             "auto_density_pct": int(self.auto_density_pct.value()),
@@ -1843,6 +1906,8 @@ class OverlayPlayerWindow(QWidget):
         self._video_click_timer.setSingleShot(True)
         self._video_click_timer.timeout.connect(self._on_video_single_click)
         self._suppress_video_click = False  # Release сразу после DblClick
+        self._pending_video_click_x: int | None = None
+        self._pending_video_click_w: int | None = None
         self._auto_density_timer = QTimer(self)
         self._auto_density_timer.setSingleShot(True)
         self._auto_density_timer.timeout.connect(self._on_auto_density_fire)
@@ -1950,15 +2015,35 @@ class OverlayPlayerWindow(QWidget):
         self.video.setMouseTracking(True)
         self.pulse.setMouseTracking(True)
         self.media_stack.setMouseTracking(True)
+        # HWND QVideoWidget ест клики: мышь пропускаем сквозь видео на video_hit.
+        if _HAS_MULTIMEDIA:
+            self.video.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+            )
 
-        # Превью: одна карточка — видео сверху, transport вплотную снизу (0 gap).
-        # Не оверлей на QVideoWidget: нативный HWND часто «отрывает» слой.
+        # Превью: кадр на весь стол; клики — video_hit (1× play/pause, 2× край ±5с / центр stage).
         self.video_column = QWidget()
         self.video_column.setObjectName("videoColumn")
         self._video_shell = QVBoxLayout(self.video_column)
         self._video_shell.setContentsMargins(0, 0, 0, 0)
         self._video_shell.setSpacing(0)
-        self._video_shell.addWidget(self.media_stack, stretch=1)
+
+        self.video_host = QWidget()
+        self.video_host.setObjectName("videoHost")
+        host_grid = QGridLayout(self.video_host)
+        host_grid.setContentsMargins(0, 0, 0, 0)
+        host_grid.setSpacing(0)
+        self.video_hit = QWidget(self.video_host)
+        self.video_hit.setObjectName("videoHit")
+        self.video_hit.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.video_hit.setStyleSheet("background: transparent;")
+        self.video_hit.setMouseTracking(True)
+        self.video_hit.installEventFilter(self)
+        host_grid.addWidget(self.video_hit, 0, 0)
+        host_grid.addWidget(self.media_stack, 0, 0)
+        self.media_stack.raise_()
+        self._video_shell.addWidget(self.video_host, stretch=1)
+        self._sync_video_mouse_passthrough()
 
         self.transport_bar = QWidget()
         self.transport_bar.setObjectName("transportBar")
@@ -1973,6 +2058,18 @@ class OverlayPlayerWindow(QWidget):
         ctrl.addWidget(self.stop_btn)
         self.next_btn = _icon_button("Следующий (Ctrl+Shift+1)", "next", self._play_next)
         ctrl.addWidget(self.next_btn)
+        self.shuffle_btn = QPushButton()
+        self.shuffle_btn.setObjectName("iconBtn")
+        self.shuffle_btn.setCheckable(True)
+        self.shuffle_btn.setIcon(_svg_icon("shuffle", 18))
+        self.shuffle_btn.setIconSize(QSize(18, 18))
+        self.shuffle_btn.setFixedSize(40, 40)
+        self.shuffle_btn.setToolTip(
+            "Shuffle: следующий / конец трека — случайный · Ctrl+Shift+R — разовый random"
+        )
+        self.shuffle_btn.setChecked(bool(self._prefs.get("catalog_shuffle", False)))
+        self.shuffle_btn.toggled.connect(self._on_catalog_shuffle_toggled)
+        ctrl.addWidget(self.shuffle_btn)
 
         self.time_label = QLabel("0:00 / 0:00")
         self.time_label.setObjectName("timeLabel")
@@ -2099,6 +2196,7 @@ class OverlayPlayerWindow(QWidget):
             self.play_btn,
             self.stop_btn,
             self.next_btn,
+            self.shuffle_btn,
             self.hide_btn,
         ):
             btn.setAutoDefault(False)
@@ -2156,6 +2254,7 @@ class OverlayPlayerWindow(QWidget):
             (hk.get("hide_show", "Ctrl+Shift+O"), "hide_show", self._toggle_hide_or_show),
             (hk.get("next_track", "Ctrl+Shift+1"), "next_track", self._play_next),
             (hk.get("prev_track", "Ctrl+Shift+2"), "prev_track", self._play_prev),
+            (hk.get("random_track", "Ctrl+Shift+R"), "random_track", self._play_random),
             (hk.get("stop_track", "Ctrl+Shift+F1"), "stop_track", self._toggle_play),
             (hk.get("opacity_up", "Ctrl+]"), "opacity_up", lambda: self._nudge_opacity(_OPACITY_STEP)),
             (hk.get("opacity_down", "Ctrl+["), "opacity_down", lambda: self._nudge_opacity(-_OPACITY_STEP)),
@@ -2355,7 +2454,7 @@ class OverlayPlayerWindow(QWidget):
             break
 
     def _on_catalog_order_changed(self) -> None:
-        """После drag-drop: пересоздать виджеты строк и сохранить порядок."""
+        """После drag-drop: сохранить порядок и полный reload (виджеты иначе «отлипают»)."""
         keys: list[str] = []
         for i in range(self.list.count()):
             item = self.list.item(i)
@@ -2364,27 +2463,15 @@ class OverlayPlayerWindow(QWidget):
             raw = item.data(Qt.ItemDataRole.UserRole)
             if not raw:
                 continue
-            path = Path(str(raw))
-            keys.append(catalog_track_key(path))
-            if self.list.itemWidget(item) is None:
-                title, has_video, _ha, video_path, _d = catalog_row_meta(path)
-                row = CatalogExplorerRow(title, has_video=has_video)
-                item.setSizeHint(QSize(200, _THUMB_H + 12))
-                self.list.setItemWidget(item, row)
-                if video_path is not None:
-                    cached = catalog_thumb_cache_path(video_path)
-                    try:
-                        if cached.is_file() and cached.stat().st_size > 0:
-                            row.set_thumb_file(cached)
-                    except OSError:
-                        pass
+            keys.append(catalog_track_key(Path(str(raw))))
+        if not keys:
+            return
         folder_key = os.path.abspath(self._folder)
         order_map = dict(self._prefs.get("catalog_order") or {})
         order_map[folder_key] = keys
         self._prefs = save_overlay_prefs(catalog_order=order_map, catalog_sort="manual")
-        self._refresh_playing_highlight()
-        if hasattr(self, "status"):
-            self.status.setText(f"{len(keys)} трек(ов) · порядок сохранён · ПКМ / F2 / Del")
+        # InternalMove + setItemWidget = пустые строки; пересобираем список
+        QTimer.singleShot(0, self._reload_list)
 
     def _selected_catalog_path(self) -> Path | None:
         item = self.list.currentItem()
@@ -2601,6 +2688,9 @@ class OverlayPlayerWindow(QWidget):
             if _qt_match(hk.get("prev_track", "Ctrl+Shift+2"), event):
                 self._play_prev()
                 return True
+            if _qt_match(hk.get("random_track", "Ctrl+Shift+R"), event):
+                self._play_random()
+                return True
             if _qt_match(hk.get("seek_back", "Left"), event):
                 self._seek_by(-_SEEK_MS)
                 return True
@@ -2629,7 +2719,10 @@ class OverlayPlayerWindow(QWidget):
                 btn = None
             if btn is not None and self._dispatch_mouse_hotkey(btn):
                 return True
-        if watched in (self.video, self.pulse, self.media_stack) and not self._click_through:
+        hit_surfaces = (self.video, self.pulse, self.media_stack)
+        if hasattr(self, "video_hit"):
+            hit_surfaces = hit_surfaces + (self.video_hit,)
+        if watched in hit_surfaces and not self._click_through:
             if et == QEvent.Type.MouseMove and self._stage_mode and self._playing:
                 self._bump_auto_density_idle()
             try:
@@ -2641,10 +2734,23 @@ class OverlayPlayerWindow(QWidget):
                     # Сбросить отложенный single — иначе dbl ещё и pause/play мигнёт
                     self._video_click_timer.stop()
                     self._suppress_video_click = True  # следующий Release от dbl
+                    x, width = self._video_click_xy_from_event(watched, event)
+                    self._pending_video_click_x = x
+                    self._pending_video_click_w = width
+                    # 2× по краям → ±5с; 2× по центру → stage/каталог
+                    edge_delta = self._video_edge_seek_delta()
+                    if edge_delta is not None:
+                        self._seek_by(edge_delta)
+                        if hasattr(self, "status"):
+                            sec = abs(edge_delta) // 1000
+                            arrow = "←" if edge_delta < 0 else "→"
+                            self.status.setText(f"Промотка {arrow} {sec}с")
+                        self._bump_auto_density_idle()
+                        return True
                     if self._stage_mode:
                         self._enter_catalog()
                         return True
-                    # Каталог: 2× по кадру → полное окно
+                    # Каталог: 2× по центру кадра → полное окно
                     if self._playing or self._last_play_path:
                         self._enter_stage()
                         return True
@@ -2653,7 +2759,7 @@ class OverlayPlayerWindow(QWidget):
                     if self._suppress_video_click:
                         self._suppress_video_click = False
                         return True
-                    # Ждём doubleClickInterval: один клик = play/pause (каталог и stage)
+                    # 1× везде — play/pause (после dbl-таймера)
                     interval = QApplication.doubleClickInterval()
                     self._video_click_timer.start(max(200, int(interval)))
                     self._bump_auto_density_idle()
@@ -2680,6 +2786,8 @@ class OverlayPlayerWindow(QWidget):
             self._play_next()
         elif action == "prev_track":
             self._play_prev()
+        elif action == "random_track":
+            self._play_random()
         elif action == "seek_back":
             self._seek_by(-_SEEK_MS)
         elif action == "seek_fwd":
@@ -2833,17 +2941,82 @@ class OverlayPlayerWindow(QWidget):
         finally:
             self._suppress_opacity_prefs = False
 
+    def _sync_video_mouse_passthrough(self) -> None:
+        """Видео рисуется, клики идут в video_hit (1× play/pause, 2× край ±5с)."""
+        ct = bool(getattr(self, "_click_through", False))
+        showing_video = (
+            hasattr(self, "media_stack")
+            and hasattr(self, "video")
+            and self.media_stack.currentWidget() is self.video
+        )
+        try:
+            if hasattr(self, "video") and self.video is not None:
+                self.video.setAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                    showing_video or ct,
+                )
+            if hasattr(self, "media_stack"):
+                # Стек поверх hit: при mp4 пропускаем мышь вниз на video_hit
+                self.media_stack.setAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                    ct or showing_video,
+                )
+            if hasattr(self, "pulse"):
+                self.pulse.setAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents, ct
+                )
+            for name in ("video_hit", "video_host", "video_column"):
+                w = getattr(self, name, None)
+                if w is not None:
+                    w.setAttribute(
+                        Qt.WidgetAttribute.WA_TransparentForMouseEvents, ct
+                    )
+        except Exception:
+            pass
+        # HWND видео иначе перехватывает клики до Qt — гасим input, пока на экране mp4
+        if sys.platform == "win32":
+            try:
+                self._set_video_input_enabled(not ct and not showing_video)
+            except Exception:
+                pass
+
+    def _video_click_xy_from_event(self, watched, event) -> tuple[int, int]:
+        """Локальный x и ширина кадра (для зон seek)."""
+        try:
+            if hasattr(event, "position"):
+                local = event.position().toPoint()
+            else:
+                local = event.pos()
+        except Exception:
+            local = None
+        hit = getattr(self, "video_hit", None) or self.media_stack
+        width = max(1, int(hit.width()))
+        if local is None:
+            mapped = hit.mapFromGlobal(QCursor.pos())
+            return int(mapped.x()), width
+        if watched is hit or watched is self.media_stack:
+            return int(local.x()), width
+        try:
+            global_pt = watched.mapToGlobal(local)
+            mapped = hit.mapFromGlobal(global_pt)
+            return int(mapped.x()), width
+        except Exception:
+            return int(local.x()), max(1, int(watched.width()))
+
     def _video_edge_seek_delta(self) -> int | None:
-        """Левый/правый край кадра → ±5с; середина → None (play/pause)."""
-        w = self.media_stack if hasattr(self, "media_stack") else None
-        if w is None or w.width() < 40:
-            return None
-        pos = w.mapFromGlobal(QCursor.pos())
-        x = int(pos.x())
-        width = max(1, int(w.width()))
+        """Левый/правый край (для 2×) → ±5с; середина → None (stage / 1× play)."""
+        x = self._pending_video_click_x
+        width = self._pending_video_click_w
+        if x is None or width is None or width < 40:
+            hit = getattr(self, "video_hit", None) or getattr(self, "media_stack", None)
+            if hit is None or hit.width() < 40:
+                return None
+            mapped = hit.mapFromGlobal(QCursor.pos())
+            x = int(mapped.x())
+            width = max(1, int(hit.width()))
         if x < 0 or x > width:
             return None
-        edge = max(28, int(width * _SEEK_ZONE_FRAC))
+        edge = max(40, int(width * _SEEK_ZONE_FRAC))
         if x <= edge:
             return -_SEEK_MS
         if x >= width - edge:
@@ -2851,18 +3024,12 @@ class OverlayPlayerWindow(QWidget):
         return None
 
     def _on_video_single_click(self) -> None:
-        """Один клик по кадру: края ±5с, центр — play/pause."""
+        """Один клик по кадру — play/pause (2× по краю — seek, не сюда)."""
         if self._click_through or not self.isVisible():
             return
-        delta = self._video_edge_seek_delta()
-        if delta is not None:
-            self._seek_by(delta)
-            if hasattr(self, "status"):
-                sec = abs(delta) // 1000
-                arrow = "←" if delta < 0 else "→"
-                self.status.setText(f"Промотка {arrow} {sec}с")
-            return
         self._toggle_play()
+        self._pending_video_click_x = None
+        self._pending_video_click_w = None
 
     def _play_selected(self, item: QListWidgetItem | None = None) -> None:
         if not _HAS_MULTIMEDIA or self._player is None:
@@ -2899,6 +3066,7 @@ class OverlayPlayerWindow(QWidget):
                 self.pulse.start()
             else:
                 self.pulse.stop()
+        self._sync_video_mouse_passthrough()
         self._player.setSource(QUrl.fromLocalFile(str(path)))
         # Даже «только открыть»: короткий play нужен, чтобы mp4 показал кадр
         self._player.play()
@@ -2977,7 +3145,36 @@ class OverlayPlayerWindow(QWidget):
         else:
             self._apply_catalog_opacity()
 
+    def _sync_shuffle_btn(self) -> None:
+        if not hasattr(self, "shuffle_btn"):
+            return
+        want = bool(self._prefs.get("catalog_shuffle", False))
+        if self.shuffle_btn.isChecked() != want:
+            self.shuffle_btn.blockSignals(True)
+            self.shuffle_btn.setChecked(want)
+            self.shuffle_btn.blockSignals(False)
+
+    def _on_catalog_shuffle_toggled(self, checked: bool) -> None:
+        self._prefs = save_overlay_prefs(catalog_shuffle=bool(checked))
+        tip = (
+            "Shuffle вкл: следующий / конец — случайный · Ctrl+Shift+R — разовый random"
+            if checked
+            else "Shuffle выкл · Ctrl+Shift+R — случайный трек"
+        )
+        self.shuffle_btn.setToolTip(tip)
+
+    def _play_random(self) -> None:
+        n = self.list.count()
+        if n <= 0:
+            return
+        idx = pick_random_playlist_index(n, self._playlist_index())
+        self._play_at_index(idx)
+        self._scroll_playing_soft()
+
     def _play_next(self) -> None:
+        if self._prefs.get("catalog_shuffle"):
+            self._play_random()
+            return
         self._play_at_index(self._playlist_index() + 1)
         self._scroll_playing_soft()
 
@@ -3552,12 +3749,7 @@ class OverlayPlayerWindow(QWidget):
         try:
             self._update_ct_label()
             self._write_root_exstyle()
-            self._set_video_input_enabled(True)
-            for w in (self.media_stack, self.video, self.pulse, self.video_column):
-                try:
-                    w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-                except Exception:
-                    pass
+            self._sync_video_mouse_passthrough()
             if was_ct:
                 hwnd = int(self.winId()) if self.winId() else 0
                 if hwnd:
@@ -3645,17 +3837,8 @@ class OverlayPlayerWindow(QWidget):
         hwnd = int(self.winId())
         self._write_root_exstyle()
         # Не WS_EX_TRANSPARENT на children (убивает QVideoWidget).
-        # Клики с video: EnableWindow(False) — рисует, но не принимает мышь.
         self._clear_child_transparent_styles(hwnd)
-        self._set_video_input_enabled(not self._click_through)
-        for w in (self.media_stack, self.video, self.pulse, self.video_column):
-            try:
-                w.setAttribute(
-                    Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-                    self._click_through,
-                )
-            except Exception:
-                pass
+        self._sync_video_mouse_passthrough()
         if not self._click_through:
             self._repair_video_surface()
         if self._stage_mode:
@@ -3719,7 +3902,7 @@ class OverlayPlayerWindow(QWidget):
                 pass
 
     def _repair_video_surface(self) -> None:
-        """После CT/hide: снять залипшие стили, EnableWindow(True). Без pause/play."""
+        """После CT/hide: снять залипшие стили; мышь — через _sync_video_mouse_passthrough."""
         if sys.platform != "win32":
             return
         if self._click_through:
@@ -3728,7 +3911,7 @@ class OverlayPlayerWindow(QWidget):
             root = int(self.winId()) if self.winId() else 0
             if root:
                 self._clear_child_transparent_styles(root)
-                self._set_video_input_enabled(True)
+            self._sync_video_mouse_passthrough()
         except Exception:
             pass
 
@@ -3754,6 +3937,7 @@ class OverlayPlayerWindow(QWidget):
                     self.volume_slider.blockSignals(True)
                     self.volume_slider.setValue(int(updates["volume"]))
                     self.volume_slider.blockSignals(False)
+                self._sync_shuffle_btn()
                 self._refresh_hint()
                 self._install_shortcuts()
                 self._apply_output_volume()
