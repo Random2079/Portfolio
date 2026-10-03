@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QSplitter,
@@ -165,59 +166,56 @@ OverlayPlayerWindow {
     color: #e2e8f0;
 }
 QListWidget {
-    background: #11151e;
+    background: #0f131a;
     border: 1px solid #1e2533;
     border-radius: 8px;
-    padding: 4px;
+    padding: 6px 4px;
     outline: none;
 }
 QListWidget::item {
-    padding: 2px 4px;
+    padding: 3px 4px;
+    margin: 1px 2px;
     border-radius: 6px;
+    border: none;
     color: #cbd5e1;
 }
 QListWidget::item:selected {
-    background: #1e3a5f;
+    background: #1a2740;
     color: #f8fafc;
-    border: 1px solid #38bdf8;
+    border: none;
 }
 QListWidget::item:hover {
-    background: #1a2230;
+    background: #161c28;
 }
 QListWidget::item:selected:hover {
-    background: #254a73;
+    background: #1e3050;
 }
 QWidget#catalogRow {
     background: transparent;
 }
 QLabel#catalogThumb {
-    background: #1a2230;
-    border-radius: 3px;
-    color: #64748b;
-    font-size: 14px;
+    background: #151a24;
+    border: 1px solid #243044;
+    border-radius: 4px;
+    color: #475569;
+    font-size: 13px;
 }
 QLabel#catalogTitle {
     color: #e2e8f0;
     font-size: 12px;
     font-weight: 500;
     background: transparent;
+    padding: 0;
 }
 QLabel#catalogTitle[playing="true"] {
     color: #7dd3fc;
-    font-weight: 700;
+    font-weight: 600;
 }
 QLabel#catalogMeta {
     color: #64748b;
-    font-size: 10px;
+    font-size: 11px;
     background: transparent;
-}
-QLabel#catalogBadge {
-    color: #7dd3fc;
-    background: #0c4a6e;
-    border: 1px solid #0ea5e9;
-    border-radius: 3px;
-    padding: 0px 5px;
-    font-size: 10px;
+    padding: 0;
 }
 QLabel#folderLabel, QLabel#timeLabel, QLabel#hintLabel, QLabel#statusLabel,
 QLabel#opacityCaption, QLabel#opacityValue, QLabel#ctLabel {
@@ -1024,12 +1022,12 @@ def ensure_catalog_thumb(video: Path, *, timeout: float = 15.0) -> Path | None:
     return None
 
 
-_THUMB_W = 64
-_THUMB_H = 36
+_THUMB_W = 72
+_THUMB_H = 42
 
 
 class CatalogExplorerRow(QWidget):
-    """Строка мини-проводника: кадр · имя · дата · бейджи mp4/mp3."""
+    """Строка мини-проводника: кадр · имя · тихая мета (дата · mp4 · mp3)."""
 
     def __init__(
         self,
@@ -1043,43 +1041,57 @@ class CatalogExplorerRow(QWidget):
         super().__init__(parent)
         self.setObjectName("catalogRow")
         self._base_title = title
+        self._mark = ""
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(4, 3, 6, 3)
-        lay.setSpacing(8)
+        lay.setContentsMargins(6, 5, 8, 5)
+        lay.setSpacing(10)
 
-        self.thumb = QLabel("♪" if not has_video else "…")
+        self.thumb = QLabel("♪" if not has_video else "")
         self.thumb.setObjectName("catalogThumb")
         self.thumb.setFixedSize(_THUMB_W, _THUMB_H)
         self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.thumb)
+        self.thumb.setScaledContents(False)
+        lay.addWidget(self.thumb, 0, Qt.AlignmentFlag.AlignVCenter)
 
         col = QVBoxLayout()
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(1)
+        col.setContentsMargins(0, 1, 0, 1)
+        col.setSpacing(3)
         self.title_lbl = QLabel(title)
         self.title_lbl.setObjectName("catalogTitle")
         self.title_lbl.setWordWrap(False)
         self.title_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self.title_lbl.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         col.addWidget(self.title_lbl)
 
-        meta = QHBoxLayout()
-        meta.setContentsMargins(0, 0, 0, 0)
-        meta.setSpacing(4)
-        self.date_lbl = QLabel(date_str)
-        self.date_lbl.setObjectName("catalogMeta")
-        meta.addWidget(self.date_lbl)
+        bits: list[str] = []
+        if date_str:
+            # короче: без секунд уже; убрать год если хочется воздуха — оставляем ДД.ММ.ГГ ЧЧ:ММ
+            bits.append(date_str)
         if has_video:
-            b = QLabel("mp4")
-            b.setObjectName("catalogBadge")
-            meta.addWidget(b)
+            bits.append("mp4")
         if has_audio:
-            b = QLabel("mp3")
-            b.setObjectName("catalogBadge")
-            meta.addWidget(b)
-        meta.addStretch(1)
-        col.addLayout(meta)
+            bits.append("mp3")
+        self.meta_lbl = QLabel(" · ".join(bits))
+        self.meta_lbl.setObjectName("catalogMeta")
+        self.meta_lbl.setWordWrap(False)
+        col.addWidget(self.meta_lbl)
         lay.addLayout(col, stretch=1)
-        self.setMinimumHeight(_THUMB_H + 10)
+        self.setMinimumHeight(_THUMB_H + 14)
+        self.setToolTip("ПКМ — переименовать / удалить · F2 · Del")
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._apply_elided_title()
+
+    def _apply_elided_title(self) -> None:
+        full = f"{self._mark}{self._base_title}"
+        w = max(40, self.title_lbl.width())
+        metrics = self.title_lbl.fontMetrics()
+        self.title_lbl.setText(
+            metrics.elidedText(full, Qt.TextElideMode.ElideRight, w)
+        )
 
     def set_thumb_file(self, path: Path | None) -> None:
         if path is None or not path.is_file():
@@ -1100,16 +1112,16 @@ class CatalogExplorerRow(QWidget):
 
     def set_playing_mark(self, active: bool, *, playing: bool) -> None:
         if active:
-            mark = "▶ " if playing else "· "
-            self.title_lbl.setText(f"{mark}{self._base_title}")
+            self._mark = "▶ " if playing else "· "
             self.title_lbl.setProperty("playing", True)
         else:
-            self.title_lbl.setText(self._base_title)
+            self._mark = ""
             self.title_lbl.setProperty("playing", False)
         sty = self.title_lbl.style()
         if sty is not None:
             sty.unpolish(self.title_lbl)
             sty.polish(self.title_lbl)
+        self._apply_elided_title()
 
 
 def _parse_hotkey(spec: str, *, allow_repeat: bool = False) -> tuple[int, int] | None:
@@ -1961,7 +1973,7 @@ class OverlayPlayerWindow(QWidget):
         self._splitter.setHandleWidth(6)
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 3)
-        self._splitter.setSizes([320, 740])
+        self._splitter.setSizes([380, 720])
         root.addWidget(self._splitter, stretch=1)
 
         # Нижний хром: плотность / каталог / скрыть (скрыт в каталоге) / подсказки
@@ -2201,7 +2213,7 @@ class OverlayPlayerWindow(QWidget):
                 has_audio=has_audio,
                 date_str=date_str,
             )
-            item.setSizeHint(QSize(160, _THUMB_H + 14))
+            item.setSizeHint(QSize(200, _THUMB_H + 18))
             self.list.addItem(item)
             self.list.setItemWidget(item, row)
             if video_path is not None:
@@ -2305,7 +2317,7 @@ class OverlayPlayerWindow(QWidget):
             if isinstance(row, CatalogExplorerRow):
                 row.set_playing_mark(is_now, playing=bool(self._playing and is_now))
             if is_now:
-                item.setBackground(QBrush(QColor("#0e3a4a")))
+                item.setBackground(QBrush(QColor("#152536")))
                 item.setData(_ROLE_PLAYING, True)
                 self.list.scrollToItem(item)
             else:
@@ -2954,7 +2966,7 @@ class OverlayPlayerWindow(QWidget):
                 self.resize(1100, 640)
             self.list.setMaximumWidth(16777215)
             self.list.show()
-            restore = self._splitter_sizes or [320, 740]
+            restore = self._splitter_sizes or [380, 720]
             self._splitter.setSizes(restore)
             self._update_chrome_visibility()
             self._apply_catalog_opacity()
