@@ -22,7 +22,17 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QEvent, QPoint, QSize, QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import (
+    QByteArray,
+    QEvent,
+    QPoint,
+    QSettings,
+    QSize,
+    QTimer,
+    QUrl,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -1417,8 +1427,8 @@ def _is_valid_hotkey_spec(spec: str) -> bool:
 
 
 class HotkeyCaptureEdit(QLineEdit):
-    """ЛКМ — выбрать поле (синяя рамка). Потом комбо/Mouse4/5 → черновик.
-    Enter — принять; Esc / ✕ — отмена. Без фокуса кнопки мыши поле не трогают."""
+    """ЛКМ — выбрать поле (синяя рамка). Комбо/Mouse4/5 — сразу принять.
+    Esc / ✕ — отмена. Без фокуса кнопки мыши поле не трогают."""
 
     committed = Signal(object)  # self после Enter
 
@@ -1451,9 +1461,8 @@ class HotkeyCaptureEdit(QLineEdit):
         )
         self.setToolTip(
             "1) ЛКМ по полю (синяя рамка)\n"
-            "2) жми сочетание или Mouse4/5\n"
-            "3) Enter — принять · Esc / ✕ — отмена\n"
-            "Backspace — подставить дефолт (потом всё равно Enter)"
+            "2) жми сочетание или Mouse4/5 — сразу сохранится в поле\n"
+            "Esc / ✕ — отмена · Backspace — дефолт"
         )
 
     def current_spec(self) -> str:
@@ -1480,7 +1489,7 @@ class HotkeyCaptureEdit(QLineEdit):
         if not self.hasFocus() or not self._drafting:
             return False
         self.setText(mspec)
-        self.selectAll()
+        self._commit_draft()
         return True
 
     def _commit_draft(self) -> None:
@@ -1540,7 +1549,7 @@ class HotkeyCaptureEdit(QLineEdit):
             )
         ):
             self.setText(self._default)
-            self.selectAll()
+            self._commit_draft()
             event.accept()
             return
         spec = _key_event_to_hotkey_spec(event)
@@ -1548,7 +1557,7 @@ class HotkeyCaptureEdit(QLineEdit):
             event.accept()
             return
         self.setText(_normalize_hotkey_spec(spec))
-        self.selectAll()
+        self._commit_draft()
         event.accept()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
@@ -1556,7 +1565,7 @@ class HotkeyCaptureEdit(QLineEdit):
         if mspec:
             if self.hasFocus() and self._drafting:
                 self.setText(mspec)
-                self.selectAll()
+                self._commit_draft()
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1648,6 +1657,9 @@ class PulseVisual(QWidget):
             painter.drawRoundedRect(int(x), int(y), int(bar_w), int(bh), 3, 3)
 
 
+_OVERLAY_SETTINGS_QSETTINGS = ("SubtitleRipper", "OverlaySettingsDialog")
+
+
 class OverlaySettingsDialog(QDialog):
     def __init__(self, prefs: dict, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1655,6 +1667,7 @@ class OverlaySettingsDialog(QDialog):
         self.setModal(True)
         self.resize(540, 640)
         self.setMinimumSize(480, 480)
+        self._geometry_restored = False
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
@@ -1727,7 +1740,7 @@ class OverlaySettingsDialog(QDialog):
         layout.addLayout(top)
 
         hk_title = QLabel(
-            "Хоткеи: ЛКМ по полю → комбо/Mouse4/5 → Enter принять · ✕/Esc отмена"
+            "Хоткеи: ЛКМ по полю → жми комбо (сразу принимается, без Enter) · ✕/Esc отмена"
         )
         hk_title.setStyleSheet("color:#94a3b8;font-size:12px;")
         layout.addWidget(hk_title)
@@ -1774,12 +1787,22 @@ class OverlaySettingsDialog(QDialog):
 
         hint = QLabel(
             "Пока окно открыто — глобальные хоткеи Фон выкл.\n"
-            "Без синей рамки Mouse4/5 поля не меняют. Одно сочетание = одна функция "
-            "(дубликат сбрасывается на дефолт). ✕ — отмена правки."
+            "Комбо в синем поле принимается сразу (OK внизу — сохранить всё и закрыть).\n"
+            "Одно сочетание = одна функция · ✕/Esc — отмена правки · «Сброс» — заводские."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#94a3b8;font-size:11px;")
         layout.addWidget(hint)
+        reset_row = QHBoxLayout()
+        self.reset_btn = QPushButton("Сброс к умолчанию")
+        self.reset_btn.setToolTip(
+            "Чекбоксы, громкость, авто-плотность и хоткеи — как при первом запуске. "
+            "Папка каталога и порядок треков не меняются."
+        )
+        self.reset_btn.clicked.connect(self._reset_to_defaults)
+        reset_row.addWidget(self.reset_btn)
+        reset_row.addStretch(1)
+        layout.addLayout(reset_row)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -1793,6 +1816,48 @@ class OverlaySettingsDialog(QDialog):
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not self._geometry_restored:
+            self._geometry_restored = True
+            qs = QSettings(*_OVERLAY_SETTINGS_QSETTINGS)
+            raw = qs.value("geometry")
+            if raw is not None:
+                self.restoreGeometry(raw)
+        # После map окна: иначе frameGeometry врёт и диалог снова уезжает «вне экрана»
+        QTimer.singleShot(0, self._clamp_geometry_on_screen)
+        QTimer.singleShot(50, self._clamp_geometry_on_screen)
+
+    def _clamp_geometry_on_screen(self) -> None:
+        from ui_motion import ensure_widget_on_screen
+
+        if not self.isVisible():
+            return
+        ensure_widget_on_screen(self, shrink=True, min_visible_frac=0.4)
+
+    def _reset_to_defaults(self) -> None:
+        ans = QMessageBox.question(
+            self,
+            "Сброс к умолчанию",
+            "Сбросить поля этого окна к заводским?\n\n"
+            "Папка каталога и порядок треков не меняются — только то, что видно здесь.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            return
+        self.play_hidden.setChecked(bool(_DEFAULT_PREFS["play_when_hidden"]))
+        self.catalog_preview.setChecked(bool(_DEFAULT_PREFS["catalog_preview"]))
+        self.preview_sound.setChecked(bool(_DEFAULT_PREFS["preview_sound"]))
+        self.catalog_shuffle.setChecked(bool(_DEFAULT_PREFS["catalog_shuffle"]))
+        self.volume_spin.setValue(int(_DEFAULT_PREFS["volume"]))
+        self.auto_density.setChecked(bool(_DEFAULT_PREFS["auto_density"]))
+        self.auto_density_pct.setValue(int(_DEFAULT_PREFS["auto_density_pct"]))
+        self.auto_density_idle.setValue(int(_DEFAULT_PREFS["auto_density_idle_sec"]))
+        self.auto_density_adapt.setValue(int(_DEFAULT_PREFS["auto_density_adapt_sec"]))
+        for key, edit in self.hk_edits.items():
+            edit.force_spec(_DEFAULT_HOTKEYS[key])
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         # Mouse4/5 → в выбранное поле, даже если курсор не над ним
@@ -1839,6 +1904,11 @@ class OverlaySettingsDialog(QDialog):
         super().reject()
 
     def done(self, result: int) -> None:  # noqa: N802
+        try:
+            qs = QSettings(*_OVERLAY_SETTINGS_QSETTINGS)
+            qs.setValue("geometry", self.saveGeometry())
+        except Exception:
+            pass
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
@@ -3251,10 +3321,7 @@ class OverlayPlayerWindow(QWidget):
         try:
             self._stage_mode = False
             self.showNormal()
-            if self._normal_geometry is not None:
-                self.setGeometry(self._normal_geometry)
-            else:
-                self.resize(1100, 640)
+            self._apply_catalog_window_geometry()
             self.list.setMaximumWidth(16777215)
             self.list.show()
             restore = self._splitter_sizes or [380, 720]
@@ -3805,9 +3872,25 @@ class OverlayPlayerWindow(QWidget):
         except Exception:
             pass
 
+    def _apply_catalog_window_geometry(self) -> None:
+        """Восстановить _normal_geometry с clamp (2-й монитор / QSettings off-screen)."""
+        from ui_motion import ensure_widget_on_screen
+
+        if self._normal_geometry is not None:
+            self.setGeometry(self._normal_geometry)
+        else:
+            self.resize(1100, 640)
+        ensure_widget_on_screen(self, shrink=True, min_visible_frac=0.4)
+        QTimer.singleShot(
+            0,
+            lambda: ensure_widget_on_screen(self, shrink=True, min_visible_frac=0.4),
+        )
+        if not self._stage_mode and not self.isFullScreen():
+            self._normal_geometry = self.geometry()
+
     def present_visible(self) -> None:
         """Кнопка «Фон» / повторный show: fade-in (канон как у SR shell)."""
-        from ui_motion import center_widget_on_screen, fade_window_opacity
+        from ui_motion import fade_window_opacity
 
         if self._click_through:
             self._set_click_through(False)
@@ -3819,11 +3902,7 @@ class OverlayPlayerWindow(QWidget):
             )
         self.setWindowOpacity(0.0)
         self.showNormal()
-        if self._normal_geometry is not None:
-            self.setGeometry(self._normal_geometry)
-        else:
-            self.resize(1100, 640)
-            center_widget_on_screen(self)
+        self._apply_catalog_window_geometry()
         self.raise_()
         self.activateWindow()
         fade_window_opacity(self, 1.0, duration_ms=180)

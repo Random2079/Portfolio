@@ -20,6 +20,7 @@ from PySide6.QtCore import (
     QRect,
     QSize,
 )
+from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsDropShadowEffect,
@@ -164,9 +165,36 @@ def _frame_fit_top_left(
     return x, y
 
 
+def _screen_for_widget_frame(frame: QRect):
+    """Экран с макс. пересечением рамы; если ни одного — primary."""
+    best = None
+    best_area = 0
+    for screen in QGuiApplication.screens():
+        inter = frame.intersected(screen.availableGeometry())
+        area = inter.width() * inter.height()
+        if area > best_area:
+            best_area = area
+            best = screen
+    if best is not None and best_area > 0:
+        return best
+    center = frame.center()
+    for screen in QGuiApplication.screens():
+        if screen.geometry().contains(center):
+            return screen
+    app = QApplication.instance()
+    if app is not None:
+        ps = app.primaryScreen()
+        if ps is not None:
+            return ps
+    screens = QGuiApplication.screens()
+    return screens[0] if screens else None
+
+
 def center_widget_on_screen(widget: QWidget) -> None:
     """Поставить окно в центр availableGeometry текущего экрана."""
     screen = widget.screen()
+    if screen is None:
+        screen = _screen_for_widget_frame(widget.frameGeometry())
     if screen is None:
         app = QApplication.instance()
         screen = app.primaryScreen() if app is not None else None
@@ -176,6 +204,65 @@ def center_widget_on_screen(widget: QWidget) -> None:
     frame = widget.frameGeometry()
     frame.moveCenter(avail.center())
     widget.move(frame.topLeft())
+
+
+def _screen_under_cursor():
+    """Экран под курсором, иначе primary."""
+    try:
+        scr = QGuiApplication.screenAt(QCursor.pos())
+    except Exception:
+        scr = None
+    if scr is not None:
+        return scr
+    app = QApplication.instance()
+    if app is not None:
+        return app.primaryScreen()
+    screens = QGuiApplication.screens()
+    return screens[0] if screens else None
+
+
+def ensure_widget_on_screen(
+    widget: QWidget, *, shrink: bool = True, min_visible_frac: float = 0.4
+) -> None:
+    """Сдвинуть/ужать окно; если почти вне экрана — центр на монитор под курсором."""
+    if widget.isMaximized() or widget.isFullScreen():
+        return
+    frame = widget.frameGeometry()
+    area = max(1, frame.width() * frame.height())
+    best_vis = 0
+    for scr in QGuiApplication.screens():
+        inter = frame.intersected(scr.availableGeometry())
+        best_vis = max(best_vis, inter.width() * inter.height())
+    # Слабый кусок / мёртвый монитор в QSettings → не «подтягивать», а центрировать
+    if best_vis <= 0 or best_vis < area * max(0.05, min(1.0, min_visible_frac)):
+        screen = _screen_under_cursor()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        if shrink:
+            max_w = max(320, avail.width() - 16)
+            max_h = max(240, avail.height() - 16)
+            widget.resize(min(widget.width(), max_w), min(widget.height(), max_h))
+        frame = widget.frameGeometry()
+        frame.moveCenter(avail.center())
+        widget.move(frame.topLeft())
+        return
+    screen = _screen_for_widget_frame(frame)
+    if screen is None:
+        screen = _screen_under_cursor()
+    if screen is None:
+        return
+    avail = screen.availableGeometry()
+    if shrink:
+        max_w = max(320, avail.width() - 16)
+        max_h = max(240, avail.height() - 16)
+        if widget.width() > max_w or widget.height() > max_h:
+            widget.resize(min(widget.width(), max_w), min(widget.height(), max_h))
+            frame = widget.frameGeometry()
+    fx, fy = _frame_fit_top_left(avail, frame.width(), frame.height(), frame.x(), frame.y())
+    dx = widget.x() - frame.x()
+    dy = widget.y() - frame.y()
+    widget.move(fx + dx, fy + dy)
 
 
 def fade_window_opacity(
