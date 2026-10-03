@@ -13,7 +13,7 @@
 - Выход: список кандидатов URL+title+published для дедупа в poller.
 - Pulse allowlist: профили из `pulse_allowlist.json` → `v1` only; mirror `tbank-online.com`; tag `pulse_allowlist`.
 - Pulse news-by-ticker: `/invest/stocks/{TICKER}/news/` → `investSocialNewsByTicker`; tag `pulse_news_ticker`; **equity only**.
-- Telegram allowlist: `t.me/s/{slug}` preview; v1 = Рубиндей (`rubinday50`); tag `telegram_allowlist`.
+- Telegram allowlist: `t.me/s/{slug}` preview; v1 = Рубиндей · РКИ · Интерфакс.Рынки; `i_moex` rejected; tag `telegram_allowlist`.
 
 ## Не здесь
 

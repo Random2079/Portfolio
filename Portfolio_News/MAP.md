@@ -324,9 +324,11 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 **Macro/geo:** keep только если сектор / regulatory / тикер из checkpoint / holdings — align с существующим geo-keep в `news_noise.py`.
 
 **Telegram allowlist v1 — код ✅ (2026-10-03):**  
-- Публичный preview `https://t.me/s/{slug}` (без userbot). Канал: [Рубиндей](https://t.me/rubinday50) (`rubinday50`).  
+- Публичный preview `https://t.me/s/{slug}` (без userbot).  
+- **v1:** [Рубиндей](https://t.me/rubinday50) · [РКИ](https://t.me/information_disclosure) · [Интерфакс.Рынки](https://t.me/ifax_go).  
+- **Не брать:** `i_moex` — не офиц. MOEX, «в разработке», в описании TA/идеи, лента смешанная (аудит 2026-10-03).  
 - Модуль: `telegram_allowlist.py` + json · tag `telegram_allowlist` · в `default_sources()`.  
-- Кэш постов на инстанс poll; матч `title_matches_ticker` по тексту поста; `is_noise_title`. Preview ~20 последних постов.  
+- Кэш постов на инстанс poll; матч `title_matches_ticker` по тексту поста; `is_noise_title`. Preview ~20 последних постов / канал.  
 - Failure: HTTP/parse fail → [] (остальные источники живы). Закрытые каналы / userbot — не этот слой.
 
 **Вне Pulse (later):** TG **Архивариус**, **Вредные** — daily fact sources; добавить slug в `telegram_allowlist.json`, не userbot.
@@ -334,7 +336,7 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 Критерий как у пользователя + Investing `чек-поинт.md`: факты/макро по секторам KS, не идеи / таргеты / интрадей. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
 
 **Coverage / poll hygiene (2026-10-03):**  
-- Активные источники в `default_sources()`: `google_news_ru` · `smartlab` · `pulse_allowlist` (2 канала: Interfax, Advokat_Manasyan) · `pulse_news_ticker` (equity) · `telegram_allowlist` (Рубиндей `rubinday50`).  
+- Активные источники в `default_sources()`: `google_news_ru` · `smartlab` · `pulse_allowlist` (2 канала: Interfax, Advokat_Manasyan) · `pulse_news_ticker` (equity) · `telegram_allowlist` (Рубиндей · РКИ · ifax_go).  
 - Аудит CLI: `python -m portfolio_news coverage --window 7d` (BCS scope; `--all-tickers` для offline).  
 - Google: минус `#сильный_рост` в RSS-query **ломал ленту (0 entries)** — убран; denylist title остаётся.  
 - После фикса — нужен `once`/`watch` poll, чтобы заполнить `pulse_news_ticker` и оживить Google в DB.

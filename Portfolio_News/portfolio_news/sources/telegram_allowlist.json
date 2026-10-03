@@ -5,6 +5,24 @@
       "slug": "rubinday50",
       "title": "Рубиндей",
       "url": "https://t.me/rubinday50"
+    },
+    {
+      "slug": "information_disclosure",
+      "title": "РКИ — раскрытие корп. информации",
+      "url": "https://t.me/information_disclosure"
+    },
+    {
+      "slug": "ifax_go",
+      "title": "Интерфакс. Рынки",
+      "url": "https://t.me/ifax_go"
+    }
+  ],
+  "rejected": [
+    {
+      "slug": "i_moex",
+      "title": "Дивиденды и отчёты компаний Мосбиржи",
+      "url": "https://t.me/i_moex",
+      "reason": "Не офиц. MOEX; самоописание «в разработке» + TA/идеи; смесь макро/чужих тем; точность не как у РКИ/ifax"
     }
   ]
 }
