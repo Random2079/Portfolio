@@ -42,10 +42,12 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -756,6 +758,134 @@ def resolve_play_path(path: Path) -> Path:
         if alt.is_file():
             return alt
     return path
+
+
+def _yt_id_from_name(name: str) -> str | None:
+    m = re.search(r"\[([A-Za-z0-9_-]{11})\]", name)
+    return m.group(1) if m else None
+
+
+_INVALID_WIN_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def sanitize_media_title(title: str) -> str:
+    """Имя для файла на диске (без [id] / расширения)."""
+    t = _INVALID_WIN_NAME.sub("", (title or "").strip())
+    t = re.sub(r"\s{2,}", " ", t).strip(" .")
+    return t[:180]
+
+
+def catalog_pair_files(path: Path) -> list[Path]:
+    """Все медиа пары: тот же [youtubeId] или тот же stem (C2b)."""
+    if path is None:
+        return []
+    folder = path.parent
+    ytid = _yt_id_from_name(path.name)
+    found: dict[str, Path] = {}
+
+    def _add(p: Path) -> None:
+        if not p.is_file() or p.suffix.lower() not in MEDIA_EXTS:
+            return
+        try:
+            found[str(p.resolve())] = p
+        except OSError:
+            found[str(p)] = p
+
+    if ytid:
+        needle = f"[{ytid}]"
+        try:
+            for p in folder.iterdir():
+                if needle in p.name:
+                    _add(p)
+        except OSError:
+            pass
+    else:
+        for stem_src in (path, resolve_play_path(path)):
+            for ext in MEDIA_EXTS:
+                _add(stem_src.with_suffix(ext))
+    if not found:
+        _add(path)
+    return sorted(found.values(), key=lambda p: p.name.lower())
+
+
+def build_renamed_filename(old: Path, new_title: str) -> str:
+    ytid = _yt_id_from_name(old.name)
+    if ytid:
+        return f"{new_title} [{ytid}]{old.suffix.lower()}"
+    return f"{new_title}{old.suffix.lower()}"
+
+
+def rename_catalog_pair(
+    path: Path, new_title: str
+) -> tuple[bool, str, Path | None]:
+    """Переименовать пару на диске. Возвращает (ok, msg, новый play-path)."""
+    title = sanitize_media_title(new_title)
+    if not title:
+        return False, "Пустое имя", None
+    files = catalog_pair_files(path)
+    if not files:
+        return False, "Файлы не найдены", None
+    plans: list[tuple[Path, Path]] = []
+    for f in files:
+        dest = f.with_name(build_renamed_filename(f, title))
+        try:
+            same = f.resolve() == dest.resolve()
+        except OSError:
+            same = f == dest
+        if not same and dest.exists():
+            return False, f"Уже есть файл: {dest.name}", None
+        plans.append((f, dest))
+
+    play_old = resolve_play_path(path)
+    try:
+        play_key = str(play_old.resolve())
+        path_key = str(path.resolve())
+    except OSError:
+        play_key = str(play_old)
+        path_key = str(path)
+
+    primary: Path | None = None
+    for src, dest in plans:
+        try:
+            src_key = str(src.resolve())
+        except OSError:
+            src_key = str(src)
+        if src_key in (play_key, path_key):
+            primary = dest
+        try:
+            if src.resolve() != dest.resolve():
+                src.rename(dest)
+        except OSError as exc:
+            return False, str(exc), None
+
+    if primary is None:
+        for _, dest in plans:
+            if dest.suffix.lower() in VIDEO_EXTS:
+                primary = dest
+                break
+        if primary is None and plans:
+            primary = plans[0][1]
+    return True, "ok", primary
+
+
+def delete_catalog_pair(path: Path) -> tuple[bool, str, list[str]]:
+    """Удалить пару с диска. (ok, msg, удалённые имена)."""
+    files = catalog_pair_files(path)
+    if not files:
+        return False, "Нечего удалять", []
+    deleted: list[str] = []
+    errors: list[str] = []
+    for f in files:
+        try:
+            f.unlink()
+            deleted.append(f.name)
+        except OSError as exc:
+            errors.append(f"{f.name}: {exc}")
+    if not deleted:
+        return False, "; ".join(errors) or "Ошибка удаления", []
+    if errors:
+        return True, "Частично: " + "; ".join(errors), deleted
+    return True, "ok", deleted
 
 
 def _parse_hotkey(spec: str, *, allow_repeat: bool = False) -> tuple[int, int] | None:
@@ -1519,6 +1649,8 @@ class OverlayPlayerWindow(QWidget):
         self.list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.setWordWrap(False)
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._on_list_context_menu)
         # 1-й клик — выбор; Enter/2× — play (если превью выкл); превью вкл — сразу play
         self.list.itemClicked.connect(self._on_list_clicked)
         self.list.itemActivated.connect(self._on_list_activated)
@@ -1870,6 +2002,125 @@ class OverlayPlayerWindow(QWidget):
                 item.setForeground(QBrush(QColor("#cbd5e1")))
                 item.setFont(font_normal)
                 item.setData(_ROLE_PLAYING, False)
+
+    def _selected_catalog_path(self) -> Path | None:
+        item = self.list.currentItem()
+        if item is None:
+            return None
+        raw = item.data(Qt.ItemDataRole.UserRole)
+        if not raw:
+            return None
+        return Path(str(raw))
+
+    def _on_list_context_menu(self, pos) -> None:
+        item = self.list.itemAt(pos)
+        if item is not None:
+            self.list.setCurrentItem(item)
+        path = self._selected_catalog_path()
+        if path is None:
+            return
+        menu = QMenu(self)
+        act_rename = menu.addAction("Переименовать…")
+        act_delete = menu.addAction("Удалить с диска…")
+        chosen = menu.exec(self.list.mapToGlobal(pos))
+        if chosen is act_rename:
+            self._rename_selected_track()
+        elif chosen is act_delete:
+            self._delete_selected_track()
+
+    def _pair_is_current_play(self, path: Path) -> bool:
+        if not self._last_play_path:
+            return False
+        try:
+            cur = str(Path(self._last_play_path).resolve())
+        except OSError:
+            cur = self._last_play_path
+        for f in catalog_pair_files(path):
+            try:
+                if str(f.resolve()) == cur:
+                    return True
+            except OSError:
+                if str(f) == cur:
+                    return True
+            play = resolve_play_path(f)
+            try:
+                if str(play.resolve()) == cur:
+                    return True
+            except OSError:
+                if str(play) == cur:
+                    return True
+        return False
+
+    def _rename_selected_track(self) -> None:
+        path = self._selected_catalog_path()
+        if path is None or not path.exists():
+            self.status.setText("Не выбран трек")
+            return
+        old_title = _clean_media_title(path.stem)
+        text, ok = QInputDialog.getText(
+            self,
+            "Переименовать",
+            "Новое имя (файлы на диске; [id] сохранится):",
+            QLineEdit.EchoMode.Normal,
+            old_title,
+        )
+        if not ok:
+            return
+        was_current = self._pair_is_current_play(path)
+        success, msg, new_path = rename_catalog_pair(path, text)
+        if not success:
+            QMessageBox.warning(self, "Переименовать", msg)
+            return
+        if was_current and new_path is not None:
+            play = resolve_play_path(new_path)
+            self._last_play_path = str(play.resolve()) if play.exists() else str(play)
+        self._reload_list()
+        # выделить переименованный
+        if new_path is not None:
+            want = str(resolve_play_path(new_path).resolve())
+            for i in range(self.list.count()):
+                it = self.list.item(i)
+                if it is None:
+                    continue
+                raw = Path(it.data(Qt.ItemDataRole.UserRole))
+                if str(resolve_play_path(raw).resolve()) == want:
+                    self.list.setCurrentItem(it)
+                    break
+        self.status.setText(f"Переименовано → {_clean_media_title((new_path or path).stem)}")
+
+    def _delete_selected_track(self) -> None:
+        path = self._selected_catalog_path()
+        if path is None:
+            self.status.setText("Не выбран трек")
+            return
+        files = catalog_pair_files(path)
+        if not files:
+            self.status.setText("Файлы не найдены")
+            return
+        names = "\n".join(f"• {f.name}" for f in files)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Удалить с диска")
+        box.setText(f"Удалить {len(files)} файл(ов) безвозвратно?")
+        box.setInformativeText(names)
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        if self._pair_is_current_play(path):
+            self._stop()
+            self._last_play_path = None
+        success, msg, deleted = delete_catalog_pair(path)
+        if not success:
+            QMessageBox.warning(self, "Удалить", msg)
+            return
+        self._reload_list()
+        if msg != "ok":
+            self.status.setText(msg)
+        else:
+            self.status.setText(f"Удалено: {len(deleted)} файл(ов)")
 
     def _on_list_clicked(self, item: QListWidgetItem | None = None) -> None:
         """Клик: всегда открыть кадр/фон; галка «сразу играет» — play или пауза."""
@@ -3122,6 +3373,21 @@ class OverlayPlayerWindow(QWidget):
             self._on_escape()
             event.accept()
             return
+        # C2b: F2 rename · Delete — только в каталоге, не в stage
+        if not self._stage_mode and not self._click_through:
+            fw = QApplication.focusWidget()
+            list_focus = fw is self.list or (
+                fw is not None and self.list.isAncestorOf(fw)
+            )
+            if list_focus or fw is self or fw is None:
+                if event.key() == Qt.Key.Key_F2:
+                    self._rename_selected_track()
+                    event.accept()
+                    return
+                if event.key() == Qt.Key.Key_Delete:
+                    self._delete_selected_track()
+                    event.accept()
+                    return
         super().keyPressEvent(event)
 
     def showEvent(self, event) -> None:  # noqa: N802
