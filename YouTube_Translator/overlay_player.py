@@ -8,14 +8,18 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.wintypes
+import hashlib
 import json
 import math
 import os
 import random
 import re
+import shutil
+import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QEvent, QSize, QTimer, QUrl, Qt, Signal
@@ -168,7 +172,7 @@ QListWidget {
     outline: none;
 }
 QListWidget::item {
-    padding: 8px 10px;
+    padding: 2px 4px;
     border-radius: 6px;
     color: #cbd5e1;
 }
@@ -182,6 +186,38 @@ QListWidget::item:hover {
 }
 QListWidget::item:selected:hover {
     background: #254a73;
+}
+QWidget#catalogRow {
+    background: transparent;
+}
+QLabel#catalogThumb {
+    background: #1a2230;
+    border-radius: 3px;
+    color: #64748b;
+    font-size: 14px;
+}
+QLabel#catalogTitle {
+    color: #e2e8f0;
+    font-size: 12px;
+    font-weight: 500;
+    background: transparent;
+}
+QLabel#catalogTitle[playing="true"] {
+    color: #7dd3fc;
+    font-weight: 700;
+}
+QLabel#catalogMeta {
+    color: #64748b;
+    font-size: 10px;
+    background: transparent;
+}
+QLabel#catalogBadge {
+    color: #7dd3fc;
+    background: #0c4a6e;
+    border: 1px solid #0ea5e9;
+    border-radius: 3px;
+    padding: 0px 5px;
+    font-size: 10px;
 }
 QLabel#folderLabel, QLabel#timeLabel, QLabel#hintLabel, QLabel#statusLabel,
 QLabel#opacityCaption, QLabel#opacityValue, QLabel#ctLabel {
@@ -888,6 +924,194 @@ def delete_catalog_pair(path: Path) -> tuple[bool, str, list[str]]:
     return True, "ok", deleted
 
 
+def catalog_row_meta(
+    path: Path,
+) -> tuple[str, bool, bool, Path | None, str]:
+    """title, has_video, has_audio, video_for_thumb, date_str (мини-проводник)."""
+    play = resolve_play_path(path)
+    pair = catalog_pair_files(path)
+    has_video = any(p.suffix.lower() in VIDEO_EXTS for p in pair)
+    has_audio = any(p.suffix.lower() in AUDIO_EXTS for p in pair)
+    video_path = play if play.suffix.lower() in VIDEO_EXTS and play.is_file() else None
+    if video_path is None:
+        for p in pair:
+            if p.suffix.lower() in VIDEO_EXTS:
+                video_path = p
+                break
+    title = _clean_media_title((video_path or path).stem)
+    mtime = 0.0
+    for p in pair or [path]:
+        try:
+            mtime = max(mtime, float(p.stat().st_mtime))
+        except OSError:
+            pass
+    try:
+        date_str = datetime.fromtimestamp(mtime).strftime("%d.%m.%Y %H:%M") if mtime else ""
+    except (OSError, ValueError, OverflowError):
+        date_str = ""
+    return title, has_video, has_audio, video_path, date_str
+
+
+def catalog_thumbs_dir(*, ensure: bool = False) -> Path:
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    d = Path(base) / ".subtitle_ripper" / "thumbs"
+    if ensure:
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def catalog_thumb_cache_path(video: Path) -> Path:
+    ytid = _yt_id_from_name(video.name)
+    key = ytid or hashlib.sha1(
+        str(video.resolve()).encode("utf-8", "replace")
+    ).hexdigest()[:16]
+    return catalog_thumbs_dir(ensure=False) / f"{key}.jpg"
+
+
+def ensure_catalog_thumb(video: Path, *, timeout: float = 15.0) -> Path | None:
+    """Кадр из mp4 → jpg. Без мигания консоли (CREATE_NO_WINDOW)."""
+    if not video.is_file() or video.suffix.lower() not in VIDEO_EXTS:
+        return None
+    catalog_thumbs_dir(ensure=True)
+    out = catalog_thumb_cache_path(video)
+    try:
+        if out.is_file() and out.stat().st_size > 0:
+            if out.stat().st_mtime >= video.stat().st_mtime:
+                return out
+    except OSError:
+        pass
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    run_kw: dict = {"capture_output": True, "timeout": timeout}
+    if os.name == "nt":
+        run_kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0
+        run_kw["startupinfo"] = si
+    try:
+        proc = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-ss",
+                "3",
+                "-i",
+                str(video),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "5",
+                "-vf",
+                "scale=112:-1",
+                str(out),
+            ],
+            **run_kw,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        if out.is_file() and out.stat().st_size > 0:
+            return out
+    except OSError:
+        return None
+    return None
+
+
+_THUMB_W = 64
+_THUMB_H = 36
+
+
+class CatalogExplorerRow(QWidget):
+    """Строка мини-проводника: кадр · имя · дата · бейджи mp4/mp3."""
+
+    def __init__(
+        self,
+        title: str,
+        *,
+        has_video: bool,
+        has_audio: bool,
+        date_str: str = "",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("catalogRow")
+        self._base_title = title
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(4, 3, 6, 3)
+        lay.setSpacing(8)
+
+        self.thumb = QLabel("♪" if not has_video else "…")
+        self.thumb.setObjectName("catalogThumb")
+        self.thumb.setFixedSize(_THUMB_W, _THUMB_H)
+        self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self.thumb)
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(1)
+        self.title_lbl = QLabel(title)
+        self.title_lbl.setObjectName("catalogTitle")
+        self.title_lbl.setWordWrap(False)
+        self.title_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        col.addWidget(self.title_lbl)
+
+        meta = QHBoxLayout()
+        meta.setContentsMargins(0, 0, 0, 0)
+        meta.setSpacing(4)
+        self.date_lbl = QLabel(date_str)
+        self.date_lbl.setObjectName("catalogMeta")
+        meta.addWidget(self.date_lbl)
+        if has_video:
+            b = QLabel("mp4")
+            b.setObjectName("catalogBadge")
+            meta.addWidget(b)
+        if has_audio:
+            b = QLabel("mp3")
+            b.setObjectName("catalogBadge")
+            meta.addWidget(b)
+        meta.addStretch(1)
+        col.addLayout(meta)
+        lay.addLayout(col, stretch=1)
+        self.setMinimumHeight(_THUMB_H + 10)
+
+    def set_thumb_file(self, path: Path | None) -> None:
+        if path is None or not path.is_file():
+            return
+        pm = QPixmap(str(path))
+        if pm.isNull():
+            return
+        scaled = pm.scaled(
+            _THUMB_W,
+            _THUMB_H,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        x = max(0, (scaled.width() - _THUMB_W) // 2)
+        y = max(0, (scaled.height() - _THUMB_H) // 2)
+        self.thumb.setPixmap(scaled.copy(x, y, _THUMB_W, _THUMB_H))
+        self.thumb.setText("")
+
+    def set_playing_mark(self, active: bool, *, playing: bool) -> None:
+        if active:
+            mark = "▶ " if playing else "· "
+            self.title_lbl.setText(f"{mark}{self._base_title}")
+            self.title_lbl.setProperty("playing", True)
+        else:
+            self.title_lbl.setText(self._base_title)
+            self.title_lbl.setProperty("playing", False)
+        sty = self.title_lbl.style()
+        if sty is not None:
+            sty.unpolish(self.title_lbl)
+            sty.polish(self.title_lbl)
+
+
 def _parse_hotkey(spec: str, *, allow_repeat: bool = False) -> tuple[int, int] | None:
     """'Ctrl+Shift+O' → (mods, vk) for RegisterHotKey. None if not parseable.
 
@@ -1531,6 +1755,7 @@ class OverlayPlayerWindow(QWidget):
     closed = Signal()
     hidden_keep = Signal()  # устарело: Ctrl+Shift+O больше не поднимает Translator
     hotkey_pressed = Signal(int)
+    thumb_ready = Signal(str, str, int)  # video, thumb_jpg, gen
 
     def __init__(self, start_dir: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1602,6 +1827,11 @@ class OverlayPlayerWindow(QWidget):
         self._player: QMediaPlayer | None = None
         self._audio: QAudioOutput | None = None
         self.hotkey_pressed.connect(self._on_global_hotkey)
+        self.thumb_ready.connect(self._on_thumb_ready)
+        self._thumb_jobs: list[tuple[str, int]] = []
+        self._thumb_busy = False
+        self._thumb_job_gen = 0
+        self._thumb_gen = 0
         if _HAS_MULTIMEDIA:
             self._player = QMediaPlayer(self)
             self._audio = QAudioOutput(self)
@@ -1948,36 +2178,122 @@ class OverlayPlayerWindow(QWidget):
     def _reload_list(self) -> None:
         self.folder_label.setText(self._folder)
         self.list.clear()
+        self._thumb_gen += 1
+        self._thumb_jobs = []
+        gen = self._thumb_gen
         sort = str(self._prefs.get("catalog_sort") or "date_asc")
         files = scan_media(self._folder, sort=sort)
         for path in files:
-            # Показываем stem без расширения и без [youtubeId]
-            title = _clean_media_title(path.stem)
-            label = title
-            if path.suffix.lower() in VIDEO_EXTS:
-                label = f"{title}  · video"
-            item = QListWidgetItem(label)
+            title, has_video, has_audio, video_path, date_str = catalog_row_meta(path)
+            item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, str(path))
-            item.setToolTip(path.name)
+            tip = path.name
+            if has_video and has_audio:
+                tip += " · mp4+mp3"
+            elif has_video:
+                tip += " · mp4"
+            elif has_audio:
+                tip += " · mp3"
+            item.setToolTip(tip)
+            row = CatalogExplorerRow(
+                title,
+                has_video=has_video,
+                has_audio=has_audio,
+                date_str=date_str,
+            )
+            item.setSizeHint(QSize(160, _THUMB_H + 14))
             self.list.addItem(item)
+            self.list.setItemWidget(item, row)
+            if video_path is not None:
+                cached = catalog_thumb_cache_path(video_path)
+                try:
+                    fresh = (
+                        cached.is_file()
+                        and cached.stat().st_size > 0
+                        and cached.stat().st_mtime >= video_path.stat().st_mtime
+                    )
+                except OSError:
+                    fresh = False
+                if fresh:
+                    row.set_thumb_file(cached)
+                else:
+                    self._thumb_jobs.append((str(video_path), self.list.count() - 1))
         self._refresh_playing_highlight()
         n = len(files)
         if n:
-            self.status.setText(f"{n} трек(ов) (без дублей stem/YouTube id)")
+            self.status.setText(f"{n} трек(ов) · ПКМ / F2 / Del")
         else:
             self.status.setText(
                 "Пусто — Папка… → выбери любой .mp3/.mp4 в нужной папке "
                 "(фильтр Медиа / Видео / Аудио)"
             )
+        if self._thumb_jobs:
+            QTimer.singleShot(400, lambda g=gen: self._kick_thumb_queue(g))
+
+    def _kick_thumb_queue(self, gen: int) -> None:
+        if gen != self._thumb_gen or self._thumb_busy or not self._thumb_jobs:
+            return
+        video_s, _row = self._thumb_jobs.pop(0)
+        self._thumb_busy = True
+        self._thumb_job_gen = gen
+        job_gen = gen
+
+        def _work() -> None:
+            thumb_path = ""
+            try:
+                thumb = ensure_catalog_thumb(Path(video_s))
+                if thumb is not None:
+                    thumb_path = str(thumb)
+            except Exception:
+                thumb_path = ""
+            try:
+                self.thumb_ready.emit(video_s, thumb_path, job_gen)
+            except (RuntimeError, TypeError):
+                pass
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_thumb_ready(self, video_s: str, thumb_s: str, gen: int = 0) -> None:
+        if self._thumb_job_gen == gen:
+            self._thumb_busy = False
+            self._thumb_job_gen = 0
+        if gen != self._thumb_gen:
+            self._kick_thumb_queue(self._thumb_gen)
+            return
+        if thumb_s:
+            thumb = Path(thumb_s)
+            try:
+                video_key = str(Path(video_s).resolve())
+            except OSError:
+                video_key = video_s
+            for i in range(self.list.count()):
+                item = self.list.item(i)
+                if item is None:
+                    continue
+                raw = Path(item.data(Qt.ItemDataRole.UserRole))
+                play = resolve_play_path(raw)
+                try:
+                    match = (
+                        str(play.resolve()) == video_key
+                        or str(raw.resolve()) == video_key
+                        or str(play) == video_s
+                        or str(raw) == video_s
+                    )
+                except OSError:
+                    match = str(play) == video_s or str(raw) == video_s
+                if not match:
+                    continue
+                w = self.list.itemWidget(item)
+                if isinstance(w, CatalogExplorerRow):
+                    w.set_thumb_file(thumb)
+                break
+        self._kick_thumb_queue(gen)
 
     def _refresh_playing_highlight(self) -> None:
         """Подсветка текущего трека (играет или просто открыт в кадре)."""
         if not hasattr(self, "list"):
             return
         current_key = self._last_play_path
-        font_normal = self.list.font()
-        font_play = QFont(font_normal)
-        font_play.setBold(True)
         for i in range(self.list.count()):
             item = self.list.item(i)
             if item is None:
@@ -1985,22 +2301,15 @@ class OverlayPlayerWindow(QWidget):
             raw = Path(item.data(Qt.ItemDataRole.UserRole))
             key = str(resolve_play_path(raw).resolve())
             is_now = bool(current_key and key == current_key)
-            base = item.text()
-            if base.startswith("▶ ") or base.startswith("· "):
-                base = base[2:]
+            row = self.list.itemWidget(item)
+            if isinstance(row, CatalogExplorerRow):
+                row.set_playing_mark(is_now, playing=bool(self._playing and is_now))
             if is_now:
-                mark = "▶ " if self._playing else "· "
-                item.setText(f"{mark}{base}")
                 item.setBackground(QBrush(QColor("#0e3a4a")))
-                item.setForeground(QBrush(QColor("#7dd3fc")))
-                item.setFont(font_play)
                 item.setData(_ROLE_PLAYING, True)
                 self.list.scrollToItem(item)
             else:
-                item.setText(base)
                 item.setBackground(QBrush())
-                item.setForeground(QBrush(QColor("#cbd5e1")))
-                item.setFont(font_normal)
                 item.setData(_ROLE_PLAYING, False)
 
     def _selected_catalog_path(self) -> Path | None:
@@ -3640,13 +3949,15 @@ class OverlayPlayerWindow(QWidget):
         if not hwnd:
             return
         smtc = OverlaySmtc()
-        # emit → Qt-поток (winrt callback может быть с другого потока)
-        ok = smtc.bind(
-            hwnd,
-            on_play_pause=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_PLAY),
-            on_next=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_NEXT),
-            on_prev=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_PREV),
-        )
+        try:
+            ok = smtc.bind(
+                hwnd,
+                on_play_pause=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_PLAY),
+                on_next=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_NEXT),
+                on_prev=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_PREV),
+            )
+        except BaseException:
+            return
         if ok:
             self._smtc = smtc
             playing = bool(
@@ -3660,7 +3971,10 @@ class OverlayPlayerWindow(QWidget):
                     title = _clean_media_title(Path(self._last_play_path).stem)
                 except Exception:
                     title = None
-            smtc.set_playing(playing, title=title)
+            try:
+                smtc.set_playing(playing, title=title)
+            except BaseException:
+                self._smtc = None
 
     def _sync_smtc_playing(self, playing: bool) -> None:
         if self._smtc is None:
