@@ -8,14 +8,11 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.wintypes
-import hashlib
 import json
 import math
 import os
 import random
 import re
-import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -169,8 +166,8 @@ QListWidget {
     outline: none;
 }
 QListWidget::item {
-    padding: 2px 4px;
-    border-radius: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
     color: #cbd5e1;
 }
 QListWidget::item:selected {
@@ -183,38 +180,6 @@ QListWidget::item:hover {
 }
 QListWidget::item:selected:hover {
     background: #254a73;
-}
-QWidget#catalogCard {
-    background: transparent;
-}
-QLabel#catalogThumb {
-    background: #1a2230;
-    border-radius: 4px;
-    color: #64748b;
-    font-size: 16px;
-}
-QLabel#catalogTitle {
-    color: #e2e8f0;
-    font-size: 13px;
-    font-weight: 500;
-    background: transparent;
-}
-QLabel#catalogTitle[playing="true"] {
-    color: #7dd3fc;
-    font-weight: 700;
-}
-QLabel#catalogBadge {
-    color: #94a3b8;
-    background: #1e2533;
-    border: 1px solid #334155;
-    border-radius: 4px;
-    padding: 1px 6px;
-    font-size: 10px;
-}
-QLabel#catalogBadge[on="true"] {
-    color: #7dd3fc;
-    border-color: #0ea5e9;
-    background: #0c4a6e;
 }
 QLabel#folderLabel, QLabel#timeLabel, QLabel#hintLabel, QLabel#statusLabel,
 QLabel#opacityCaption, QLabel#opacityValue, QLabel#ctLabel {
@@ -791,198 +756,6 @@ def resolve_play_path(path: Path) -> Path:
         if alt.is_file():
             return alt
     return path
-
-
-def _yt_id_from_name(name: str) -> str | None:
-    m = re.search(r"\[([A-Za-z0-9_-]{11})\]", name)
-    return m.group(1) if m else None
-
-
-def catalog_entry_meta(path: Path) -> tuple[str, bool, bool, Path | None]:
-    """title, has_video, has_audio, video_path_for_thumb (C2)."""
-    play = resolve_play_path(path)
-    has_video = play.suffix.lower() in VIDEO_EXTS and play.is_file()
-    video_path = play if has_video else None
-
-    has_audio = path.suffix.lower() in AUDIO_EXTS and path.is_file()
-    if not has_audio:
-        for stem_src in (path, play):
-            for ext in AUDIO_EXTS:
-                cand = stem_src.with_suffix(ext)
-                if cand.is_file():
-                    has_audio = True
-                    break
-            if has_audio:
-                break
-    if not has_audio:
-        ytid = _yt_id_from_name(path.name) or _yt_id_from_name(play.name)
-        if ytid:
-            needle = f"[{ytid}]"
-            try:
-                for p in path.parent.iterdir():
-                    if (
-                        p.is_file()
-                        and p.suffix.lower() in AUDIO_EXTS
-                        and needle in p.name
-                    ):
-                        has_audio = True
-                        break
-            except OSError:
-                pass
-
-    title = _clean_media_title((play if has_video else path).stem)
-    return title, has_video, has_audio, video_path
-
-
-def catalog_thumbs_dir(*, ensure: bool = False) -> Path:
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
-    d = Path(base) / ".subtitle_ripper" / "thumbs"
-    if ensure:
-        d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def catalog_thumb_cache_path(video: Path) -> Path:
-    ytid = _yt_id_from_name(video.name)
-    key = ytid or hashlib.sha1(str(video.resolve()).encode("utf-8", "replace")).hexdigest()[
-        :16
-    ]
-    return catalog_thumbs_dir(ensure=False) / f"{key}.jpg"
-
-
-def ensure_catalog_thumb(video: Path, *, timeout: float = 15.0) -> Path | None:
-    """Кадр из mp4 → jpg в кэше. None если ffmpeg нет / ошибка."""
-    if not video.is_file() or video.suffix.lower() not in VIDEO_EXTS:
-        return None
-    catalog_thumbs_dir(ensure=True)
-    out = catalog_thumb_cache_path(video)
-    try:
-        if out.is_file() and out.stat().st_size > 0:
-            if out.stat().st_mtime >= video.stat().st_mtime:
-                return out
-    except OSError:
-        pass
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        return None
-    try:
-        proc = subprocess.run(
-            [
-                ffmpeg,
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-y",
-                "-ss",
-                "3",
-                "-i",
-                str(video),
-                "-frames:v",
-                "1",
-                "-q:v",
-                "5",
-                "-vf",
-                "scale=144:-1",
-                str(out),
-            ],
-            capture_output=True,
-            timeout=timeout,
-            creationflags=0x08000000 if os.name == "nt" else 0,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0:
-        return None
-    try:
-        if out.is_file() and out.stat().st_size > 0:
-            return out
-    except OSError:
-        return None
-    return None
-
-
-_THUMB_W = 72
-_THUMB_H = 40
-
-
-class CatalogCardWidget(QWidget):
-    """C2: превью + название + бейджи mp4/mp3."""
-
-    def __init__(
-        self,
-        title: str,
-        *,
-        has_video: bool,
-        has_audio: bool,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.setObjectName("catalogCard")
-        self._base_title = title
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(6, 4, 8, 4)
-        lay.setSpacing(10)
-
-        self.thumb = QLabel("♪" if not has_video else "…")
-        self.thumb.setObjectName("catalogThumb")
-        self.thumb.setFixedSize(_THUMB_W, _THUMB_H)
-        self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.thumb)
-
-        col = QVBoxLayout()
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(3)
-        self.title_lbl = QLabel(title)
-        self.title_lbl.setObjectName("catalogTitle")
-        self.title_lbl.setWordWrap(False)
-        self.title_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        col.addWidget(self.title_lbl)
-
-        badges = QHBoxLayout()
-        badges.setContentsMargins(0, 0, 0, 0)
-        badges.setSpacing(4)
-        self.badge_mp4 = QLabel("mp4")
-        self.badge_mp4.setObjectName("catalogBadge")
-        self.badge_mp4.setProperty("on", True)
-        self.badge_mp4.setVisible(has_video)
-        badges.addWidget(self.badge_mp4)
-        self.badge_mp3 = QLabel("mp3")
-        self.badge_mp3.setObjectName("catalogBadge")
-        self.badge_mp3.setProperty("on", True)
-        self.badge_mp3.setVisible(has_audio)
-        badges.addWidget(self.badge_mp3)
-        badges.addStretch(1)
-        col.addLayout(badges)
-        lay.addLayout(col, stretch=1)
-        self.setMinimumHeight(_THUMB_H + 12)
-
-    def set_thumb_file(self, path: Path | None) -> None:
-        if path is None or not path.is_file():
-            return
-        pm = QPixmap(str(path))
-        if pm.isNull():
-            return
-        scaled = pm.scaled(
-            _THUMB_W,
-            _THUMB_H,
-            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        x = max(0, (scaled.width() - _THUMB_W) // 2)
-        y = max(0, (scaled.height() - _THUMB_H) // 2)
-        self.thumb.setPixmap(scaled.copy(x, y, _THUMB_W, _THUMB_H))
-        self.thumb.setText("")
-
-    def set_playing_mark(self, active: bool, *, playing: bool) -> None:
-        if active:
-            mark = "▶ " if playing else "· "
-            self.title_lbl.setText(f"{mark}{self._base_title}")
-            self.title_lbl.setProperty("playing", True)
-        else:
-            self.title_lbl.setText(self._base_title)
-            self.title_lbl.setProperty("playing", False)
-        self.title_lbl.style().unpolish(self.title_lbl)
-        self.title_lbl.style().polish(self.title_lbl)
 
 
 def _parse_hotkey(spec: str, *, allow_repeat: bool = False) -> tuple[int, int] | None:
@@ -1628,7 +1401,6 @@ class OverlayPlayerWindow(QWidget):
     closed = Signal()
     hidden_keep = Signal()  # устарело: Ctrl+Shift+O больше не поднимает Translator
     hotkey_pressed = Signal(int)
-    thumb_ready = Signal(str, str, int)  # video_path, thumb_jpg, gen
 
     def __init__(self, start_dir: str | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1700,10 +1472,6 @@ class OverlayPlayerWindow(QWidget):
         self._player: QMediaPlayer | None = None
         self._audio: QAudioOutput | None = None
         self.hotkey_pressed.connect(self._on_global_hotkey)
-        self.thumb_ready.connect(self._on_thumb_ready)
-        self._thumb_jobs: list[tuple[str, int]] = []  # video_path, item row
-        self._thumb_busy = False
-        self._thumb_gen = 0  # bump on reload — ignore stale thumbs
         if _HAS_MULTIMEDIA:
             self._player = QMediaPlayer(self)
             self._audio = QAudioOutput(self)
@@ -2048,104 +1816,36 @@ class OverlayPlayerWindow(QWidget):
     def _reload_list(self) -> None:
         self.folder_label.setText(self._folder)
         self.list.clear()
-        self._thumb_gen += 1
-        self._thumb_jobs = []
-        self._thumb_busy = False
-        gen = self._thumb_gen
         sort = str(self._prefs.get("catalog_sort") or "date_asc")
         files = scan_media(self._folder, sort=sort)
         for path in files:
-            title, has_video, has_audio, video_path = catalog_entry_meta(path)
-            item = QListWidgetItem(title)
+            # Показываем stem без расширения и без [youtubeId]
+            title = _clean_media_title(path.stem)
+            label = title
+            if path.suffix.lower() in VIDEO_EXTS:
+                label = f"{title}  · video"
+            item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, str(path))
-            tip_bits = [path.name]
-            if has_video:
-                tip_bits.append("mp4")
-            if has_audio:
-                tip_bits.append("mp3")
-            item.setToolTip(" · ".join(tip_bits))
-            card = CatalogCardWidget(title, has_video=has_video, has_audio=has_audio)
-            item.setSizeHint(card.sizeHint().expandedTo(QSize(120, _THUMB_H + 16)))
+            item.setToolTip(path.name)
             self.list.addItem(item)
-            self.list.setItemWidget(item, card)
-            if video_path is not None:
-                cached = catalog_thumb_cache_path(video_path)
-                try:
-                    fresh = (
-                        cached.is_file()
-                        and cached.stat().st_size > 0
-                        and cached.stat().st_mtime >= video_path.stat().st_mtime
-                    )
-                except OSError:
-                    fresh = False
-                if fresh:
-                    card.set_thumb_file(cached)
-                else:
-                    self._thumb_jobs.append((str(video_path), self.list.count() - 1))
         self._refresh_playing_highlight()
         n = len(files)
         if n:
-            self.status.setText(f"{n} трек(ов) · карточки (mp4/mp3)")
+            self.status.setText(f"{n} трек(ов) (без дублей stem/YouTube id)")
         else:
             self.status.setText(
                 "Пусто — Папка… → выбери любой .mp3/.mp4 в нужной папке "
                 "(фильтр Медиа / Видео / Аудио)"
             )
-        if self._thumb_jobs:
-            QTimer.singleShot(0, lambda g=gen: self._kick_thumb_queue(g))
-
-    def _kick_thumb_queue(self, gen: int) -> None:
-        if gen != self._thumb_gen or self._thumb_busy or not self._thumb_jobs:
-            return
-        video_s, _row = self._thumb_jobs.pop(0)
-        self._thumb_busy = True
-        job_gen = gen
-
-        def _work() -> None:
-            thumb = ensure_catalog_thumb(Path(video_s))
-            # QueuedConnection → UI-поток
-            self.thumb_ready.emit(video_s, str(thumb) if thumb else "", job_gen)
-
-        threading.Thread(target=_work, daemon=True).start()
-
-    def _on_thumb_ready(self, video_s: str, thumb_s: str, gen: int = 0) -> None:
-        self._thumb_busy = False
-        if gen == self._thumb_gen and thumb_s:
-            thumb = Path(thumb_s)
-            video_key = ""
-            try:
-                video_key = str(Path(video_s).resolve())
-            except OSError:
-                video_key = video_s
-            for i in range(self.list.count()):
-                item = self.list.item(i)
-                if item is None:
-                    continue
-                raw = Path(item.data(Qt.ItemDataRole.UserRole))
-                play = resolve_play_path(raw)
-                try:
-                    match = (
-                        str(play.resolve()) == video_key
-                        or str(raw.resolve()) == video_key
-                        or str(play) == video_s
-                        or str(raw) == video_s
-                    )
-                except OSError:
-                    match = str(play) == video_s or str(raw) == video_s
-                if not match:
-                    continue
-                w = self.list.itemWidget(item)
-                if isinstance(w, CatalogCardWidget):
-                    w.set_thumb_file(thumb)
-                break
-        if gen == self._thumb_gen:
-            self._kick_thumb_queue(gen)
 
     def _refresh_playing_highlight(self) -> None:
         """Подсветка текущего трека (играет или просто открыт в кадре)."""
         if not hasattr(self, "list"):
             return
         current_key = self._last_play_path
+        font_normal = self.list.font()
+        font_play = QFont(font_normal)
+        font_play.setBold(True)
         for i in range(self.list.count()):
             item = self.list.item(i)
             if item is None:
@@ -2153,15 +1853,22 @@ class OverlayPlayerWindow(QWidget):
             raw = Path(item.data(Qt.ItemDataRole.UserRole))
             key = str(resolve_play_path(raw).resolve())
             is_now = bool(current_key and key == current_key)
-            card = self.list.itemWidget(item)
-            if isinstance(card, CatalogCardWidget):
-                card.set_playing_mark(is_now, playing=bool(self._playing and is_now))
+            base = item.text()
+            if base.startswith("▶ ") or base.startswith("· "):
+                base = base[2:]
             if is_now:
+                mark = "▶ " if self._playing else "· "
+                item.setText(f"{mark}{base}")
                 item.setBackground(QBrush(QColor("#0e3a4a")))
+                item.setForeground(QBrush(QColor("#7dd3fc")))
+                item.setFont(font_play)
                 item.setData(_ROLE_PLAYING, True)
                 self.list.scrollToItem(item)
             else:
+                item.setText(base)
                 item.setBackground(QBrush())
+                item.setForeground(QBrush(QColor("#cbd5e1")))
+                item.setFont(font_normal)
                 item.setData(_ROLE_PLAYING, False)
 
     def _on_list_clicked(self, item: QListWidgetItem | None = None) -> None:

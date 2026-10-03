@@ -34,7 +34,7 @@
 | 6 | Split 📥 vs ✨ ИИ + Отмена | D6 | ✅ | 📥 = субы текущего URL без ИИ; ✨ = разбор текущего id; ✕ Отмена видна при busy |
 | 7 | Скачивание музыки (MP3) | M | ✅→superseded | UI ↓ MP3 убран; качка через **🎞↓** (№21 / part 20) |
 | **21** | Обои mp4+mp3 для Фона | M+ | ✅ | **🎞↓** → mp4+mp3 в `YouTube_DL` · [part 20](parts/20-overlay-wallpaper-download.md) |
-| **22** | Фон: max quality + каталог UX | 022c | 🟡 | ✅ C0–C2 · ⬜ C2b delete/rename · ⏸ C3 · [part 21](parts/21-overlay-catalog-quality.md) · [MAP](../MAP.md) |
+| **22** | Фон: max quality + каталог UX | 022c | 🟡 | ✅ C0+C1 · ⬜ C2 · ⬜ C2b delete/rename · ⏸ C3 · [part 21](parts/21-overlay-catalog-quality.md) · [MAP](../MAP.md) |
 | 8 | ui_motion (микроанимации) | G | ✅ | Hover/press + BusyPulse на Скачать / ИИ |
 | 9 | Файлы `dist/` внутри приложения | IDEA-021 | 🟡 F0 | Список + проводник ✅ · delete/rename ⬜ · [part 19](parts/19-dist-files.md) |
 | 10 | Overlay музыка/mp4 поверх окон | IDEA-022 | 🟡 MVP | Кнопка **🎞 Фон** → `overlay_player.py`: каталог, play+визуал, opacity, click-through |
@@ -65,7 +65,7 @@
 | W — Размер окна / Snap / clamp | ✅ | soft-lock download; не ломать `WS_THICKFRAME` |
 | M — Музыка MP3 | ✅→M+ | UI MP3-only убран; см. M+ / part 20 |
 | **M+ — Обои mp4+mp3** | **✅** | **🎞↓** · [part 20](parts/20-overlay-wallpaper-download.md) |
-| **022c — Фон catalog** | **🟡** | ✅ C0–C2 · ⬜ **C2b** · ⏸ C3 · [part 21](parts/21-overlay-catalog-quality.md) · [MAP](../MAP.md) |
+| **022c — Фон catalog** | **🟡** | ✅ C0+C1 · ⬜ **C2** · ⬜ C2b · ⏸ C3 · [part 21](parts/21-overlay-catalog-quality.md) · [MAP](../MAP.md) |
 | F — Закладки | ✅ | `bookmarks.json`, Chrome `--app=` fallback |
 | G — ui_motion | ✅ | `ui_motion.py` |
 | E — «Полный браузер-клон» | 🚫 | **не в scope** |
