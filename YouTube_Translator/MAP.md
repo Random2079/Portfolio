@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| **Где мы** | Catalog ✅ C3 · Настр. Фон: clamp geometry, сброс, хоткеи сразу ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
+| **Где мы** | Catalog ✅ C3 · полное окно сразу со сквозь (pref) · Настр. clamp/сброс/хоткеи ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
 | **Фокус** | полировка · 021 F1 dist · ⏸ наушник / B0 |
 | **Код scope** | `overlay_player.py` |
 

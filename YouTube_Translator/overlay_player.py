@@ -446,6 +446,7 @@ _DEFAULT_PREFS = {
     "stage_opacity": 85,
     "volume": 10,
     "play_when_hidden": True,
+    "stage_click_through": True,  # полное окно сразу со сквозь
     "catalog_preview": True,
     "preview_sound": True,
     "auto_density": False,
@@ -670,6 +671,8 @@ def load_overlay_prefs() -> dict:
             data["volume"] = max(0, min(100, int(raw["volume"])))
         if "play_when_hidden" in raw:
             data["play_when_hidden"] = bool(raw["play_when_hidden"])
+        if "stage_click_through" in raw:
+            data["stage_click_through"] = bool(raw["stage_click_through"])
         if "catalog_preview" in raw:
             data["catalog_preview"] = bool(raw["catalog_preview"])
         if "preview_sound" in raw:
@@ -1675,6 +1678,13 @@ class OverlaySettingsDialog(QDialog):
         self.play_hidden = QCheckBox("Играть при скрытом фоне / сквозь")
         self.play_hidden.setChecked(bool(prefs.get("play_when_hidden", True)))
         top.addRow(self.play_hidden)
+        self.stage_click_through = QCheckBox("Полное окно сразу со сквозь")
+        self.stage_click_through.setToolTip(
+            "Вкл: 2× / полное окно сразу пропускает клики вниз (как Ctrl+O).\n"
+            "Выкл: как раньше — сквозь руками. Ctrl+O всё равно переключает."
+        )
+        self.stage_click_through.setChecked(bool(prefs.get("stage_click_through", True)))
+        top.addRow(self.stage_click_through)
         self.catalog_preview = QCheckBox("Клик в каталоге сразу играет")
         self.catalog_preview.setToolTip(
             "Вкл: клик = play.\n"
@@ -1848,6 +1858,7 @@ class OverlaySettingsDialog(QDialog):
         if ans != QMessageBox.StandardButton.Yes:
             return
         self.play_hidden.setChecked(bool(_DEFAULT_PREFS["play_when_hidden"]))
+        self.stage_click_through.setChecked(bool(_DEFAULT_PREFS["stage_click_through"]))
         self.catalog_preview.setChecked(bool(_DEFAULT_PREFS["catalog_preview"]))
         self.preview_sound.setChecked(bool(_DEFAULT_PREFS["preview_sound"]))
         self.catalog_shuffle.setChecked(bool(_DEFAULT_PREFS["catalog_shuffle"]))
@@ -1918,6 +1929,7 @@ class OverlaySettingsDialog(QDialog):
         hotkeys = {k: e.current_spec() for k, e in self.hk_edits.items()}
         return {
             "play_when_hidden": self.play_hidden.isChecked(),
+            "stage_click_through": self.stage_click_through.isChecked(),
             "catalog_preview": self.catalog_preview.isChecked(),
             "preview_sound": self.preview_sound.isChecked(),
             "catalog_shuffle": self.catalog_shuffle.isChecked(),
@@ -3306,6 +3318,19 @@ class OverlayPlayerWindow(QWidget):
                 "Полное окно · плотность снизу · Ctrl+O — сквозь · Ctrl+Shift+O — свернуть"
             )
         self._arm_auto_density_timer()
+        # По умолчанию сразу сквозь (иначе вечный Ctrl+O). HWND после fullscreen.
+        if self._prefs.get("stage_click_through", True) and not self._click_through:
+            QTimer.singleShot(80, self._apply_default_stage_click_through)
+
+    def _apply_default_stage_click_through(self) -> None:
+        """После входа в полное окно — сквозь, если галка в Настр. (по умолчанию вкл)."""
+        if not self._stage_mode or self._click_through:
+            return
+        if not self._prefs.get("stage_click_through", True):
+            return
+        if self.isMinimized() or not self.isVisible():
+            return
+        self._set_click_through(True)
 
     def _enter_catalog(self) -> None:
         """Вернуть каталог; воспроизведение не стопаем."""
