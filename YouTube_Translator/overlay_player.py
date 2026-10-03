@@ -38,6 +38,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QShortcut,
+    QWindowStateChangeEvent,
 )
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -337,6 +338,9 @@ WS_EX_LAYERED = 0x00080000
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_TOPMOST = 0x00000008
 WM_HOTKEY = 0x0312
+WM_SYSCOMMAND = 0x0112
+SC_MOUSEMENU = 0xF090
+SC_KEYMENU = 0xF100
 MOD_ALT = 0x0001
 MOD_CONTROL = 0x0002
 MOD_SHIFT = 0x0004
@@ -2483,6 +2487,7 @@ class OverlayPlayerWindow(QWidget):
         return Path(str(raw))
 
     def _on_list_context_menu(self, pos) -> None:
+        self._prepare_for_modal_ui()
         item = self.list.itemAt(pos)
         if item is not None:
             self.list.setCurrentItem(item)
@@ -3575,10 +3580,36 @@ class OverlayPlayerWindow(QWidget):
         self._force_topmost_widget(self, topmost=want)
 
     def changeEvent(self, event) -> None:  # noqa: N802
-        if event.type() == QEvent.Type.WindowStateChange:
+        if event.type() == QEvent.Type.WindowStateChange and isinstance(
+            event, QWindowStateChangeEvent
+        ):
+            was_min = bool(event.oldState() & Qt.WindowState.WindowMinimized)
             if self.isMinimized():
                 self._stop_auto_density_timer(exit_ct_if_armed=False)
+                was_ct = bool(self._click_through)
+                if was_ct:
+                    self._click_through = False
+                QTimer.singleShot(0, lambda: self._sanitize_after_hide(was_ct))
+            elif was_min and not self.isMinimized():
+                self._prepare_for_modal_ui()
         super().changeEvent(event)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        if self._click_through:
+            self._prepare_for_modal_ui()
+        super().focusInEvent(event)
+
+    def nativeEvent(self, eventType, message):  # noqa: N802
+        if sys.platform == "win32" and eventType == b"windows_generic_MSG":
+            try:
+                msg = ctypes.wintypes.MSG.from_address(int(message))
+                if int(msg.message) == WM_SYSCOMMAND:
+                    cmd = int(msg.wParam) & 0xFFF0
+                    if cmd in (SC_MOUSEMENU, SC_KEYMENU):
+                        self._prepare_for_modal_ui()
+            except Exception:
+                pass
+        return super().nativeEvent(eventType, message)
 
     def _update_ct_label(self) -> None:
         if self._click_through:
@@ -3757,6 +3788,23 @@ class OverlayPlayerWindow(QWidget):
         except Exception:
             pass
 
+    def _prepare_for_modal_ui(self) -> None:
+        """Меню / диалог / ПКМ по иконке в заголовке или панели — CT off, иначе залипают клики."""
+        if self._click_through:
+            self._set_click_through(False)
+            return
+        if sys.platform != "win32":
+            return
+        try:
+            self._write_root_exstyle()
+            self._sync_video_mouse_passthrough()
+            hwnd = int(self.winId()) if self.winId() else 0
+            if hwnd:
+                self._clear_child_transparent_styles(hwnd)
+            self._set_video_input_enabled(True)
+        except Exception:
+            pass
+
     def present_visible(self) -> None:
         """Кнопка «Фон» / повторный show: fade-in (канон как у SR shell)."""
         from ui_motion import center_widget_on_screen, fade_window_opacity
@@ -3916,6 +3964,7 @@ class OverlayPlayerWindow(QWidget):
             pass
 
     def _open_settings(self) -> None:
+        self._prepare_for_modal_ui()
         # P6: пауза перед модальным диалогом
         was_playing = False
         if self._player is not None:
@@ -4365,6 +4414,13 @@ def _find_overlay_hwnd() -> int:
 def _bring_overlay_hwnd(hwnd: int) -> None:
     if not hwnd:
         return
+    global _overlay_singleton
+    if _overlay_singleton is not None:
+        try:
+            _overlay_singleton.present_visible()
+            return
+        except RuntimeError:
+            _overlay_singleton = None
     user32 = ctypes.windll.user32
     SW_RESTORE = 9
     user32.ShowWindow(hwnd, SW_RESTORE)

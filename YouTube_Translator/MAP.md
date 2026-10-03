@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| **Где мы** | Catalog ✅ C3 shuffle · 2× край ±5с · 1× play/pause · drag-порядок ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
+| **Где мы** | Catalog ✅ C3 · CT fix: ПКМ иконка/панель без залипания ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
 | **Фокус** | полировка · 021 F1 dist · ⏸ наушник / B0 |
 | **Код scope** | `overlay_player.py` |
 
