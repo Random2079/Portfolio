@@ -202,7 +202,7 @@ QLabel#catalogThumb {
 }
 QLabel#catalogTitle {
     color: #e2e8f0;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     background: transparent;
     padding: 0;
@@ -210,12 +210,6 @@ QLabel#catalogTitle {
 QLabel#catalogTitle[playing="true"] {
     color: #7dd3fc;
     font-weight: 600;
-}
-QLabel#catalogMeta {
-    color: #64748b;
-    font-size: 11px;
-    background: transparent;
-    padding: 0;
 }
 QLabel#folderLabel, QLabel#timeLabel, QLabel#hintLabel, QLabel#statusLabel,
 QLabel#opacityCaption, QLabel#opacityValue, QLabel#ctLabel {
@@ -1027,14 +1021,14 @@ _THUMB_H = 42
 
 
 class CatalogExplorerRow(QWidget):
-    """Строка мини-проводника: кадр · имя · тихая мета (дата · mp4 · mp3)."""
+    """Строка: кадр + название (обрезка …). Без даты/бейджей."""
 
     def __init__(
         self,
         title: str,
         *,
         has_video: bool,
-        has_audio: bool,
+        has_audio: bool = False,
         date_str: str = "",
         parent: QWidget | None = None,
     ) -> None:
@@ -1053,9 +1047,6 @@ class CatalogExplorerRow(QWidget):
         self.thumb.setScaledContents(False)
         lay.addWidget(self.thumb, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        col = QVBoxLayout()
-        col.setContentsMargins(0, 1, 0, 1)
-        col.setSpacing(3)
         self.title_lbl = QLabel(title)
         self.title_lbl.setObjectName("catalogTitle")
         self.title_lbl.setWordWrap(False)
@@ -1063,22 +1054,11 @@ class CatalogExplorerRow(QWidget):
         self.title_lbl.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
-        col.addWidget(self.title_lbl)
-
-        bits: list[str] = []
-        if date_str:
-            # короче: без секунд уже; убрать год если хочется воздуха — оставляем ДД.ММ.ГГ ЧЧ:ММ
-            bits.append(date_str)
-        if has_video:
-            bits.append("mp4")
-        if has_audio:
-            bits.append("mp3")
-        self.meta_lbl = QLabel(" · ".join(bits))
-        self.meta_lbl.setObjectName("catalogMeta")
-        self.meta_lbl.setWordWrap(False)
-        col.addWidget(self.meta_lbl)
-        lay.addLayout(col, stretch=1)
-        self.setMinimumHeight(_THUMB_H + 14)
+        self.title_lbl.setAlignment(
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        )
+        lay.addWidget(self.title_lbl, stretch=1)
+        self.setMinimumHeight(_THUMB_H + 10)
         self.setToolTip("ПКМ — переименовать / удалить · F2 · Del")
 
     def resizeEvent(self, event) -> None:  # noqa: N802
@@ -2193,27 +2173,16 @@ class OverlayPlayerWindow(QWidget):
         self._thumb_gen += 1
         self._thumb_jobs = []
         gen = self._thumb_gen
-        sort = str(self._prefs.get("catalog_sort") or "date_asc")
-        files = scan_media(self._folder, sort=sort)
+        # Канон: старые сверху → новые снизу (дата файла)
+        files = scan_media(self._folder, sort="date_asc")
         for path in files:
-            title, has_video, has_audio, video_path, date_str = catalog_row_meta(path)
-            item = QListWidgetItem(title)
+            title, has_video, _has_audio, video_path, _date_str = catalog_row_meta(path)
+            # Текст item пустой — иначе Qt рисует title ПОД виджетом (двойное имя)
+            item = QListWidgetItem("")
             item.setData(Qt.ItemDataRole.UserRole, str(path))
-            tip = path.name
-            if has_video and has_audio:
-                tip += " · mp4+mp3"
-            elif has_video:
-                tip += " · mp4"
-            elif has_audio:
-                tip += " · mp3"
-            item.setToolTip(tip)
-            row = CatalogExplorerRow(
-                title,
-                has_video=has_video,
-                has_audio=has_audio,
-                date_str=date_str,
-            )
-            item.setSizeHint(QSize(200, _THUMB_H + 18))
+            item.setToolTip(f"{title}\nПКМ — переименовать / удалить · F2 · Del")
+            row = CatalogExplorerRow(title, has_video=has_video)
+            item.setSizeHint(QSize(200, _THUMB_H + 12))
             self.list.addItem(item)
             self.list.setItemWidget(item, row)
             if video_path is not None:
@@ -2233,7 +2202,7 @@ class OverlayPlayerWindow(QWidget):
         self._refresh_playing_highlight()
         n = len(files)
         if n:
-            self.status.setText(f"{n} трек(ов) · ПКМ / F2 / Del")
+            self.status.setText(f"{n} трек(ов) · старые → новые · ПКМ / F2 / Del")
         else:
             self.status.setText(
                 "Пусто — Папка… → выбери любой .mp3/.mp4 в нужной папке "
