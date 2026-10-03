@@ -5,9 +5,9 @@
 
 | | |
 |---|---|
-| **Где мы** | Catalog: **C0+C1 ✅** · дальше **C2** карточки → **C2b** delete/rename → C3 ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
-| **Фокус** | **`делаем C2`** — карточки (превью+play) · manage отдельно C2b |
-| **Код scope** | `overlay_player.py` (C2 → C2b → C3) · `Subtitle_App.py` (C0 ✅) |
+| **Где мы** | Catalog: **C0–C2 ✅** · дальше **C2b** delete/rename → C3 ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
+| **Фокус** | **`делаем C2b`** — удалить пару с диска + переименовать файлы |
+| **Код scope** | `overlay_player.py` (C2b → C3) · `Subtitle_App.py` (C0 ✅) |
 
 ---
 
@@ -34,8 +34,8 @@
 |---|-----|--------|
 | **1** | **C0** 🎞↓ max quality (+ статус/лог факта) | ✅ |
 | **2** | **C1** каталог: сортировка дата старый→новый | ✅ |
-| **3** | **C2** каталог: карточки пары mp4/mp3 + thumb + title | ⬜ **следующий** |
-| **4** | **C2b** каталог: удалить пару с диска + переименовать файлы | ⬜ после C2 |
+| **3** | **C2** каталог: карточки пары mp4/mp3 + thumb + title | ✅ |
+| **4** | **C2b** каталог: удалить пару с диска + переименовать файлы | ⬜ **следующий** |
 | **5** | **C3** random / shuffle | ⏸ после C2b |
 | — | Наушник multi-tap + SMTC | ⏸ (новые наушники) |
 | — | 025 B0 авто-плотность комфорт | ⏸ |
@@ -54,7 +54,7 @@
 | Video | `bestvideo*[height<=2160]+bestaudio` + `-S res,fps,vbr,abr` | ✅ C0 |
 | Audio mp3 | `--audio-quality 0` | оставить |
 | Список Фон | `catalog_sort=date_asc` (mtime) | ✅ C1 |
-| UI | QList текст | C2: пара + превью · C2b: del/rename |
+| UI | карточки C2 ✅ | C2b: del/rename |
 
 ---
 

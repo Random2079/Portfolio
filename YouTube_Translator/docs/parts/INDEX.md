@@ -19,7 +19,7 @@
 | 18 | [Авто-плотность Фона](18-overlay-auto-density.md) | `overlay_player.py` | **№20 / IDEA-025** | ⬜ |
 | 19 | [Файлы dist](19-dist-files.md) | `Subtitle_App.py` | **№9 / IDEA-021** | 🟡 F0 |
 | 20 | [Обои mp4+mp3](20-overlay-wallpaper-download.md) | `Subtitle_App.py` | M+ / 022 feed | ✅ |
-| 21 | [Фон: max quality + каталог](21-overlay-catalog-quality.md) | `Subtitle_App.py`, `overlay_player.py` | №22 / 022 catalog | ✅ C0–C1 · ⬜ C2 · ⬜ C2b |
+| 21 | [Фон: max quality + каталог](21-overlay-catalog-quality.md) | `Subtitle_App.py`, `overlay_player.py` | №22 / 022 catalog | ✅ C0–C2 · ⬜ C2b |
 
 Очередь/план слоя: [`../../MAP.md`](../../MAP.md).
 
