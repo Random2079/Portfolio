@@ -221,6 +221,39 @@ def _screen_under_cursor():
     return screens[0] if screens else None
 
 
+def force_widget_on_cursor_screen(widget: QWidget, *, shrink: bool = True) -> None:
+    """Всегда центр на монитор под курсором (диалоги с отравленным QSettings)."""
+    if widget.isMaximized() or widget.isFullScreen():
+        return
+    screen = _screen_under_cursor()
+    if screen is None:
+        return
+    avail = screen.availableGeometry()
+    if shrink:
+        max_w = max(320, avail.width() - 24)
+        max_h = max(240, avail.height() - 24)
+        w = min(max(widget.width(), 320), max_w)
+        h = min(max(widget.height(), 240), max_h)
+        widget.resize(w, h)
+    frame = widget.frameGeometry()
+    # Если frame ещё 0×0 — двигаем по geometry виджета
+    if frame.width() < 32 or frame.height() < 32:
+        geo = widget.geometry()
+        x = avail.left() + max(0, (avail.width() - geo.width()) // 2)
+        y = avail.top() + max(0, (avail.height() - geo.height()) // 2)
+        widget.setGeometry(x, y, geo.width(), geo.height())
+        return
+    frame.moveCenter(avail.center())
+    widget.move(frame.topLeft())
+    frame = widget.frameGeometry()
+    fx, fy = _frame_fit_top_left(
+        avail, frame.width(), frame.height(), frame.x(), frame.y()
+    )
+    dx = widget.x() - frame.x()
+    dy = widget.y() - frame.y()
+    widget.move(fx + dx, fy + dy)
+
+
 def ensure_widget_on_screen(
     widget: QWidget, *, shrink: bool = True, min_visible_frac: float = 0.4
 ) -> None:
@@ -235,17 +268,7 @@ def ensure_widget_on_screen(
         best_vis = max(best_vis, inter.width() * inter.height())
     # Слабый кусок / мёртвый монитор в QSettings → не «подтягивать», а центрировать
     if best_vis <= 0 or best_vis < area * max(0.05, min(1.0, min_visible_frac)):
-        screen = _screen_under_cursor()
-        if screen is None:
-            return
-        avail = screen.availableGeometry()
-        if shrink:
-            max_w = max(320, avail.width() - 16)
-            max_h = max(240, avail.height() - 16)
-            widget.resize(min(widget.width(), max_w), min(widget.height(), max_h))
-        frame = widget.frameGeometry()
-        frame.moveCenter(avail.center())
-        widget.move(frame.topLeft())
+        force_widget_on_cursor_screen(widget, shrink=shrink)
         return
     screen = _screen_for_widget_frame(frame)
     if screen is None:

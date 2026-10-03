@@ -1872,19 +1872,31 @@ class OverlaySettingsDialog(QDialog):
         if not self._geometry_restored:
             self._geometry_restored = True
             qs = QSettings(*_OVERLAY_SETTINGS_QSETTINGS)
-            raw = qs.value("geometry")
-            if raw is not None:
-                self.restoreGeometry(raw)
-        # После map окна: иначе frameGeometry врёт и диалог снова уезжает «вне экрана»
+            # Полный restoreGeometry часто уносит на «мёртвый» 2-й монитор ноутбука.
+            # Берём только размер; позицию всегда — центр под курсором.
+            try:
+                sz = qs.value("dialog_size")
+                if sz is not None:
+                    from PySide6.QtCore import QSize
+
+                    if isinstance(sz, QSize) and sz.width() >= 320 and sz.height() >= 240:
+                        self.resize(sz)
+            except Exception:
+                pass
+            try:
+                qs.remove("geometry")  # выкинуть отравленную геометрию
+            except Exception:
+                pass
         QTimer.singleShot(0, self._clamp_geometry_on_screen)
         QTimer.singleShot(50, self._clamp_geometry_on_screen)
+        QTimer.singleShot(200, self._clamp_geometry_on_screen)
 
     def _clamp_geometry_on_screen(self) -> None:
-        from ui_motion import ensure_widget_on_screen
+        from ui_motion import force_widget_on_cursor_screen
 
         if not self.isVisible():
             return
-        ensure_widget_on_screen(self, shrink=True, min_visible_frac=0.4)
+        force_widget_on_cursor_screen(self, shrink=True)
 
     def _reset_to_defaults(self) -> None:
         ans = QMessageBox.question(
@@ -1958,7 +1970,8 @@ class OverlaySettingsDialog(QDialog):
     def done(self, result: int) -> None:  # noqa: N802
         try:
             qs = QSettings(*_OVERLAY_SETTINGS_QSETTINGS)
-            qs.setValue("geometry", self.saveGeometry())
+            qs.setValue("dialog_size", self.size())
+            qs.remove("geometry")  # не копить off-screen позицию
         except Exception:
             pass
         app = QApplication.instance()
@@ -4207,7 +4220,9 @@ class OverlayPlayerWindow(QWidget):
         # Иначе RegisterHotKey съедает Ctrl+Shift+1 и поле не видит комбо
         self._unregister_hotkeys()
         try:
-            dlg = OverlaySettingsDialog(self._prefs, self)
+            # parent=None: иначе при fullscreen Фон Qt паркует диалог «за» ноутбуком
+            dlg = OverlaySettingsDialog(self._prefs, None)
+            dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
             accepted = dlg.exec() == QDialog.DialogCode.Accepted
             if accepted:
                 updates = dlg.result_prefs()
