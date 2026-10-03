@@ -26,6 +26,7 @@ from PySide6.QtCore import QByteArray, QEvent, QSize, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QCursor,
     QFont,
     QGuiApplication,
     QIcon,
@@ -39,6 +40,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QDialog,
@@ -427,9 +429,12 @@ _DEFAULT_PREFS = {
     "auto_density_pct": 45,
     "auto_density_idle_sec": 4,
     "auto_density_adapt_sec": 1,
-    "catalog_sort": "date_asc",  # date_asc | date_desc | name
+    "catalog_sort": "date_asc",  # date_asc | date_desc | name | manual
+    "catalog_order": {},  # abs folder → [track keys]
     "hotkeys": dict(_DEFAULT_HOTKEYS),
 }
+
+_SEEK_ZONE_FRAC = 0.18  # края кадра: ← −5с · → +5с
 
 # YouTube-id в скобках: [dQw4w9WgXcQ], [Ci_zad39Uhw]
 _YT_ID_BRACKET_RE = re.compile(r"\s*\[[a-zA-Z0-9_-]{10,13}\]\s*")
@@ -657,8 +662,14 @@ def load_overlay_prefs() -> dict:
             data["auto_density_adapt_sec"] = max(1, min(60, int(raw["auto_density_adapt_sec"])))
         if "catalog_sort" in raw:
             cs = str(raw.get("catalog_sort") or "date_asc").strip().lower()
-            if cs in ("date_asc", "date_desc", "name"):
+            if cs in ("date_asc", "date_desc", "name", "manual"):
                 data["catalog_sort"] = cs
+        if "catalog_order" in raw and isinstance(raw["catalog_order"], dict):
+            co: dict[str, list[str]] = {}
+            for fk, keys in raw["catalog_order"].items():
+                if isinstance(fk, str) and isinstance(keys, list):
+                    co[fk] = [str(k) for k in keys if k]
+            data["catalog_order"] = co
         hk = raw.get("hotkeys")
         if isinstance(hk, dict):
             for key, default in _DEFAULT_HOTKEYS.items():
@@ -714,6 +725,37 @@ def default_music_dirs() -> list[str]:
         seen.add(ap)
         if os.path.isdir(ap):
             out.append(ap)
+    return out
+
+
+def catalog_track_key(path: Path) -> str:
+    ytid = _yt_id_from_name(path.name)
+    if ytid:
+        return f"id:{ytid}"
+    return f"stem:{path.stem.lower()}"
+
+
+def apply_catalog_order(files: list[Path], order: list[str] | None) -> list[Path]:
+    """Ручной порядок из prefs; неизвестные ключи — в конец (date_asc среди них)."""
+    if not order:
+        return files
+    by_key = {catalog_track_key(p): p for p in files}
+    out: list[Path] = []
+    seen: set[str] = set()
+    for k in order:
+        p = by_key.get(k)
+        if p is not None and k not in seen:
+            out.append(p)
+            seen.add(k)
+
+    def _mtime(p: Path) -> float:
+        try:
+            return float(p.stat().st_mtime)
+        except OSError:
+            return 0.0
+
+    rest = sorted((p for p in files if catalog_track_key(p) not in seen), key=_mtime)
+    out.extend(rest)
     return out
 
 
@@ -773,6 +815,16 @@ def scan_media(folder: str, *, sort: str = "date_asc") -> list[Path]:
         return sorted(items, key=_mtime, reverse=True)
     # date_asc — канон C1: старый → новый
     return sorted(items, key=_mtime)
+
+
+class CatalogListWidget(QListWidget):
+    """Список с InternalMove; сигнал после drop для сохранения порядка."""
+
+    order_changed = Signal()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        super().dropEvent(event)
+        self.order_changed.emit()
 
 
 def resolve_play_path(path: Path) -> Path:
@@ -1861,12 +1913,18 @@ class OverlayPlayerWindow(QWidget):
         root.addWidget(self.chrome_top)
 
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.list = QListWidget()
+        self.list = CatalogListWidget()
         self.list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.setWordWrap(False)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._on_list_context_menu)
+        self.list.setDragEnabled(True)
+        self.list.setAcceptDrops(True)
+        self.list.setDropIndicatorShown(True)
+        self.list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.list.order_changed.connect(self._on_catalog_order_changed)
         # 1-й клик — выбор; Enter/2× — play (если превью выкл); превью вкл — сразу play
         self.list.itemClicked.connect(self._on_list_clicked)
         self.list.itemActivated.connect(self._on_list_activated)
@@ -2116,27 +2174,10 @@ class OverlayPlayerWindow(QWidget):
             self._shortcuts.append(sc)
 
     def _set_folder(self, folder: str) -> None:
+        """Сменить каталог из кода (🎞↓ / open_overlay). Кнопки «Папка» в UI нет."""
         self._folder = os.path.abspath(folder)
         self.folder_label.setText(self._folder)
         self._reload_list()
-
-    def _pick_folder(self) -> None:
-        """Диалог с фильтром медиа: видно типы файлов; папка = родитель выбранного файла."""
-        start = self._folder if os.path.isdir(self._folder) else os.path.expanduser("~")
-        dlg = QFileDialog(self, "Папка с музыкой / видео", start)
-        dlg.setFileMode(QFileDialog.FileMode.ExistingFile)
-        dlg.setNameFilter(_MEDIA_FILTER)
-        dlg.selectNameFilter(_MEDIA_FILTER.split(";;")[0])
-        dlg.setOption(QFileDialog.Option.DontUseNativeDialog, False)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        files = dlg.selectedFiles()
-        if not files:
-            return
-        chosen = Path(files[0])
-        folder = chosen.parent if chosen.is_file() else chosen
-        if folder.is_dir():
-            self._set_folder(str(folder))
 
     def _set_play_icon(self, playing: bool) -> None:
         self.play_btn.setIcon(_svg_icon("pause" if playing else "play", 20))
@@ -2166,8 +2207,11 @@ class OverlayPlayerWindow(QWidget):
         self._thumb_gen += 1
         self._thumb_jobs = []
         gen = self._thumb_gen
-        # Канон: старые сверху → новые снизу (дата файла)
+        # База: старые → новые; если был drag — ручной порядок из prefs
         files = scan_media(self._folder, sort="date_asc")
+        order_map = self._prefs.get("catalog_order") or {}
+        folder_key = os.path.abspath(self._folder)
+        files = apply_catalog_order(files, order_map.get(folder_key))
         for path in files:
             title, has_video, _has_audio, video_path, _date_str = catalog_row_meta(path)
             # Текст item пустой — иначе Qt рисует title ПОД виджетом (двойное имя)
@@ -2198,8 +2242,8 @@ class OverlayPlayerWindow(QWidget):
             self.status.setText(f"{n} трек(ов) · старые → новые · ПКМ / F2 / Del")
         else:
             self.status.setText(
-                "Пусто — Папка… → выбери любой .mp3/.mp4 в нужной папке "
-                "(фильтр Медиа / Видео / Аудио)"
+                "Пусто — скачай 🎞↓ в Music\\YouTube_DL, потом обнови список "
+                "(закрой/открой Фон)"
             )
         if self._thumb_jobs:
             QTimer.singleShot(400, lambda g=gen: self._kick_thumb_queue(g))
@@ -2281,10 +2325,66 @@ class OverlayPlayerWindow(QWidget):
             if is_now:
                 item.setBackground(QBrush(QColor("#152536")))
                 item.setData(_ROLE_PLAYING, True)
-                self.list.scrollToItem(item)
+                # Не scrollToItem здесь — на последнем треке дёргает весь список
             else:
                 item.setBackground(QBrush())
                 item.setData(_ROLE_PLAYING, False)
+
+    def _scroll_playing_soft(self) -> None:
+        """Подскролл только если текущий трек вне viewport (next/prev)."""
+        if not self._last_play_path:
+            return
+        want = self._last_play_path
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if item is None:
+                continue
+            raw = Path(item.data(Qt.ItemDataRole.UserRole))
+            try:
+                key = str(resolve_play_path(raw).resolve())
+            except OSError:
+                continue
+            if key != want:
+                continue
+            vr = self.list.visualItemRect(item)
+            vp = self.list.viewport().rect()
+            if vr.top() < vp.top() or vr.bottom() > vp.bottom():
+                self.list.scrollToItem(
+                    item, QAbstractItemView.ScrollHint.EnsureVisible
+                )
+            break
+
+    def _on_catalog_order_changed(self) -> None:
+        """После drag-drop: пересоздать виджеты строк и сохранить порядок."""
+        keys: list[str] = []
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if item is None:
+                continue
+            raw = item.data(Qt.ItemDataRole.UserRole)
+            if not raw:
+                continue
+            path = Path(str(raw))
+            keys.append(catalog_track_key(path))
+            if self.list.itemWidget(item) is None:
+                title, has_video, _ha, video_path, _d = catalog_row_meta(path)
+                row = CatalogExplorerRow(title, has_video=has_video)
+                item.setSizeHint(QSize(200, _THUMB_H + 12))
+                self.list.setItemWidget(item, row)
+                if video_path is not None:
+                    cached = catalog_thumb_cache_path(video_path)
+                    try:
+                        if cached.is_file() and cached.stat().st_size > 0:
+                            row.set_thumb_file(cached)
+                    except OSError:
+                        pass
+        folder_key = os.path.abspath(self._folder)
+        order_map = dict(self._prefs.get("catalog_order") or {})
+        order_map[folder_key] = keys
+        self._prefs = save_overlay_prefs(catalog_order=order_map, catalog_sort="manual")
+        self._refresh_playing_highlight()
+        if hasattr(self, "status"):
+            self.status.setText(f"{len(keys)} трек(ов) · порядок сохранён · ПКМ / F2 / Del")
 
     def _selected_catalog_path(self) -> Path | None:
         item = self.list.currentItem()
@@ -2733,9 +2833,34 @@ class OverlayPlayerWindow(QWidget):
         finally:
             self._suppress_opacity_prefs = False
 
+    def _video_edge_seek_delta(self) -> int | None:
+        """Левый/правый край кадра → ±5с; середина → None (play/pause)."""
+        w = self.media_stack if hasattr(self, "media_stack") else None
+        if w is None or w.width() < 40:
+            return None
+        pos = w.mapFromGlobal(QCursor.pos())
+        x = int(pos.x())
+        width = max(1, int(w.width()))
+        if x < 0 or x > width:
+            return None
+        edge = max(28, int(width * _SEEK_ZONE_FRAC))
+        if x <= edge:
+            return -_SEEK_MS
+        if x >= width - edge:
+            return _SEEK_MS
+        return None
+
     def _on_video_single_click(self) -> None:
-        """Один клик по кадру (после таймера) — play/pause."""
+        """Один клик по кадру: края ±5с, центр — play/pause."""
         if self._click_through or not self.isVisible():
+            return
+        delta = self._video_edge_seek_delta()
+        if delta is not None:
+            self._seek_by(delta)
+            if hasattr(self, "status"):
+                sec = abs(delta) // 1000
+                arrow = "←" if delta < 0 else "→"
+                self.status.setText(f"Промотка {arrow} {sec}с")
             return
         self._toggle_play()
 
@@ -2854,9 +2979,11 @@ class OverlayPlayerWindow(QWidget):
 
     def _play_next(self) -> None:
         self._play_at_index(self._playlist_index() + 1)
+        self._scroll_playing_soft()
 
     def _play_prev(self) -> None:
         self._play_at_index(self._playlist_index() - 1)
+        self._scroll_playing_soft()
 
     def _nudge_opacity(self, delta: int) -> None:
         if not self._stage_mode:

@@ -5,8 +5,8 @@
 
 | | |
 |---|---|
-| **Где мы** | Catalog: **C0+C1+C2b+C2c ✅** · кнопка Папка убрана (всегда YouTube_DL) · C3 по запросу ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
-| **Фокус** | C3 random — по запросу |
+| **Где мы** | Catalog ✅ · seek-зоны ±5с · drag-порядок · без скачка списка · C3 random по запросу ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
+| **Фокус** | C3 random — по запросу · или полировка |
 | **Код scope** | `overlay_player.py` |
 
 ---
