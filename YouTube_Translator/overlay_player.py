@@ -369,6 +369,7 @@ _HOTKEY_SEEK_BACK = 0x0229
 _HOTKEY_SEEK_FWD = 0x022A
 _HOTKEY_VOL_UP = 0x022B
 _HOTKEY_VOL_DOWN = 0x022C
+_HOTKEY_RANDOM = 0x022D
 # Тест: кнопки наушников / клавиатуры (VK_MEDIA_*)
 _HOTKEY_MEDIA_PLAY = 0x0231
 _HOTKEY_MEDIA_NEXT = 0x0232
@@ -2057,6 +2058,12 @@ class OverlayPlayerWindow(QWidget):
         self._last_hk_t: float = 0.0
         self._media_tap_count = 0
         self._last_headset_edge_t = 0.0  # SMTC+RegisterHotKey дублируют одно нажатие
+        self._track_change_guard = False  # EndOfMedia / next / random — не двойной play
+        self._hk_reg_timer = QTimer(self)
+        self._hk_reg_timer.setSingleShot(True)
+        self._hk_reg_timer.timeout.connect(self._register_hotkeys_flush)
+        self._hk_reg_args: tuple[bool, int] = (False, 0)
+        self._hk_reg_fingerprint: tuple | None = None
         self._media_tap_timer = QTimer(self)
         self._media_tap_timer.setSingleShot(True)
         self._media_tap_timer.timeout.connect(self._flush_media_taps)
@@ -3240,6 +3247,11 @@ class OverlayPlayerWindow(QWidget):
             else:
                 self.pulse.stop()
         self._sync_video_mouse_passthrough()
+        # stop до setSource — иначе при shuffle иногда слышны два трека
+        try:
+            self._player.stop()
+        except Exception:
+            pass
         self._player.setSource(QUrl.fromLocalFile(str(path)))
         # Даже «только открыть»: короткий play нужен, чтобы mp4 показал кадр
         self._player.play()
@@ -3303,6 +3315,8 @@ class OverlayPlayerWindow(QWidget):
 
     def _play_at_index(self, index: int) -> None:
         """Сменить трек. Не уводит в fullscreen — только play в текущем режиме."""
+        if self._track_change_guard:
+            return
         n = self.list.count()
         if n <= 0 or not _HAS_MULTIMEDIA or self._player is None:
             return
@@ -3310,13 +3324,20 @@ class OverlayPlayerWindow(QWidget):
         item = self.list.item(index)
         if item is None:
             return
-        self.list.setCurrentRow(index)
-        path = resolve_play_path(Path(item.data(Qt.ItemDataRole.UserRole)))
-        self._play_path(path, force_sound=True)
-        if self._stage_mode:
-            self._apply_stage_opacity()
-        else:
-            self._apply_catalog_opacity()
+        self._track_change_guard = True
+        try:
+            self.list.setCurrentRow(index)
+            path = resolve_play_path(Path(item.data(Qt.ItemDataRole.UserRole)))
+            self._play_path(path, force_sound=True)
+            if self._stage_mode:
+                self._apply_stage_opacity()
+            else:
+                self._apply_catalog_opacity()
+        finally:
+            QTimer.singleShot(350, self._clear_track_change_guard)
+
+    def _clear_track_change_guard(self) -> None:
+        self._track_change_guard = False
 
     def _sync_shuffle_btn(self) -> None:
         if not hasattr(self, "shuffle_btn"):
@@ -3335,6 +3356,13 @@ class OverlayPlayerWindow(QWidget):
             else "Shuffle выкл · Ctrl+Shift+R — случайный трек"
         )
         self.shuffle_btn.setToolTip(tip)
+        # Не трогаем RegisterHotKey здесь — раньше лишние re-reg сбивали клавиши
+        if hasattr(self, "status"):
+            self.status.setText(
+                "Shuffle вкл · следующий/конец — random"
+                if checked
+                else "Shuffle выкл"
+            )
 
     def _play_random(self) -> None:
         n = self.list.count()
@@ -3549,8 +3577,8 @@ class OverlayPlayerWindow(QWidget):
                 self._apply_catalog_opacity()
             self._apply_output_volume()
             if not was:
-                # Подцепить VK_MEDIA_* + SMTC пока играет
-                QTimer.singleShot(0, self._register_hotkeys)
+                # Media-клавиши только при переходе idle→play (не на каждый shuffle-трек)
+                self._register_hotkeys()
                 QTimer.singleShot(0, self._ensure_smtc)
             self._sync_smtc_playing(True)
             self._arm_auto_density_timer()
@@ -3560,9 +3588,8 @@ class OverlayPlayerWindow(QWidget):
             self._set_play_icon(False)
             if state == QMediaPlayer.PlaybackState.StoppedState:
                 self.pulse.stop()
-                self._playing = False
-                self._sync_smtc_playing(False)
-                # A2: Stopped при смене трека — не снимать авто-сквозь / не мигать 100%
+                # Смена трека (setSource) даёт короткий Stopped — не трогать RegisterHotKey
+                changing_track = bool(self._track_change_guard or self._hold_stage_opacity)
                 keep_auto_ct = bool(
                     self._stage_mode
                     and self._auto_density_armed
@@ -3575,8 +3602,14 @@ class OverlayPlayerWindow(QWidget):
                     self._apply_stage_opacity()
                 elif not self._stage_mode:
                     self._apply_catalog_opacity()
-                if not self._hold_stage_opacity and not keep_auto_ct:
-                    QTimer.singleShot(0, self._register_hotkeys)
+                if changing_track:
+                    # Ждём Playing нового трека — иначе hotkeys «сбиваются» на shuffle
+                    pass
+                else:
+                    self._playing = False
+                    self._sync_smtc_playing(False)
+                    if not keep_auto_ct:
+                        self._register_hotkeys()
             elif state == QMediaPlayer.PlaybackState.PausedState:
                 self._playing = True
                 self._sync_smtc_playing(False)
@@ -3599,6 +3632,8 @@ class OverlayPlayerWindow(QWidget):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             if self._pause_after_open:
                 self._pause_after_open = False
+                return
+            if self._track_change_guard:
                 return
             self._play_next()
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
@@ -4184,6 +4219,7 @@ class OverlayPlayerWindow(QWidget):
                 self._sync_shuffle_btn()
                 self._refresh_hint()
                 self._install_shortcuts()
+                self._hk_reg_fingerprint = None  # хоткеи в prefs могли смениться
                 self._apply_output_volume()
                 if updates.get("auto_density"):
                     ov = int(updates.get("auto_density_luma_override", -1))
@@ -4287,18 +4323,35 @@ class OverlayPlayerWindow(QWidget):
         super().closeEvent(event)
 
     def _register_hotkeys(self, *, hidden_only: bool = False, _retry: int = 0) -> None:
+        """Debounce: shuffle/next иначе рвут RegisterHotKey на каждом Stopped/Playing."""
         if sys.platform != "win32":
             return
-        # Не рвём поток, пока старый не отпустил RegisterHotKey (иначе 1409 на части клавиш).
-        if not self._unregister_hotkeys():
-            if _retry < 8:
-                QTimer.singleShot(150, lambda: self._register_hotkeys(hidden_only=hidden_only, _retry=_retry + 1))
+        self._hk_reg_args = (bool(hidden_only), int(_retry))
+        if _retry > 0:
+            self._register_hotkeys_flush()
             return
+        self._hk_reg_timer.start(200)
+
+    def _hotkey_entries_fingerprint(
+        self, entries: list[tuple[int, str, int, int]], *, hidden_only: bool
+    ) -> tuple:
+        return (
+            hidden_only,
+            bool(self._stage_mode),
+            bool(self._playing),
+            tuple((e[0], e[2], e[3]) for e in entries),
+        )
+
+    def _register_hotkeys_flush(self) -> None:
+        if sys.platform != "win32":
+            return
+        hidden_only, _retry = self._hk_reg_args
         hk = self._prefs.get("hotkeys") or _DEFAULT_HOTKEYS
         priority = [
             (_HOTKEY_HIDE, hk.get("hide_show", "Ctrl+Shift+O")),
             (_HOTKEY_NEXT, hk.get("next_track", "Ctrl+Shift+1")),
             (_HOTKEY_PREV, hk.get("prev_track", "Ctrl+Shift+2")),
+            (_HOTKEY_RANDOM, hk.get("random_track", "Ctrl+Shift+R")),
             (_HOTKEY_STOP, hk.get("stop_track", "Ctrl+Shift+F1")),
             (_HOTKEY_VOL_UP, hk.get("vol_up", "Ctrl+Up")),
             (_HOTKEY_VOL_DOWN, hk.get("vol_down", "Ctrl+Down")),
@@ -4340,6 +4393,18 @@ class OverlayPlayerWindow(QWidget):
                 continue
             seen_vk.add(key)
             entries.append((int(hk_id), str(spec), int(mods), int(vk)))
+        fp = self._hotkey_entries_fingerprint(entries, hidden_only=hidden_only)
+        if _retry == 0 and fp == self._hk_reg_fingerprint and self._hotkey_thread is not None:
+            th = self._hotkey_thread
+            if th is not None and th.is_alive():
+                return
+        # Не рвём поток, пока старый не отпустил RegisterHotKey (иначе 1409 на части клавиш).
+        if not self._unregister_hotkeys():
+            if _retry < 8:
+                self._hk_reg_args = (hidden_only, _retry + 1)
+                QTimer.singleShot(150, self._register_hotkeys_flush)
+            return
+        self._hk_reg_fingerprint = fp
         if entries:
             self._start_hotkey_thread(entries, hidden_only=hidden_only, conflict_retry=_retry)
 
@@ -4347,6 +4412,8 @@ class OverlayPlayerWindow(QWidget):
         """False = старый поток ещё жив — не стартовать новый."""
         ok = self._stop_hotkey_thread()
         self._hotkeys_registered.clear()
+        if ok:
+            self._hk_reg_fingerprint = None
         return ok
 
     def _start_hotkey_thread(
@@ -4582,6 +4649,9 @@ class OverlayPlayerWindow(QWidget):
             self._media_tap_count = 0
             self._play_prev()
             return
+        if hotkey_id == _HOTKEY_RANDOM:
+            self._play_random()
+            return
         if hotkey_id == _HOTKEY_STOP:
             self._toggle_play()
             return
@@ -4675,7 +4745,10 @@ def open_overlay_player(
     existing = _find_overlay_hwnd()
     if existing:
         _bring_overlay_hwnd(existing)
-        return _overlay_singleton
+        # Чужой процесс уже держит Фон — второй экземпляр = 2 музыки + битые хоткеи
+        if _overlay_singleton is not None:
+            return _overlay_singleton
+        return None
 
     win = OverlayPlayerWindow(start_dir=start_dir, parent=None)
     win.closed.connect(_clear_singleton)

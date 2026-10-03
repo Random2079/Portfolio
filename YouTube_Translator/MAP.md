@@ -5,8 +5,8 @@
 
 | | |
 |---|---|
-| **Где мы** | Авто-плотность: лог `logs/auto_density.log` + ручная яркость фона · C3 · сквозь по умолчанию ([part 18](docs/parts/18-overlay-auto-density.md)). |
-| **Фокус** | полировка · 021 F1 dist · ⏸ наушник / B0 |
+| **Где мы** | fix shuffle/hotkeys (debounce RegisterHotKey, guard double-play) · авто-плотность лог · IDEA-027 очередь ⏸ |
+| **Фокус** | пауза · потом IDEA-027 очередь скачивания + fix skip-рекламы · 021 F1 · B0 |
 | **Код scope** | `overlay_player.py` |
 
 ---
