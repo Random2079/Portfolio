@@ -453,6 +453,8 @@ _DEFAULT_PREFS = {
     "auto_density_pct": 45,
     "auto_density_idle_sec": 4,
     "auto_density_adapt_sec": 1,
+    # -1 = замер обои/стол; 0..100 = ручная «яркость фона» для формулы %
+    "auto_density_luma_override": -1,
     "catalog_sort": "date_asc",  # date_asc | date_desc | name | manual
     "catalog_order": {},  # abs folder → [track keys]
     "catalog_shuffle": False,  # next / конец трека → случайный
@@ -606,17 +608,32 @@ def _desktop_luminance_outside(exclude_geo) -> float | None:
     return _visibility_luma_from_samples(samples)
 
 
-def _auto_density_log(line: str) -> None:
-    """Тики → ~/.subtitle_ripper/auto_density.log (обрезка >150KB)."""
-    try:
-        path = Path.home() / ".subtitle_ripper" / "auto_density.log"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.is_file() and path.stat().st_size > 150_000:
-            path.write_text("", encoding="utf-8")
-        with path.open("a", encoding="utf-8") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
-    except Exception:
-        pass
+def _auto_density_log_paths() -> list[Path]:
+    """Домашний лог + копия в репо — вместе смотреть при тесте."""
+    return [
+        Path.home() / ".subtitle_ripper" / "auto_density.log",
+        Path(__file__).resolve().parent / "logs" / "auto_density.log",
+    ]
+
+
+def _auto_density_log(line: str, *, event: str = "tick") -> None:
+    """События авто-плотности → ~/.subtitle_ripper + YouTube_Translator/logs/."""
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    text = f"{stamp} [{event}] {line}\n"
+    for path in _auto_density_log_paths():
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.is_file() and path.stat().st_size > 150_000:
+                path.write_text("", encoding="utf-8")
+            with path.open("a", encoding="utf-8") as f:
+                f.write(text)
+        except Exception:
+            pass
+
+
+def auto_density_log_hint() -> str:
+    """Короткий путь для статуса / подсказки."""
+    return str(Path(__file__).resolve().parent / "logs" / "auto_density.log")
 
 
 def _auto_density_pct_from_luma(base: int, luma: float) -> int:
@@ -687,6 +704,12 @@ def load_overlay_prefs() -> dict:
             data["auto_density_idle_sec"] = max(1, min(120, int(raw["auto_density_idle_sec"])))
         if "auto_density_adapt_sec" in raw:
             data["auto_density_adapt_sec"] = max(1, min(60, int(raw["auto_density_adapt_sec"])))
+        if "auto_density_luma_override" in raw:
+            try:
+                ov = int(raw["auto_density_luma_override"])
+            except (TypeError, ValueError):
+                ov = -1
+            data["auto_density_luma_override"] = -1 if ov < 0 else max(0, min(100, ov))
         if "catalog_sort" in raw:
             cs = str(raw.get("catalog_sort") or "date_asc").strip().lower()
             if cs in ("date_asc", "date_desc", "name", "manual"):
@@ -1747,6 +1770,22 @@ class OverlaySettingsDialog(QDialog):
             "1с ≈ live; чаще тяжело из‑за снимка экрана. Ctrl+[ / ] — пауза ~8с."
         )
         top.addRow("Авто: обновлять % каждые", self.auto_density_adapt)
+        self.auto_density_luma = QSpinBox()
+        self.auto_density_luma.setRange(-1, 100)
+        self.auto_density_luma.setSpecialValueText("авто (замер)")
+        self.auto_density_luma.setSuffix(" %")
+        try:
+            ov = int(prefs.get("auto_density_luma_override", -1))
+        except (TypeError, ValueError):
+            ov = -1
+        self.auto_density_luma.setValue(-1 if ov < 0 else max(0, min(100, ov)))
+        self.auto_density_luma.setToolTip(
+            "Яркость заднего фона для формулы плотности.\n"
+            "«авто» — замер обоев/стола.\n"
+            "0–100 — руками (0 тёмный → прозрачнее, 100 светлый → плотнее).\n"
+            f"Лог теста: {auto_density_log_hint()}"
+        )
+        top.addRow("Авто: яркость фона", self.auto_density_luma)
         layout.addLayout(top)
 
         hk_title = QLabel(
@@ -1867,6 +1906,7 @@ class OverlaySettingsDialog(QDialog):
         self.auto_density_pct.setValue(int(_DEFAULT_PREFS["auto_density_pct"]))
         self.auto_density_idle.setValue(int(_DEFAULT_PREFS["auto_density_idle_sec"]))
         self.auto_density_adapt.setValue(int(_DEFAULT_PREFS["auto_density_adapt_sec"]))
+        self.auto_density_luma.setValue(int(_DEFAULT_PREFS["auto_density_luma_override"]))
         for key, edit in self.hk_edits.items():
             edit.force_spec(_DEFAULT_HOTKEYS[key])
 
@@ -1938,6 +1978,7 @@ class OverlaySettingsDialog(QDialog):
             "auto_density_pct": int(self.auto_density_pct.value()),
             "auto_density_idle_sec": int(self.auto_density_idle.value()),
             "auto_density_adapt_sec": int(self.auto_density_adapt.value()),
+            "auto_density_luma_override": int(self.auto_density_luma.value()),
             "hotkeys": hotkeys,
         }
 
@@ -2002,6 +2043,7 @@ class OverlayPlayerWindow(QWidget):
         self._auto_density_adapt_timer.timeout.connect(self._on_auto_density_adapt_tick)
         self._auto_density_armed = False  # сквозь включили авто
         self._auto_density_manual_until = 0.0  # Ctrl+[ / ] — не перебивать N сек
+        self._auto_density_arm_log_t = 0.0  # throttle arm-логов (bump мыши)
         self._cached_screen_luma: float | None = None  # снимок ДО сквозь (grab при CT мигает)
         self._suppress_opacity_prefs = False  # A2: авто-% не писать в stage_opacity
         self._hk_retry_pending = False
@@ -2913,10 +2955,19 @@ class OverlayPlayerWindow(QWidget):
             return
         sec = max(1, min(120, int(self._prefs.get("auto_density_idle_sec", 4))))
         self._auto_density_timer.start(sec * 1000)
+        # bump мыши часто — не спамить лог
+        now = time.monotonic()
+        if now - getattr(self, "_auto_density_arm_log_t", 0.0) >= 2.0:
+            self._auto_density_arm_log_t = now
+            _auto_density_log(
+                f"idle {sec}s → сквозь · log={auto_density_log_hint()}",
+                event="arm",
+            )
 
     def _stop_auto_density_timer(self, *, exit_ct_if_armed: bool = False) -> None:
         self._auto_density_timer.stop()
         if exit_ct_if_armed and self._auto_density_armed and self._click_through:
+            _auto_density_log("stop timer → exit CT (catalog/escape)", event="ct_off")
             self._auto_density_armed = False
             self._stop_auto_density_adapt()
             self._set_click_through(False)
@@ -2934,9 +2985,13 @@ class OverlayPlayerWindow(QWidget):
             return
         sec = max(1, min(60, int(self._prefs.get("auto_density_adapt_sec", 1))))
         self._auto_density_adapt_timer.start(sec * 1000)
+        _auto_density_log(f"adapt every {sec}s", event="adapt")
 
     def _stop_auto_density_adapt(self) -> None:
+        was = self._auto_density_adapt_timer.isActive()
         self._auto_density_adapt_timer.stop()
+        if was:
+            _auto_density_log("adapt stopped", event="adapt")
 
     def _on_auto_density_adapt_tick(self) -> None:
         if not self._prefs.get("auto_density"):
@@ -2956,28 +3011,48 @@ class OverlayPlayerWindow(QWidget):
     def _apply_auto_density_now(self) -> None:
         """Замер → слайдер + opacity. При сквозь — без grabWindow (иначе мигание поверх Cursor)."""
         if not self._click_through or not self._stage_mode:
+            _auto_density_log(
+                f"skip apply ct={self._click_through} stage={self._stage_mode}",
+                event="skip",
+            )
             return
         t0 = time.perf_counter()
         pct, tone = self._resolve_auto_density_pct()
         ms = (time.perf_counter() - t0) * 1000.0
         cur = int(self.opacity_slider.value())
-        if abs(pct - cur) >= 2:
+        changed = abs(pct - cur) >= 2
+        if changed:
             self._set_opacity_slider_visual(pct, persist=False)
             self._apply_stage_opacity()
         self.status.setText(
-            f"Авто-плотность {pct}% ({tone}) · сквозь · Ctrl+O / Esc — вернуть"
+            f"Авто-плотность {pct}% ({tone}) · лог logs/auto_density.log · Ctrl+O / Esc"
         )
-        _auto_density_log(f"{pct}% {tone} slider={cur} {ms:.0f}ms")
+        _auto_density_log(
+            f"{pct}% {tone} slider={cur}→{pct if changed else cur} "
+            f"changed={int(changed)} {ms:.0f}ms",
+            event="tick",
+        )
 
     def _resolve_auto_density_pct(self) -> tuple[int, str]:
         """
         База + яркость. Пока сквозь — только обои/кэш (grabWindow при CT
         мигает поверх чужого окна: DWM + topmost).
+        Ручной override яркости фона — prefs auto_density_luma_override 0..100.
         """
         base = max(
             _OPACITY_MIN,
             min(_OPACITY_MAX, int(self._prefs.get("auto_density_pct", 45))),
         )
+        try:
+            ov = int(self._prefs.get("auto_density_luma_override", -1))
+        except (TypeError, ValueError):
+            ov = -1
+        if ov >= 0:
+            luma = max(0.0, min(1.0, ov / 100.0))
+            pct = _auto_density_pct_from_luma(base, luma)
+            tone = "светлый" if luma >= 0.45 else ("тёмный" if luma <= 0.30 else "средний")
+            return pct, f"ручная {tone} L{luma:.2f}"
+
         luma: float | None = None
         src = "база"
         if self._click_through:
@@ -3005,11 +3080,22 @@ class OverlayPlayerWindow(QWidget):
     def _on_auto_density_fire(self) -> None:
         """Idle истёк → снимок стола, потом сквозь (grab только до CT)."""
         if not self._prefs.get("auto_density"):
+            _auto_density_log("fire but pref off", event="skip")
             return
         if not self._stage_mode or not self._playing or self._click_through:
+            _auto_density_log(
+                f"fire skip stage={self._stage_mode} play={self._playing} ct={self._click_through}",
+                event="skip",
+            )
             return
         # Важно: grab ДО сквозь — иначе вспышка поверх Cursor/игры
         self._cached_screen_luma = _desktop_luminance_outside(self.frameGeometry())
+        cache_s = (
+            f"L{self._cached_screen_luma:.2f}"
+            if self._cached_screen_luma is not None
+            else "none"
+        )
+        _auto_density_log(f"idle done → CT cache={cache_s}", event="fire")
         self._auto_density_armed = True
         self._set_click_through(True)
 
@@ -3819,6 +3905,10 @@ class OverlayPlayerWindow(QWidget):
                 # Авто-плотность: Ctrl+O тоже включает тик (не только idle-fire)
                 if self._prefs.get("auto_density"):
                     self._auto_density_armed = True
+                    _auto_density_log(
+                        f"CT on (auto) · {auto_density_log_hint()}",
+                        event="session",
+                    )
                     QTimer.singleShot(40, self._apply_auto_density_now)
                     self._start_auto_density_adapt()
                 elif not self._auto_density_armed:
@@ -3834,6 +3924,7 @@ class OverlayPlayerWindow(QWidget):
                 self._apply_stage_opacity()
                 self.status.setText("Сквозь выкл · плотность после Ctrl+O · Ctrl+Shift+O — свернуть")
                 self._register_hotkeys()
+                _auto_density_log("CT off", event="ct_off")
                 self._arm_auto_density_timer()
             else:
                 self._apply_catalog_opacity()
@@ -4094,7 +4185,24 @@ class OverlayPlayerWindow(QWidget):
                 self._refresh_hint()
                 self._install_shortcuts()
                 self._apply_output_volume()
-                self.status.setText("Настройки сохранены")
+                if updates.get("auto_density"):
+                    ov = int(updates.get("auto_density_luma_override", -1))
+                    luma_s = "авто" if ov < 0 else f"{ov}%"
+                    _auto_density_log(
+                        f"prefs on base={updates.get('auto_density_pct')}% "
+                        f"idle={updates.get('auto_density_idle_sec')}s "
+                        f"adapt={updates.get('auto_density_adapt_sec')}s "
+                        f"luma={luma_s} · {auto_density_log_hint()}",
+                        event="session",
+                    )
+                    self.status.setText(
+                        f"Настройки сохранены · авто-лог: logs/auto_density.log"
+                    )
+                else:
+                    _auto_density_log("prefs auto_density=off", event="session")
+                    self.status.setText("Настройки сохранены")
+                if self._stage_mode and self._playing and updates.get("auto_density"):
+                    self._arm_auto_density_timer()
         finally:
             self._register_hotkeys()
         if was_playing and self._player is not None and self._prefs.get("play_when_hidden", True):

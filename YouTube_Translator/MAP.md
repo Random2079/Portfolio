@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| **Где мы** | Catalog ✅ C3 · полное окно сразу со сквозь (pref) · Настр. clamp/сброс/хоткеи ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
+| **Где мы** | Авто-плотность: лог `logs/auto_density.log` + ручная яркость фона · C3 · сквозь по умолчанию ([part 18](docs/parts/18-overlay-auto-density.md)). |
 | **Фокус** | полировка · 021 F1 dist · ⏸ наушник / B0 |
 | **Код scope** | `overlay_player.py` |
 
