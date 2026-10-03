@@ -208,6 +208,9 @@ class QueryExclusionsTests(unittest.TestCase):
         self.assertIn("-ставки", q)
         self.assertIn("-кэф", q)
         self.assertIn("технический анализ", q)
+        # Google NFE returns 0 entries if query contains quoted #-hashtag minus.
+        self.assertNotIn("#", q)
+        self.assertNotIn("сильный_рост", q)
 
 
 if __name__ == "__main__":

@@ -93,6 +93,28 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_coverage(args: argparse.Namespace) -> int:
+    """Print ticker×source coverage for audit (K5 scope by default)."""
+    from portfolio_news.coverage_report import build_coverage_report, format_coverage_report
+
+    settings = get_settings()
+    Session = make_session_factory(settings.database_url)
+    bcs_only = not getattr(args, "all_tickers", False)
+    with Session() as session:
+        rep = build_coverage_report(
+            session,
+            window=args.window,
+            bcs_only=bcs_only,
+            low_max=args.low_max,
+            fat_min=args.fat_min,
+        )
+    text = format_coverage_report(
+        rep, top=args.top, low_max=args.low_max, fat_min=args.fat_min
+    )
+    print(text)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="portfolio_news", description="IDEA-003 portfolio news monitor")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -145,6 +167,26 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=None)
     serve.add_argument("--reload", action="store_true")
     serve.set_defaults(func=cmd_serve)
+
+    cov = sub.add_parser(
+        "coverage",
+        help="News coverage report: ticker × source (today/7d/30d/all)",
+    )
+    cov.add_argument(
+        "--window",
+        default="7d",
+        choices=["today", "7d", "30d", "all"],
+        help="Time window (Asia/Yekaterinburg)",
+    )
+    cov.add_argument(
+        "--all-tickers",
+        action="store_true",
+        help="Use full tickers DB instead of BCS holdings (offline audit)",
+    )
+    cov.add_argument("--low-max", type=int, default=2, help="Low-coverage threshold")
+    cov.add_argument("--fat-min", type=int, default=25, help="Overfed threshold")
+    cov.add_argument("--top", type=int, default=15, help="Top rows to print")
+    cov.set_defaults(func=cmd_coverage)
 
     return p
 

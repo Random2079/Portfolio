@@ -1,7 +1,7 @@
 # MAP — Portfolio_News (IDEA-003)
 
 **Это главная карта для тебя.** Один файл: что есть, что дальше, как устроено, что нельзя.  
-Обновлено: **2026-10-02**.
+Обновлено: **2026-10-03**.
 
 Остальные `docs/TZ.md`, `docs/parts/*`, `.cursor/WHERE_WE_ARE.md`, `.cursor/plans/*` — техника или **указатели сюда**.  
 Статус / очередь / план следующего слоя **не дублировать** в parts и plans.  
@@ -32,7 +32,7 @@
 **Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
 **React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
 Если React «пизда» → снова `/` ванили.  
-**Очередь:** React MVP R0–R4 ✅. UI вкладок ≈ ваниль. Капитал на Дне ✅. **§7N** лента Новостей (этажи + карточки) ✅. Сырой **ИИ-слой** → §7F. **Дешёвые pre-AI фильтры** в `news_noise.py` (паттерн «идея в Профите» / тех.анализ / фьючерсы / near-dup / short-ticker + geo-keep) ✅ — **площадка ≠ все авторы**, см. **§7S**. **§7S Pulse allowlist v1** ✅ + **Pulse news-by-ticker** ✅ (equity `/news/` SSR). **Privacy** — план §7P, UI позже. Дальше по желанию: §7F / **G** / H / allowlist UI · облиг→эмитент later.
+**Очередь:** React MVP R0–R4 ✅. UI вкладок ≈ ваниль. Капитал на Дне ✅. **§7N** лента Новостей (этажи + карточки) ✅. Сырой **ИИ-слой** → §7F. **Дешёвые pre-AI фильтры** в `news_noise.py` (паттерн «идея в Профите» / тех.анализ / фьючерсы / near-dup / short-ticker + geo-keep) ✅ — **площадка ≠ все авторы**, см. **§7S**. **§7S Pulse allowlist v1** ✅ + **Pulse news-by-ticker** ✅ (equity `/news/` SSR). **Coverage audit 2026-10-03:** Google RSS был мёртв из‑за `-"#сильный_рост"` в query → ✅ убрали (hashtag spam остаётся в title denylist); CLI `python -m portfolio_news coverage` ✅. В DB ещё нет строк `pulse_news_ticker` до следующего poll. **Privacy** — план §7P, UI позже. Дальше по желанию: §7F / **G** / H / allowlist UI · облиг→эмитент later · re-poll после фикса Google.
 
 ---
 
@@ -327,7 +327,13 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 
 Критерий как у пользователя + Investing `чек-поинт.md`: факты/макро по секторам KS, не идеи / таргеты / интрадей. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
 
-**Дальше:** **UI allowlist** · maybe-очередь / IR pack v1.1 · bond→company map · не Telegram-userbot.
+**Coverage / poll hygiene (2026-10-03):**  
+- Активные источники в `default_sources()`: `google_news_ru` · `smartlab` · `pulse_allowlist` (2 канала: Interfax, Advokat_Manasyan) · `pulse_news_ticker` (equity).  
+- Аудит CLI: `python -m portfolio_news coverage --window 7d` (BCS scope; `--all-tickers` для offline).  
+- Google: минус `#сильный_рост` в RSS-query **ломал ленту (0 entries)** — убран; denylist title остаётся.  
+- После фикса — нужен `once`/`watch` poll, чтобы заполнить `pulse_news_ticker` и оживить Google в DB.
+
+**Дальше:** re-poll · **UI allowlist** · maybe-очередь / IR pack v1.1 · bond→company map · не Telegram-userbot.
 
 ---
 

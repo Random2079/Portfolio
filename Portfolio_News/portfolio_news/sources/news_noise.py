@@ -13,11 +13,13 @@ from __future__ import annotations
 import re
 
 # Appended to Google News equity search (minus-operators). Bonds: lighter set.
+# Do NOT put #-hashtags in Google minus quotes: `-"#сильный_рост"` makes RSS
+# return 0 entries (Google NFE quirk). Hashtag spam stays in title denylist.
 _GOOGLE_MINUS_EQUITY = (
     "-ставки -ставка -кэф -коэффициент -букмекер -киберспорт "
     "-dota -cs2 -esports -прогноз "
     "-форум -котировки -\"курс на сегодня\" "
-    "-\"технический анализ\" -\"идея в профите\" -\"#сильный_рост\""
+    "-\"технический анализ\" -\"идея в профите\""
 )
 
 # Trailing site / product suffixes that do not change the story.
