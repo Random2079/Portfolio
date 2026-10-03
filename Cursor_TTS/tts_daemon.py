@@ -27,6 +27,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_FILE = ROOT / "tts_config.json"
+PROFILES_FILE = ROOT / "reading_profiles.json"
 PID_FILE = ROOT / "tts_daemon.pid"
 HOST = "127.0.0.1"
 PORT = 47391
@@ -34,18 +35,22 @@ DEFAULT_VOLUME = 45
 DEFAULT_ENGINE = "tera"  # tera | edge | local (Silero) | qwen | openai
 DEFAULT_PAUSE_MS = 350  # пауза между кусками (реф: ~300–500ms между предложениями)
 DEFAULT_HYBRID_MODE = "dict_only"
+DEFAULT_READING_PROFILE = "manual"
 DEFAULT_LANG_SWITCH_PAUSE_MS = 80
 DEFAULT_LOCAL_SPEAKER = "xenia"
 DEFAULT_OPENAI_VOICE = "nova"
 DEFAULT_EDGE_VOICE = "ru-RU-SvetlanaNeural"
 DEFAULT_TERA_VOICE = "ru_f1"
 DEFAULT_TERA_DURATION_SCALE = 1.0
+DEFAULT_TERA_CHUNK = 520
 DEFAULT_QWEN_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
 DEFAULT_QWEN_SPEAKER = "serena"
 DEFAULT_QWEN_DESIGN = "micro_wife/voice_design.txt"
 _ENGINES = {"local", "edge", "tera", "qwen", "openai"}
 _DEAD_ENGINES = {"kokoro", "piper"}  # kokoro→edge, piper→local
-_HYBRID_MODES = {"off", "dict_only", "dict_and_en"}
+_HYBRID_MODES = {"off", "dict_only"}
+_MANUAL_PROFILES = frozenset({"manual", "off", ""})
+_LEGACY_PROFILES = {"a": "normal", "b": "slow", "c": "normal", "d": "fast"}
 # Живой Qwen на 3050: 20–30с / до ~160с если тесно. Дальше CUDA стоит — процесс надо убить.
 WARMUP_STALE_SEC = 240
 WARMUP_BUSY_OTHER = -1
@@ -293,6 +298,7 @@ def load_config() -> dict:
         "tera_voice": DEFAULT_TERA_VOICE,
         "tera_duration_scale": DEFAULT_TERA_DURATION_SCALE,
         "hybrid_mode": DEFAULT_HYBRID_MODE,
+        "reading_profile": DEFAULT_READING_PROFILE,
         "lang_switch_pause_ms": DEFAULT_LANG_SWITCH_PAUSE_MS,
         "qwen_model": DEFAULT_QWEN_MODEL,
         "qwen_speaker": DEFAULT_QWEN_SPEAKER,
@@ -332,6 +338,9 @@ def load_config() -> dict:
             if hybrid == "dict_and_en":
                 hybrid = "dict_only"
             data["hybrid_mode"] = hybrid if hybrid in _HYBRID_MODES else DEFAULT_HYBRID_MODE
+            profile = str(raw.get("reading_profile", DEFAULT_READING_PROFILE)).strip().lower()
+            profile = _LEGACY_PROFILES.get(profile, profile)
+            data["reading_profile"] = profile or DEFAULT_READING_PROFILE
             data["qwen_model"] = (
                 str(raw.get("qwen_model", DEFAULT_QWEN_MODEL)).strip() or DEFAULT_QWEN_MODEL
             )
@@ -362,6 +371,8 @@ def load_config() -> dict:
             pass
     if "pause_ms" not in data:
         data["pause_ms"] = DEFAULT_PAUSE_MS
+    if "reading_profile" not in data:
+        data["reading_profile"] = DEFAULT_READING_PROFILE
     if "qwen_model" not in data:
         data["qwen_model"] = DEFAULT_QWEN_MODEL
     if "qwen_speaker" not in data:
@@ -424,20 +435,26 @@ def wait_while_paused() -> bool:
 
 
 def pause_after_chunk(part: str, base_ms: int) -> None:
-    """Пауза между кусками: дольше после .!? , короче после запятой, 0 если стоп/pause."""
+    """Пауза между кусками: дольше после .!? , короче после запятой, 0 если стоп/pause.
+
+    При base_ms ≤ 160 (следующий кусок уже prefetch) не раздуваем ×1.4 —
+    иначе слышны искусственные дыры даже когда аудио готово.
+    """
     if base_ms <= 0 or _stop_event.is_set() or is_paused():
         return
     stripped = part.rstrip()
     if not stripped:
         return
     end = stripped[-1]
-    if end in ".!?…":
+    if base_ms <= 160:
+        delay = base_ms
+    elif end in ".!?…":
         delay = int(base_ms * 1.4)  # ~ sentence / paragraph
     elif end in ",:;":
         delay = int(base_ms * 0.6)
     else:
         delay = base_ms
-    delay = max(80, min(2000, delay))
+    delay = max(40, min(2000, delay))
     end_at = time.monotonic() + delay / 1000.0
     while time.monotonic() < end_at:
         if _stop_event.is_set() or is_paused():
@@ -765,6 +782,7 @@ def split_for_speech(text: str) -> list[str]:
 def play_file(mp3_path: Path, volume: float) -> bool:
     """Играть до конца. True = дослушали, False = hard stop.
     get_busy() на паузе False — не считать это концом файла.
+    Громкость подтягивается из tts_config.json на лету (слайдер панели).
     """
     import pygame
 
@@ -776,10 +794,17 @@ def play_file(mp3_path: Path, volume: float) -> bool:
     if is_paused() and not wait_while_paused():
         return False
     try:
+        live_vol = float(volume)
+        try:
+            live_vol = float(load_config().get("volume", live_vol))
+        except Exception:
+            pass
         pygame.mixer.music.load(str(mp3_path))
-        pygame.mixer.music.set_volume(volume)
+        pygame.mixer.music.set_volume(live_vol)
         pygame.mixer.music.play()
         mixer_paused = False
+        last_vol = live_vol
+        vol_check_at = 0.0
         while True:
             if _stop_event.is_set():
                 pygame.mixer.music.stop()
@@ -793,6 +818,16 @@ def play_file(mp3_path: Path, volume: float) -> bool:
             if mixer_paused:
                 pygame.mixer.music.unpause()
                 mixer_paused = False
+            now = time.monotonic()
+            if now >= vol_check_at:
+                vol_check_at = now + 0.12
+                try:
+                    fresh = float(load_config().get("volume", last_vol))
+                except Exception:
+                    fresh = last_vol
+                if abs(fresh - last_vol) > 0.005:
+                    last_vol = fresh
+                    pygame.mixer.music.set_volume(last_vol)
             if pygame.mixer.music.get_busy():
                 pygame.time.wait(40)
                 continue
@@ -900,6 +935,76 @@ def _looks_like_table_speech(text: str) -> bool:
     return text.lstrip().startswith("Столбцы:")
 
 
+def load_reading_profiles() -> dict:
+    """Именованные пресеты из reading_profiles.json (без ключей на _*)."""
+    try:
+        raw = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for key, value in raw.items():
+        name = str(key).strip().lower()
+        if not name or name.startswith("_") or not isinstance(value, dict):
+            continue
+        out[name] = value
+    return out
+
+
+def effective_speak_settings(cfg: dict) -> dict:
+    """
+    pause_ms / tera_duration_scale / chunk_target с учётом reading_profile.
+    manual → слайдеры; fast/normal/slow/rollback → пресет.
+    """
+    pause_ms = int(cfg.get("pause_ms", DEFAULT_PAUSE_MS))
+    scale = float(cfg.get("tera_duration_scale", DEFAULT_TERA_DURATION_SCALE))
+    chunk_target: int | None = None
+    name = str(cfg.get("reading_profile", DEFAULT_READING_PROFILE)).strip().lower()
+    name = _LEGACY_PROFILES.get(name, name)
+    if name in _MANUAL_PROFILES:
+        return {
+            "pause_ms": pause_ms,
+            "tera_duration_scale": scale,
+            "chunk_target": chunk_target,
+            "reading_profile": "manual",
+        }
+    profiles = load_reading_profiles()
+    prof = profiles.get(name)
+    if not isinstance(prof, dict):
+        return {
+            "pause_ms": pause_ms,
+            "tera_duration_scale": scale,
+            "chunk_target": chunk_target,
+            "reading_profile": "manual",
+        }
+    try:
+        pause_ms = max(0, min(2000, int(prof.get("pause_ms", pause_ms))))
+    except (TypeError, ValueError):
+        pass
+    try:
+        from speak_tera import normalize_duration_scale
+
+        scale = normalize_duration_scale(prof.get("tera_duration_scale", scale))
+    except Exception:
+        try:
+            scale = float(prof.get("tera_duration_scale", scale))
+        except (TypeError, ValueError):
+            pass
+    try:
+        raw_chunk = prof.get("chunk_target")
+        if raw_chunk is not None:
+            chunk_target = max(120, min(900, int(raw_chunk)))
+    except (TypeError, ValueError):
+        chunk_target = None
+    return {
+        "pause_ms": pause_ms,
+        "tera_duration_scale": scale,
+        "chunk_target": chunk_target,
+        "reading_profile": name,
+    }
+
+
 # Пока играет кусок N — заранее синтезировать N+1 (не Qwen: VRAM/lock).
 _PREFETCH_ENGINES = frozenset({"tera", "edge", "local", "openai"})
 
@@ -920,8 +1025,12 @@ def _render_chunk_file(
         return None
 
 
-def _parts_for_engine(text: str, engine: str) -> list[str]:
+def _parts_for_engine(
+    text: str, engine: str, *, chunk_target: int | None = None
+) -> list[str]:
     table_like = _looks_like_table_speech(text)
+    if chunk_target is not None and engine == "tera" and not table_like:
+        return split_into_chunks(text, target=int(chunk_target))
     if engine == "local":
         # Silero режет длинные куски сам (~900); держим умеренно.
         return split_into_chunks(text, target=140 if table_like else 280)
@@ -930,7 +1039,9 @@ def _parts_for_engine(text: str, engine: str) -> list[str]:
         return split_into_chunks(text, target=500 if table_like else 900)
     if engine == "tera":
         # Локальный ONNX: крупные куски; ложный table_like раньше давал дыры на списках.
-        return split_into_chunks(text, target=220 if table_like else 520)
+        return split_into_chunks(
+            text, target=220 if table_like else DEFAULT_TERA_CHUNK
+        )
     if engine == "qwen":
         # Короткие куски на Qwen дают хуже RTF (фиксированный overhead generate).
         # table_like раньше резал до 120 — это усугубляло; держим крупные куски.
@@ -957,24 +1068,22 @@ def _speech_units(text: str, cfg: dict) -> list[tuple[str, str]]:
     """Куски [(текст, lang)]. Всегда ru: один голос Tera, EN через словарь."""
     hybrid = _effective_hybrid(cfg)
     engine = str(cfg.get("engine", DEFAULT_ENGINE))
+    eff = effective_speak_settings(cfg)
+    chunk_target = eff.get("chunk_target")
+    prepared = text
     try:
-        if hybrid == "dict_and_en":
-            from text_prep import finalize_speech_segments
-
-            units: list[tuple[str, str]] = []
-            for seg in finalize_speech_segments(text):
-                for chunk in _parts_for_engine(seg.text, engine):
-                    if chunk:
-                        units.append((chunk, seg.lang))
-            return units
-
         from text_prep import finalize_speech_text
 
         prepared = finalize_speech_text(text, apply_dict=hybrid != "off")
-        return [(chunk, "ru") for chunk in _parts_for_engine(prepared, engine) if chunk]
     except Exception as error:
         debug_log(f"text_prep skipped: {error}")
-        return [(chunk, "ru") for chunk in _parts_for_engine(text, engine) if chunk]
+    return [
+        (chunk, "ru")
+        for chunk in _parts_for_engine(
+            prepared, engine, chunk_target=chunk_target
+        )
+        if chunk
+    ]
 
 
 def speak_text(item: SpeechItem) -> None:
@@ -983,6 +1092,10 @@ def speak_text(item: SpeechItem) -> None:
         set_paused(False)
         cfg = load_config()
         engine = str(cfg["engine"])
+        eff = effective_speak_settings(cfg)
+        cfg = dict(cfg)
+        cfg["pause_ms"] = int(eff["pause_ms"])
+        cfg["tera_duration_scale"] = float(eff["tera_duration_scale"])
         set_progress(
             "preparing",
             engine=engine,
@@ -1019,6 +1132,8 @@ def speak_text(item: SpeechItem) -> None:
         hybrid = _effective_hybrid(cfg)
         debug_log(
             f"ENGINE={cfg['engine']} hybrid={hybrid} units={len(units)} "
+            f"profile={eff.get('reading_profile')} pause_ms={cfg['pause_ms']} "
+            f"scale={cfg['tera_duration_scale']} chunk={eff.get('chunk_target')} "
             f"source={item.source} conv={item.conversation_id[:12]} gen={item.generation_id[:12]}"
         )
         log_speak_start(len(item.text), len(units))
@@ -1143,6 +1258,17 @@ def speak_text(item: SpeechItem) -> None:
                 current_path = None
 
                 if prefetch_thread is not None:
+                    # Prefetch не успел → тишина без статуса «синтез» ощущается как лаг голоса.
+                    if prefetch_thread.is_alive():
+                        set_progress(
+                            "synthesizing",
+                            engine=engine,
+                            current=index + 2,
+                            total=len(units),
+                            source=item.source,
+                            conversation_id=item.conversation_id,
+                            generation_id=item.generation_id,
+                        )
                     prefetch_thread.join(timeout=180.0)
                     prefetch_thread = None
                     if (
@@ -1163,7 +1289,16 @@ def speak_text(item: SpeechItem) -> None:
                 index += 1
                 if index >= len(units):
                     break
-                pause_after_chunk(part, pause_ms)
+                try:
+                    live_cfg = load_config()
+                    pause_ms = int(effective_speak_settings(live_cfg)["pause_ms"])
+                except Exception:
+                    pass
+                # Следующий кусок уже в памяти — не тянуть паузу ×1.4 (дыры между фразами).
+                gap_ms = pause_ms
+                if ready_path is not None and ready_index == index:
+                    gap_ms = min(pause_ms, 160)
+                pause_after_chunk(part, gap_ms)
                 if units[index][1] != lang and switch_ms > 0:
                     end_at = time.monotonic() + switch_ms / 1000.0
                     while time.monotonic() < end_at:

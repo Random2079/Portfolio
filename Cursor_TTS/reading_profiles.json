@@ -1,0 +1,27 @@
+{
+  "_comment": "Пресеты чтения. manual = слайдеры. rollback = снимок «голос ок» 2026-10-02. Старые a/b/c/d в конфиге маппятся на fast/normal/slow в коде.",
+  "fast": {
+    "label": "Быстро",
+    "tera_duration_scale": 1.08,
+    "pause_ms": 350,
+    "chunk_target": 400
+  },
+  "normal": {
+    "label": "Нормально",
+    "tera_duration_scale": 1.12,
+    "pause_ms": 400,
+    "chunk_target": 360
+  },
+  "slow": {
+    "label": "Медленно",
+    "tera_duration_scale": 1.35,
+    "pause_ms": 700,
+    "chunk_target": 280
+  },
+  "rollback": {
+    "label": "Откат · голос ок 2026-10-02",
+    "tera_duration_scale": 1.18,
+    "pause_ms": 480,
+    "chunk_target": 320
+  }
+}

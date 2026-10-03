@@ -170,6 +170,60 @@ class TestListChunking(unittest.TestCase):
         self.assertNotIn("пяти, восемь", low)
 
 
+class TestPercentAndMoney(unittest.TestCase):
+    def test_percent_spoken(self) -> None:
+        out = finalize_speech_text(
+            "5 дней, 21% Auto / 19% себя. Жечь оставшиеся %.",
+            apply_dict=True,
+        ).lower()
+        self.assertIn("процент", out)
+        self.assertNotIn("%", out)
+        self.assertIn("авто", out)
+
+    def test_dollar_spoken(self) -> None:
+        out = finalize_speech_text("при $60 уже заплатил", apply_dict=False).lower()
+        self.assertIn("доллар", out)
+        self.assertNotIn("$", out)
+
+
+class TestReadingProfiles(unittest.TestCase):
+    def test_manual_keeps_slider_values(self) -> None:
+        import tts_daemon as daemon
+
+        cfg = {
+            "reading_profile": "manual",
+            "pause_ms": 777,
+            "tera_duration_scale": 1.11,
+        }
+        eff = daemon.effective_speak_settings(cfg)
+        self.assertEqual(eff["reading_profile"], "manual")
+        self.assertEqual(eff["pause_ms"], 777)
+        self.assertIsNone(eff["chunk_target"])
+
+    def test_legacy_a_maps_to_normal(self) -> None:
+        import tts_daemon as daemon
+
+        cfg = {
+            "reading_profile": "a",
+            "pause_ms": 10,
+            "tera_duration_scale": 1.0,
+        }
+        eff = daemon.effective_speak_settings(cfg)
+        self.assertEqual(eff["reading_profile"], "normal")
+        self.assertEqual(eff["pause_ms"], 400)
+        self.assertEqual(eff["chunk_target"], 360)
+        self.assertAlmostEqual(float(eff["tera_duration_scale"]), 1.12)
+
+    def test_rollback_exists(self) -> None:
+        import tts_daemon as daemon
+
+        eff = daemon.effective_speak_settings(
+            {"reading_profile": "rollback", "pause_ms": 1, "tera_duration_scale": 1.0}
+        )
+        self.assertEqual(eff["reading_profile"], "rollback")
+        self.assertEqual(eff["chunk_target"], 320)
+
+
 class TestRuOnlyHybrid(unittest.TestCase):
     def test_dict_and_en_collapses_to_dict_only(self) -> None:
         import tts_daemon as daemon
