@@ -1848,16 +1848,10 @@ class OverlayPlayerWindow(QWidget):
         self.folder_label = QLabel()
         self.folder_label.setObjectName("folderLabel")
         self.folder_label.setWordWrap(True)
-        top.addWidget(self.folder_label, stretch=1)
-        self.pick_folder_btn = QPushButton("Папка")
-        self.pick_folder_btn.setObjectName("ghostBtn")
-        self.pick_folder_btn.setIcon(_svg_icon("folder", 16))
-        self.pick_folder_btn.setIconSize(QSize(16, 16))
-        self.pick_folder_btn.setToolTip(
-            "Диалог с фильтром mp3/mp4 — выбери любой файл в нужной папке"
+        self.folder_label.setToolTip(
+            "Каталог Music\\YouTube_DL · в списке: ПКМ / F2 переименовать · Del удалить"
         )
-        self.pick_folder_btn.clicked.connect(self._pick_folder)
-        top.addWidget(self.pick_folder_btn)
+        top.addWidget(self.folder_label, stretch=1)
         self.settings_btn = QPushButton("Настр.")
         self.settings_btn.setObjectName("ghostBtn")
         self.settings_btn.setIcon(_svg_icon("settings", 16))
@@ -2041,7 +2035,6 @@ class OverlayPlayerWindow(QWidget):
 
         for btn in (
             self.back_btn,
-            self.pick_folder_btn,
             self.settings_btn,
             self.catalog_btn,
             self.prev_btn,

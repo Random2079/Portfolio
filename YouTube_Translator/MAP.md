@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| **Где мы** | Catalog: **C0+C1+C2b+C2c ✅** (мини-проводник) · дальше C3 ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
+| **Где мы** | Catalog: **C0+C1+C2b+C2c ✅** · кнопка Папка убрана (всегда YouTube_DL) · C3 по запросу ([part 21](docs/parts/21-overlay-catalog-quality.md)). |
 | **Фокус** | C3 random — по запросу |
 | **Код scope** | `overlay_player.py` |
 
