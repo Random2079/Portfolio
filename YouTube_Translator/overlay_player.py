@@ -865,17 +865,6 @@ def ensure_catalog_thumb(video: Path, *, timeout: float = 15.0) -> Path | None:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         return None
-    # CREATE_NO_WINDOW + STARTUPINFO — иначе на Win мигают чёрные консоли ffmpeg
-    run_kw: dict = {
-        "capture_output": True,
-        "timeout": timeout,
-    }
-    if os.name == "nt":
-        run_kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = 0  # SW_HIDE
-        run_kw["startupinfo"] = si
     try:
         proc = subprocess.run(
             [
@@ -896,7 +885,9 @@ def ensure_catalog_thumb(video: Path, *, timeout: float = 15.0) -> Path | None:
                 "scale=144:-1",
                 str(out),
             ],
-            **run_kw,
+            capture_output=True,
+            timeout=timeout,
+            creationflags=0x08000000 if os.name == "nt" else 0,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -1712,9 +1703,7 @@ class OverlayPlayerWindow(QWidget):
         self.thumb_ready.connect(self._on_thumb_ready)
         self._thumb_jobs: list[tuple[str, int]] = []  # video_path, item row
         self._thumb_busy = False
-        self._thumb_job_gen = 0  # gen of in-flight ffmpeg (stale must not unlock new)
         self._thumb_gen = 0  # bump on reload — ignore stale thumbs
-        self._list_built = False
         if _HAS_MULTIMEDIA:
             self._player = QMediaPlayer(self)
             self._audio = QAudioOutput(self)
@@ -1944,7 +1933,7 @@ class OverlayPlayerWindow(QWidget):
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self._apply_catalog_opacity()
-        # Список — в showEvent (один раз), не здесь: иначе splash + двойной ffmpeg-шторм
+        self._reload_list()
         self._shortcuts: list[QShortcut] = []
         self._install_shortcuts()
         self._register_hotkeys()
@@ -2014,7 +2003,6 @@ class OverlayPlayerWindow(QWidget):
     def _set_folder(self, folder: str) -> None:
         self._folder = os.path.abspath(folder)
         self.folder_label.setText(self._folder)
-        self._list_built = False
         self._reload_list()
 
     def _pick_folder(self) -> None:
@@ -2062,7 +2050,7 @@ class OverlayPlayerWindow(QWidget):
         self.list.clear()
         self._thumb_gen += 1
         self._thumb_jobs = []
-        # Не сбрасывать _thumb_busy: старый ffmpeg доработает и не запустит второй шторм
+        self._thumb_busy = False
         gen = self._thumb_gen
         sort = str(self._prefs.get("catalog_sort") or "date_asc")
         files = scan_media(self._folder, sort=sort)
@@ -2077,7 +2065,7 @@ class OverlayPlayerWindow(QWidget):
                 tip_bits.append("mp3")
             item.setToolTip(" · ".join(tip_bits))
             card = CatalogCardWidget(title, has_video=has_video, has_audio=has_audio)
-            item.setSizeHint(QSize(120, _THUMB_H + 16))
+            item.setSizeHint(card.sizeHint().expandedTo(QSize(120, _THUMB_H + 16)))
             self.list.addItem(item)
             self.list.setItemWidget(item, card)
             if video_path is not None:
@@ -2094,7 +2082,6 @@ class OverlayPlayerWindow(QWidget):
                     card.set_thumb_file(cached)
                 else:
                     self._thumb_jobs.append((str(video_path), self.list.count() - 1))
-        self._list_built = True
         self._refresh_playing_highlight()
         n = len(files)
         if n:
@@ -2105,42 +2092,25 @@ class OverlayPlayerWindow(QWidget):
                 "(фильтр Медиа / Видео / Аудио)"
             )
         if self._thumb_jobs:
-            # После show/fade — не дёргать ffmpeg в ту же миллисекунду
-            QTimer.singleShot(400, lambda g=gen: self._kick_thumb_queue(g))
+            QTimer.singleShot(0, lambda g=gen: self._kick_thumb_queue(g))
 
     def _kick_thumb_queue(self, gen: int) -> None:
         if gen != self._thumb_gen or self._thumb_busy or not self._thumb_jobs:
             return
         video_s, _row = self._thumb_jobs.pop(0)
         self._thumb_busy = True
-        self._thumb_job_gen = gen
         job_gen = gen
 
         def _work() -> None:
-            thumb_path = ""
-            try:
-                thumb = ensure_catalog_thumb(Path(video_s))
-                if thumb is not None:
-                    thumb_path = str(thumb)
-            except Exception:
-                thumb_path = ""
-            try:
-                self.thumb_ready.emit(video_s, thumb_path, job_gen)
-            except (RuntimeError, TypeError):
-                pass  # окно уже закрыто / сигнал мёртв
+            thumb = ensure_catalog_thumb(Path(video_s))
+            # QueuedConnection → UI-поток
+            self.thumb_ready.emit(video_s, str(thumb) if thumb else "", job_gen)
 
         threading.Thread(target=_work, daemon=True).start()
 
     def _on_thumb_ready(self, video_s: str, thumb_s: str, gen: int = 0) -> None:
-        # Разблокировать только свой in-flight job (не чужой gen)
-        if self._thumb_job_gen == gen:
-            self._thumb_busy = False
-            self._thumb_job_gen = 0
-        if gen != self._thumb_gen:
-            # stale — запустить актуальную очередь, если свободен
-            self._kick_thumb_queue(self._thumb_gen)
-            return
-        if thumb_s:
+        self._thumb_busy = False
+        if gen == self._thumb_gen and thumb_s:
             thumb = Path(thumb_s)
             video_key = ""
             try:
@@ -2168,7 +2138,8 @@ class OverlayPlayerWindow(QWidget):
                 if isinstance(w, CatalogCardWidget):
                     w.set_thumb_file(thumb)
                 break
-        self._kick_thumb_queue(gen)
+        if gen == self._thumb_gen:
+            self._kick_thumb_queue(gen)
 
     def _refresh_playing_highlight(self) -> None:
         """Подсветка текущего трека (играет или просто открыт в кадре)."""
@@ -3448,8 +3419,7 @@ class OverlayPlayerWindow(QWidget):
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
-        if not self._list_built:
-            self._reload_list()
+        self._reload_list()
         if not self._app_filter_installed:
             app = QApplication.instance()
             if app is not None:
@@ -3698,16 +3668,12 @@ class OverlayPlayerWindow(QWidget):
             return
         smtc = OverlaySmtc()
         # emit → Qt-поток (winrt callback может быть с другого потока)
-        try:
-            ok = smtc.bind(
-                hwnd,
-                on_play_pause=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_PLAY),
-                on_next=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_NEXT),
-                on_prev=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_PREV),
-            )
-        except BaseException:
-            # GetForWindow иногда AV на части Windows — не валим окно Фон
-            return
+        ok = smtc.bind(
+            hwnd,
+            on_play_pause=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_PLAY),
+            on_next=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_NEXT),
+            on_prev=lambda: self.hotkey_pressed.emit(_HOTKEY_MEDIA_PREV),
+        )
         if ok:
             self._smtc = smtc
             playing = bool(
@@ -3721,10 +3687,7 @@ class OverlayPlayerWindow(QWidget):
                     title = _clean_media_title(Path(self._last_play_path).stem)
                 except Exception:
                     title = None
-            try:
-                smtc.set_playing(playing, title=title)
-            except BaseException:
-                self._smtc = None
+            smtc.set_playing(playing, title=title)
 
     def _sync_smtc_playing(self, playing: bool) -> None:
         if self._smtc is None:
