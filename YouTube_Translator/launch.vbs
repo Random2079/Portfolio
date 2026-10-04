@@ -4,7 +4,10 @@
 ' GUI: pythonw launch_gui.py (stdio teed to _launch_error.log; no cmd /c)
 Option Explicit
 
-Dim sh, fso, dir, app, wrapper, pythonw, python, logPath, probeRc, errText, guiExe, winStyle
+Dim sh, fso, dir, app, wrapper, pythonw, python, logPath, probePath, probeRc, errText, guiExe, winStyle, msgTitle
+
+' Not "Subtitle Ripper ...": single-instance looks up the main window by that title prefix
+msgTitle = "SR launch"
 
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -18,14 +21,15 @@ End If
 app = dir & "\Subtitle_App.py"
 wrapper = dir & "\launch_gui.py"
 logPath = dir & "\_launch_error.log"
+probePath = dir & "\_launch_probe.log"
 
 If Not fso.FileExists(app) Then
-  MsgBox "Subtitle_App.py not found:" & vbCrLf & app, vbCritical, "Subtitle Ripper Pro"
+  MsgBox "Subtitle_App.py not found:" & vbCrLf & app, vbCritical, msgTitle
   WScript.Quit 1
 End If
 
 If Not fso.FileExists(wrapper) Then
-  MsgBox "Missing launch_gui.py:" & vbCrLf & wrapper, vbCritical, "Subtitle Ripper Pro"
+  MsgBox "Missing launch_gui.py:" & vbCrLf & wrapper, vbCritical, msgTitle
   WScript.Quit 1
 End If
 
@@ -36,33 +40,35 @@ python = FindExe("python.exe")
 If python = "" And pythonw = "" Then
   MsgBox "pythonw/python not found in PATH." & vbCrLf & _
          "Install Python or run: python Subtitle_App.py", _
-         vbCritical, "Subtitle Ripper Pro"
+         vbCritical, msgTitle
   WScript.Quit 1
 End If
 
 ' Fail-fast import probe (needs console python + redirect; hidden window)
+' Own file: _launch_error.log is held open by a running SR (launch_gui tee)
 If python <> "" Then
   On Error Resume Next
-  If fso.FileExists(logPath) Then fso.DeleteFile logPath, True
+  If fso.FileExists(probePath) Then fso.DeleteFile probePath, True
   On Error GoTo 0
   probeRc = sh.Run( _
-    "cmd /c """"" & python & """ -c ""import Subtitle_App"" 1>""" & logPath & """ 2>&1""", _
+    "cmd /c """"" & python & """ -c ""import Subtitle_App"" 1>""" & probePath & """ 2>&1""", _
     0, True)
   If probeRc <> 0 Then
-    errText = ReadLogTail(logPath, 1200)
-    If errText = "" Then errText = "(no text in _launch_error.log, code " & probeRc & ")"
+    errText = ReadLogTail(probePath, 1200)
+    If errText = "" Then errText = "(no text in _launch_probe.log, code " & probeRc & ")"
     MsgBox "Failed to start Subtitle Ripper Pro." & vbCrLf & vbCrLf & _
            errText & vbCrLf & vbCrLf & _
-           "Full log: " & logPath, _
-           vbCritical, "Subtitle Ripper Pro"
+           "Full log: " & probePath, _
+           vbCritical, msgTitle
     WScript.Quit 1
   End If
 End If
 
 ' GUI: pythonw on launch_gui.py - no cmd, no console flash; crashes go to log
+' winStyle 1: pythonw has no console; style 0 (SW_HIDE) would be applied to the first Qt window
 If pythonw <> "" Then
   guiExe = pythonw
-  winStyle = 0
+  winStyle = 1
 Else
   guiExe = python
   winStyle = 1

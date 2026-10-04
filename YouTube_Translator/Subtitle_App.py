@@ -41,36 +41,6 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse, parse_qs
 
-# #region agent log
-_AGENT_DBG_PATH = Path(__file__).resolve().parent / "debug-458393.log"
-
-
-def _agent_dbg(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict | None = None,
-    *,
-    run_id: str = "pre-fix",
-) -> None:
-    try:
-        payload = {
-            "sessionId": "458393",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        with _AGENT_DBG_PATH.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
-
-
-# #endregion
-
 from PySide6.QtCore import QByteArray, QEvent, QObject, QSize, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import (
     QColor,
@@ -382,6 +352,8 @@ def webengine_data_root() -> str:
 # yttr:// — клик по ссылке открывает Translator (протокол Windows)
 _YTTR_SCHEME = "yttr"
 _OPEN_REQUEST_FILE = "open_request.txt"
+# Второй ярлык без URL: первый процесс сам поднимает Фон или главное окно через Qt
+_ACTIVATE_REQUEST = "__activate__"
 _BARE_YT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
@@ -467,6 +439,8 @@ def read_open_request(*, consume: bool = True) -> str | None:
             pass
     if not url:
         return None
+    if url == _ACTIVATE_REQUEST:
+        return url
     return parse_launch_youtube_url(url) or (url if get_video_id(url) else None)
 
 
@@ -3038,40 +3012,6 @@ class SubtitleApp(QMainWindow):
         self._open_req_timer.timeout.connect(self._poll_open_request)
         self._open_req_timer.start()
 
-        # #region agent log
-        try:
-            dv = self.download_view
-            kids = dv.findChildren(QWidget) if dv is not None else []
-            vis_kids = [k.objectName() or type(k).__name__ for k in kids if k.isVisibleTo(dv)][:20]
-            btn = getattr(self, "download_btn", None)
-            _agent_dbg(
-                "B",
-                "SubtitleApp.__init__:end",
-                "init finished",
-                {
-                    "fixed": (self.minimumWidth(), self.minimumHeight(), self.maximumWidth(), self.maximumHeight()),
-                    "size": (self.width(), self.height()),
-                    "stack_count": self.stack.count() if hasattr(self, "stack") else -1,
-                    "stack_idx": self.stack.currentIndex() if hasattr(self, "stack") else -1,
-                    "dv_size": (dv.width(), dv.height()) if dv else None,
-                    "dv_child_n": len(kids),
-                    "dv_vis_sample": vis_kids,
-                    "download_btn": None
-                    if btn is None
-                    else {
-                        "vis": btn.isVisible(),
-                        "size": (btn.width(), btn.height()),
-                        "text": btn.text()[:40],
-                        "opacity_fx": type(btn.graphicsEffect()).__name__
-                        if btn.graphicsEffect()
-                        else None,
-                    },
-                },
-            )
-        except Exception as exc:  # noqa: BLE001 — debug only
-            _agent_dbg("B", "SubtitleApp.__init__:end", "init log failed", {"err": repr(exc)})
-        # #endregion
-
     def eventFilter(self, obj, event):  # noqa: N802 — Qt API
         # Space на сфокусированной QPushButton НЕ доходит до keyPressEvent окна —
         # ловим на уровне приложения (installEventFilter на QApplication).
@@ -4617,8 +4557,25 @@ class SubtitleApp(QMainWindow):
 
     def _poll_open_request(self) -> None:
         url = read_open_request(consume=True)
-        if url:
+        if url == _ACTIVATE_REQUEST:
+            self._activate_from_second_launch()
+        elif url:
             self.open_external_youtube(url)
+
+    def _activate_from_second_launch(self) -> None:
+        """Ярлык при живом SR: открыт Фон — вернуть его (не главное окно поверх музыки)."""
+        overlay = self._overlay_window
+        if overlay is not None:
+            try:
+                overlay.present_visible()
+                return
+            except RuntimeError:
+                self._overlay_window = None
+        if self.isMinimized():
+            self.showNormal()
+        else:
+            self.show()
+        _force_native_show(self)
 
     def on_open_player(self) -> None:
         if self._busy:
@@ -5732,6 +5689,53 @@ def _bring_sr_to_front(hwnd: int) -> bool:
     return False
 
 
+def _force_native_show(window: QWidget) -> None:
+    """Лаунчер с SW_HIDE/SW_MINIMIZE в STARTUPINFO прячет первое окно: Qt isVisible=True, HWND скрыт."""
+    if os.name != "nt":
+        return
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    hwnd = int(window.winId())
+    if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 1)  # SW_SHOWNORMAL
+    user32.SetForegroundWindow(hwnd)
+    window.raise_()
+    window.activateWindow()
+
+
+def _request_activate_from_running(hwnd: int, timeout_s: float = 2.0) -> bool:
+    """
+    Попросить живой SR поднять окно самому (Qt), а не ShowWindow снаружи:
+    главное окно при открытом Фоне спрятано Qt → внешний show = белое окно.
+    True — первый процесс забрал запрос (таймер open_request ~450 мс).
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if pid.value:
+        user32.AllowSetForegroundWindow(pid.value)
+    try:
+        write_open_request(_ACTIVATE_REQUEST)
+    except OSError:
+        return False
+    path = open_request_path()
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if not os.path.isfile(path):
+            return True
+        time.sleep(0.1)
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    _append_launch_error_log("activate request not consumed (SR hung?)")
+    return False
+
+
 def _ensure_single_instance(pending_url: str | None = None) -> object | None:
     """
     Именованный мьютекс Windows.
@@ -5746,7 +5750,8 @@ def _ensure_single_instance(pending_url: str | None = None) -> object | None:
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
     mutex = kernel32.CreateMutexW(None, True, "SubtitleRipperPro_Mutex")
-    if kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
+    already = kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+    if not already:
         return mutex
 
     if pending_url:
@@ -5757,6 +5762,8 @@ def _ensure_single_instance(pending_url: str | None = None) -> object | None:
 
     hwnd = _find_sr_hwnd()
     if hwnd:
+        if not pending_url and _request_activate_from_running(hwnd):
+            return None
         if _bring_sr_to_front(hwnd):
             return None
         msg = (
@@ -5799,8 +5806,34 @@ def _ensure_single_instance(pending_url: str | None = None) -> object | None:
     return mutex2
 
 
+def _install_main_crash_log() -> None:
+    """Если стартовали без launch_gui (SubtitleLauncher / голый pythonw) — stderr в файл."""
+    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_launch_error.log")
+    try:
+        fh = open(log_path, "a", encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    if sys.stdout is None or not hasattr(sys.stdout, "write"):
+        sys.stdout = fh  # type: ignore[assignment]
+    if sys.stderr is None or not hasattr(sys.stderr, "write"):
+        sys.stderr = fh  # type: ignore[assignment]
+
+    def _hook(exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+        try:
+            fh.write(time.strftime("%Y-%m-%dT%H:%M:%S") + " [crash]\n")
+            traceback.print_exception(exc_type, exc, tb, file=fh)
+            fh.flush()
+        except Exception:
+            pass
+
+    sys.excepthook = _hook
+
+
 if __name__ == "__main__":
+    import traceback
+
     _configure_stdio()
+    _install_main_crash_log()
 
     argv = sys.argv[1:]
     startup_url: str | None = None
@@ -5821,119 +5854,51 @@ if __name__ == "__main__":
     if _mutex_handle is None and os.name == "nt":
         sys.exit(0)
 
-    ok_proto, proto_info = register_yttr_protocol()
-    if ok_proto:
-        print(f"yttr:// registered: {proto_info}", flush=True)
-    else:
-        print(f"yttr:// register skip: {proto_info}", flush=True)
+    try:
+        ok_proto, proto_info = register_yttr_protocol()
+        if ok_proto:
+            print(f"yttr:// registered: {proto_info}", flush=True)
+        else:
+            print(f"yttr:// register skip: {proto_info}", flush=True)
 
-    _apply_sr_aumid()
-    # Профили/dist вне индекса Search; миграция yt_profile с OneDrive при первом старте
-    try:
-        default_output_root()
-        webengine_profile_dir("yt_profile")
-        webengine_profile_dir("bookmarks_profile")
-    except OSError:
-        pass
-    app = QApplication(sys.argv)
-    app.setWindowIcon(make_app_icon())
-    # #region agent log
-    _agent_dbg(
-        "A",
-        "main:pre_theme",
-        "QApplication created",
-        {"style": app.style().objectName() if app.style() else None},
-    )
-    # #endregion
-    configure_qt_theme(app)
-    # #region agent log
-    ss = app.styleSheet() or ""
-    win_c = app.palette().color(QPalette.Window)
-    _agent_dbg(
-        "A",
-        "main:post_theme",
-        "theme applied",
-        {
-            "style": app.style().objectName() if app.style() else None,
-            "ss_len": len(ss),
-            "ss_head": ss[:80].replace("\n", " "),
-            "palette_window": win_c.name(),
-        },
-    )
-    # #endregion
-    try:
-        window = SubtitleApp()
-    except Exception as exc:  # noqa: BLE001 — debug white-screen
-        # #region agent log
-        _agent_dbg(
-            "D",
-            "main:SubtitleApp",
-            "init exception",
-            {"err": repr(exc)},
-        )
-        # #endregion
+        _apply_sr_aumid()
+        # Профили/dist вне индекса Search; миграция yt_profile с OneDrive при первом старте
+        try:
+            default_output_root()
+            webengine_profile_dir("yt_profile")
+            webengine_profile_dir("bookmarks_profile")
+        except OSError:
+            pass
+        app = QApplication(sys.argv)
+    except Exception as exc:  # noqa: BLE001
+        _append_launch_error_log(f"boot exception: {exc!r}")
         raise
+    app.setWindowIcon(make_app_icon())
+    configure_qt_theme(app)
+    window = SubtitleApp()
     app.installEventFilter(window)
     window.show()
+    # Windows/AUMID часто поднимает прошлый iconic (−25600) — Qt isVisible=True, на экране пусто
+    if window.isMinimized():
+        window.showNormal()
     window.raise_()
     window.activateWindow()
     window._ensure_window_on_screen()
-    QTimer.singleShot(0, window._ensure_window_on_screen)
 
-    # #region agent log
-    def _agent_dump_ui(tag: str) -> None:
+    def _ensure_shown_after_start() -> None:
+        win32_iconic = False
         try:
-            cw = window.centralWidget()
-            btn = getattr(window, "download_btn", None)
-            kids = cw.findChildren(QWidget) if cw is not None else []
-            painted = []
-            for w in kids[:30]:
-                if isinstance(w, QPushButton) or (hasattr(w, "text") and "Label" in type(w).__name__):
-                    painted.append(
-                        {
-                            "t": type(w).__name__,
-                            "txt": (w.text()[:24] if hasattr(w, "text") else ""),
-                            "vis": w.isVisible(),
-                            "geo": (w.x(), w.y(), w.width(), w.height()),
-                        }
-                    )
-            _agent_dbg(
-                "C",
-                f"main:{tag}",
-                "post-show ui dump",
-                {
-                    "win_vis": window.isVisible(),
-                    "win_opacity": float(window.windowOpacity()),
-                    "win_geo": (
-                        window.x(),
-                        window.y(),
-                        window.width(),
-                        window.height(),
-                    ),
-                    "cw_size": (cw.width(), cw.height()) if cw else None,
-                    "cw_child_n": len(kids),
-                    "stack_idx": window.stack.currentIndex(),
-                    "stack_cur": type(window.stack.currentWidget()).__name__
-                    if window.stack.currentWidget()
-                    else None,
-                    "btn": None
-                    if btn is None
-                    else {
-                        "vis": btn.isVisible(),
-                        "geo": (btn.x(), btn.y(), btn.width(), btn.height()),
-                        "text": btn.text()[:40],
-                    },
-                    "sample": painted[:12],
-                    "ss_len": len(app.styleSheet() or ""),
-                    "palette_window": app.palette().color(QPalette.Window).name(),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001
-            _agent_dbg("C", f"main:{tag}", "dump failed", {"err": repr(exc)})
+            import ctypes
 
-    QTimer.singleShot(0, lambda: _agent_dump_ui("t0"))
-    QTimer.singleShot(500, lambda: _agent_dump_ui("t500"))
-    # #endregion
+            win32_iconic = bool(ctypes.windll.user32.IsIconic(int(window.winId())))
+        except Exception:
+            pass
+        if window.isMinimized() or win32_iconic:
+            window.showNormal()
+        _force_native_show(window)
+        window._ensure_window_on_screen()
+
+    QTimer.singleShot(0, _ensure_shown_after_start)
 
     if startup_url:
         QTimer.singleShot(150, lambda u=startup_url: window.open_external_youtube(u))
