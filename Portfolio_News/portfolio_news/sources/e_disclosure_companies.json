@@ -1,12 +1,99 @@
 {
-  "_comment": "e-disclosure.ru company.aspx?id=… for holdings issuers (manual map; expand as we poll). Verified 2026-10-04: id=3043 = ПАО Сбербанк, event.aspx links scrapeable in browser after JS check.",
-  "by_equity_ticker": {
-    "SBER": {"company_id": 3043, "name": "ПАО Сбербанк"},
-    "SIBN": {"company_id": null, "name": "ПАО Газпром нефть", "note": "find id"},
-    "ROSN": {"company_id": null, "name": "ПАО НК Роснефть", "note": "find id"},
-    "MTSS": {"company_id": null, "name": "ПАО МТС", "note": "find id"},
-    "X5": {"company_id": null, "name": "X5 / ИКС 5", "note": "find id"},
-    "MGNT": {"company_id": null, "name": "ПАО Магнит", "note": "bonds only in portfolio"}
+  "_comment": "e-disclosure issuers: Interfax company.aspx?id + INN for azipi day-feed match. Prefs share issuer. Expand inns as we poll.",
+  "portal_company_url": "https://www.e-disclosure.ru/portal/company.aspx?id={company_id}",
+  "azipi_day_url": "https://e-disclosure.azipi.ru/?msg_day={day}",
+  "azipi_message_url": "https://e-disclosure.azipi.ru/messages/{message_id}/",
+  "pref_aliases": {
+    "SBERP": "SBER",
+    "TATNP": "TATN",
+    "LSNGP": "LSNG"
   },
-  "portal_company_url": "https://www.e-disclosure.ru/portal/company.aspx?id={company_id}"
+  "by_equity_ticker": {
+    "SBER": {
+      "company_id": 3043,
+      "inn": "7707083893",
+      "name": "ПАО Сбербанк",
+      "aliases": ["Сбербанк", "Сбербанк России", "Sberbank"]
+    },
+    "SIBN": {
+      "company_id": 347,
+      "inn": "5504036333",
+      "name": "ПАО Газпром нефть",
+      "aliases": ["Газпром нефть", "Газпромнефть"]
+    },
+    "ROSN": {
+      "company_id": 6505,
+      "inn": "7706107510",
+      "name": "ПАО НК Роснефть",
+      "aliases": ["Роснефть", "НК Роснефть"]
+    },
+    "TATN": {
+      "company_id": 118,
+      "inn": "1644003838",
+      "name": "ПАО Татнефть",
+      "aliases": ["Татнефть"]
+    },
+    "MTSS": {
+      "company_id": 236,
+      "inn": "7740000076",
+      "name": "ПАО МТС",
+      "aliases": ["Мобильные ТелеСистемы", "МТС"]
+    },
+    "X5": {
+      "company_id": 39008,
+      "inn": "9722079341",
+      "name": "ПАО Корпоративный центр ИКС 5",
+      "aliases": ["ИКС 5", "ИКС5", "X5"]
+    },
+    "MGNT": {
+      "company_id": 7671,
+      "inn": "2309085638",
+      "name": "ПАО Магнит",
+      "aliases": ["Магнит"]
+    },
+    "SVCB": {
+      "company_id": 30052,
+      "inn": "4401116480",
+      "name": "ПАО Совкомбанк",
+      "aliases": ["Совкомбанк"]
+    },
+    "HNFG": {
+      "company_id": 38967,
+      "inn": null,
+      "name": "ПАО ЭЙЧ ЭФ ДЖИ",
+      "aliases": ["Хэндерсон", "Henderson", "ЭЙЧ ЭФ ДЖИ"]
+    },
+    "LEAS": {
+      "company_id": 37082,
+      "inn": null,
+      "name": "ПАО ЛК Европлан",
+      "aliases": ["Европлан"]
+    },
+    "LSNG": {
+      "company_id": 65,
+      "inn": "7803002209",
+      "name": "ПАО Россети Ленэнерго",
+      "aliases": ["Ленэнерго", "Россети Ленэнерго"]
+    },
+    "ABRD": {
+      "company_id": null,
+      "inn": null,
+      "name": "Абрау-Дюрсо",
+      "aliases": ["Абрау", "Абрау-Дюрсо"]
+    }
+  },
+  "by_issuer": {
+    "РЖД": {
+      "inn": "7708503727",
+      "aliases": ["РЖД", "Российские железные дороги"]
+    },
+    "Самолет": {
+      "inn": null,
+      "aliases": ["Самолет", "ГК Самолет"]
+    },
+    "ЛСР": {
+      "inn": null,
+      "aliases": ["Группа ЛСР", "ЛСР"]
+    }
+  }
 }

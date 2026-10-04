@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Код** | [`sources/base.py`](../../portfolio_news/sources/base.py) · [`google_news_ru.py`](../../portfolio_news/sources/google_news_ru.py) · [`smartlab.py`](../../portfolio_news/sources/smartlab.py) · [`pulse_allowlist.py`](../../portfolio_news/sources/pulse_allowlist.py) + [`pulse_allowlist.json`](../../portfolio_news/sources/pulse_allowlist.json) · [`pulse_news_ticker.py`](../../portfolio_news/sources/pulse_news_ticker.py) · [`telegram_allowlist.py`](../../portfolio_news/sources/telegram_allowlist.py) + json |
-| **Слой** | A · **§7S** Pulse v1 + news-by-ticker + TG preview |
-| **Статус** | ✅ RSS; Pulse allowlist v1; Pulse news-by-ticker (equity); Telegram Рубиндей |
+| **Код** | [`sources/base.py`](../../portfolio_news/sources/base.py) · [`google_news_ru.py`](../../portfolio_news/sources/google_news_ru.py) · [`smartlab.py`](../../portfolio_news/sources/smartlab.py) · [`pulse_allowlist.py`](../../portfolio_news/sources/pulse_allowlist.py) + json · [`pulse_news_ticker.py`](../../portfolio_news/sources/pulse_news_ticker.py) · [`telegram_allowlist.py`](../../portfolio_news/sources/telegram_allowlist.py) + json · [`e_disclosure.py`](../../portfolio_news/sources/e_disclosure.py) + json |
+| **Слой** | A · **§7S** Pulse/TG + e-disclosure |
+| **Статус** | ✅ RSS; Pulse allowlist + news-by-ticker; Telegram v1; e-disclosure (Азипи) |
 | **Навигация** | [INDEX](INDEX.md) · [TZ](../TZ.md) · [MAP §7S](../../MAP.md) |
 
 ## Вход / выход
@@ -15,7 +15,7 @@
 - Pulse news-by-ticker: `/invest/stocks/{TICKER}/news/` → `investSocialNewsByTicker`; tag `pulse_news_ticker`; **equity only**.
 - Telegram allowlist: `t.me/s/{slug}` preview; v1 = Рубиндей · РКИ · Интерфакс.Рынки; `i_moex` rejected; tag `telegram_allowlist`.
 - Bond→issuer: `bond_issuer.py` + json — poll query = issuer aliases (не серия БО).
-- e-disclosure: research only — `e_disclosure_companies.json`; source later (browser session).
+- e-disclosure: `e_disclosure.py` + json · tag `e_disclosure` · в `default_sources()`. Лента Азипи `/?msg_day=` (офиц. факты по ИНН/эмитенту). Interfax `company.aspx` — антибот, парсер HTML есть, fetch не через urllib.
 
 ## Не здесь
 

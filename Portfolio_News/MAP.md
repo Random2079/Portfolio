@@ -1,7 +1,7 @@
 # MAP — Portfolio_News (IDEA-003)
 
 **Это главная карта для тебя.** Один файл: что есть, что дальше, как устроено, что нельзя.  
-Обновлено: **2026-10-03**.
+Обновлено: **2026-10-04**.
 
 Остальные `docs/TZ.md`, `docs/parts/*`, `.cursor/WHERE_WE_ARE.md`, `.cursor/plans/*` — техника или **указатели сюда**.  
 Статус / очередь / план следующего слоя **не дублировать** в parts и plans.  
@@ -32,7 +32,7 @@
 **Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
 **React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
 Если React «пизда» → снова `/` ванили.  
-**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG ✅. **bond→issuer** ✅ (poller query по эмитенту). **e-disclosure** — проверен браузером (Сбер id=3043), источник в код ещё не врезан. Дальше: e-disclosure source · UI лента coverage · §7F / G / Privacy по желанию. TG новые каналы — стоп.
+**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG/**e-disclosure** ✅. **bond→issuer** ✅. Дальше: UI лента coverage · добить INN в json · §7F / G / Privacy по желанию. TG новые каналы — стоп.
 
 ---
 
@@ -336,7 +336,7 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 Критерий как у пользователя + Investing `чек-поинт.md`: факты/макро по секторам KS, не идеи / таргеты / интрадей. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
 
 **Coverage / poll hygiene (2026-10-03):**  
-- Активные источники в `default_sources()`: `google_news_ru` · `smartlab` · `pulse_allowlist` (2 канала: Interfax, Advokat_Manasyan) · `pulse_news_ticker` (equity) · `telegram_allowlist` (Рубиндей · РКИ · ifax_go).  
+- Активные источники в `default_sources()`: `google_news_ru` · `smartlab` · `pulse_allowlist` (2 канала: Interfax, Advokat_Manasyan) · `pulse_news_ticker` (equity) · `telegram_allowlist` (Рубиндей · РКИ · ifax_go) · `e_disclosure` (Азипи day-лента).  
 - Аудит CLI: `python -m portfolio_news coverage --window 7d` (BCS scope; `--all-tickers` для offline).  
 - Google: минус `#сильный_рост` в RSS-query **ломал ленту (0 entries)** — убран; denylist title остаётся.  
 - После фикса — нужен `once`/`watch` poll, чтобы заполнить `pulse_news_ticker` и оживить Google в DB.
@@ -345,13 +345,14 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 `bond_issuer.py` + `bond_issuer.json` — ISIN → issuer aliases (+ optional `equity_ticker`). Poller передаёт в источники **issuer query**, не «Магнит БО-004Р-08». Heuristic fallback по имени BCS. URL в DB глобально уникален → одна новость не дублируется на акцию+облиг (ок).  
 Тесты: `tests/test_bond_issuer.py`.
 
-**e-disclosure (проверка 2026-10-04, код источника ещё нет):**  
-- Браузер: после JS-check главная и `company.aspx?id=3043` (Сбер) открываются **без логина/капчи**; `event.aspx` ссылки парсятся из DOM.  
-- urllib/requests — timeout/403, нестабильно.  
-- Карта id: `sources/e_disclosure_companies.json` (пока SBER=3043, остальное добить).  
-- Следующий слой: источник `e_disclosure` (браузерная сессия / Playwright) по `company_id` holdings+issuer → не в `default_sources` пока не стабилен.
+**e-disclosure ✅ (2026-10-04):**  
+- Interfax `company.aspx` в живом браузере без логина (Сбер 3043, Роснефть 6505, Татнефть 118, …). **requests / Playwright / CDP Chrome** с этой машины — JS-check (`xpvnsulc`), страница не отдаётся.  
+- Рабочий fetch: зеркало **Азипи** `https://e-disclosure.azipi.ru/?msg_day=ДД.ММ.ГГГГ` (plain HTTP). Модуль `e_disclosure.py`, tag `e_disclosure`, в `default_sources()`. Кэш ленты на инстанс poll (~7 дней). Матч по **ИНН** / aliases эмитента, **не** `title_matches_ticker` (заголовки типовые: «выплаченные доходы…»). Лента Азипи ≈**30 сообщений/день** (не полная ЦРКИ) — тихие эмитенты могут не попасть; полный `company.aspx` — когда антибот/сессия.  
+- Карта: `e_disclosure_companies.json` — company_id + inn (SBER/SIBN/ROSN/TATN/MTSS/X5/MGNT/SVCB/LSNG + prefs; HNFG/LEAS пока aliases). Бонды → `bond_issuer` equity/issuer.  
+- Парсер `company.aspx` таблицы оставлен на случай, если антибот ослабнет. Платный REST / Playwright-профиль — не этот слой.  
+Тесты: `tests/test_e_disclosure.py`.
 
-**Дальше:** e-disclosure source · UI coverage ленты · maybe/IR · ещё company_id в json · TG стоп.
+**Дальше:** UI coverage ленты · добить INN (HNFG/LEAS/девелоперы) · maybe/IR · TG стоп.
 
 ---
 

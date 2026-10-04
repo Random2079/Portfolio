@@ -1,3 +1,4 @@
+from portfolio_news.sources.e_disclosure import EDisclosureSource
 from portfolio_news.sources.google_news_ru import GoogleNewsRuSource
 from portfolio_news.sources.pulse_allowlist import PulseAllowlistSource
 from portfolio_news.sources.pulse_news_ticker import PulseNewsTickerSource
@@ -12,4 +13,5 @@ def default_sources():
         PulseAllowlistSource(),
         PulseNewsTickerSource(),
         TelegramAllowlistSource(),
+        EDisclosureSource(),
     ]
