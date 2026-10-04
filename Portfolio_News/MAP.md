@@ -32,7 +32,7 @@
 **Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
 **React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
 Если React «пизда» → снова `/` ванили.  
-**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG/**e-disclosure** ✅. **bond→issuer** ✅. Дальше: UI лента coverage · добить INN в json · §7F / G / Privacy по желанию. TG новые каналы — стоп.
+**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG/**e-disclosure** (CDP company.aspx + Азипи) ✅. **bond→issuer** ✅. Дальше: UI лента coverage · добить INN в json · §7F / G / Privacy по желанию. TG новые каналы — стоп.
 
 ---
 
@@ -78,6 +78,8 @@
 | K0 | ✅ | Только BCS, главная = dashboard |
 | K1–K2 | ✅ | История сделок + кэш SQLite |
 | KA | ✅ | День: стоимость, Δ, «кто двинул» |
+
+**KA / выходные 2026:** календарный сб/вс ≠ «биржа закрыта». С 2026 часто доп. сессия выходного дня (09:50–19:00 MSK, часть следующего торгового дня). `/api/day.moex_live` = ISS VALTODAY/VOL>0; баннер тогда «доп. сессия · Δ к пт», не «цифры за последнюю сессию». Формула Δ не менялась (LASTTOPREVPRICE × MV).
 | KB | ✅ | Focus / клик → разбор (API остался) |
 | K3 | ✅ | График цены + маркеры сделок (LWC) |
 | K4 | ✅ | Карточка: avg, PnL, доля |
@@ -336,7 +338,7 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 Критерий как у пользователя + Investing `чек-поинт.md`: факты/макро по секторам KS, не идеи / таргеты / интрадей. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
 
 **Coverage / poll hygiene (2026-10-03):**  
-- Активные источники в `default_sources()`: `google_news_ru` · `smartlab` · `pulse_allowlist` (2 канала: Interfax, Advokat_Manasyan) · `pulse_news_ticker` (equity) · `telegram_allowlist` (Рубиндей · РКИ · ifax_go) · `e_disclosure` (Азипи day-лента).  
+- Активные источники в `default_sources()`: `google_news_ru` · `smartlab` · `pulse_allowlist` (2 канала: Interfax, Advokat_Manasyan) · `pulse_news_ticker` (equity) · `telegram_allowlist` (Рубиндей · РКИ · ifax_go) · `e_disclosure` (CDP `company.aspx` + Азипи fallback).  
 - Аудит CLI: `python -m portfolio_news coverage --window 7d` (BCS scope; `--all-tickers` для offline).  
 - Google: минус `#сильный_рост` в RSS-query **ломал ленту (0 entries)** — убран; denylist title остаётся.  
 - После фикса — нужен `once`/`watch` poll, чтобы заполнить `pulse_news_ticker` и оживить Google в DB.
@@ -345,12 +347,11 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 `bond_issuer.py` + `bond_issuer.json` — ISIN → issuer aliases (+ optional `equity_ticker`). Poller передаёт в источники **issuer query**, не «Магнит БО-004Р-08». Heuristic fallback по имени BCS. URL в DB глобально уникален → одна новость не дублируется на акцию+облиг (ок).  
 Тесты: `tests/test_bond_issuer.py`.
 
-**e-disclosure ✅ (2026-10-04):**  
-- Interfax `company.aspx` в живом браузере без логина (Сбер 3043, Роснефть 6505, Татнефть 118, …). **requests / Playwright / CDP Chrome** с этой машины — JS-check (`xpvnsulc`), страница не отдаётся.  
-- Рабочий fetch: зеркало **Азипи** `https://e-disclosure.azipi.ru/?msg_day=ДД.ММ.ГГГГ` (plain HTTP). Модуль `e_disclosure.py`, tag `e_disclosure`, в `default_sources()`. Кэш ленты на инстанс poll (~7 дней). Матч по **ИНН** / aliases эмитента, **не** `title_matches_ticker` (заголовки типовые: «выплаченные доходы…»). Лента Азипи ≈**30 сообщений/день** (не полная ЦРКИ) — тихие эмитенты могут не попасть; полный `company.aspx` — когда антибот/сессия.  
-- Карта: `e_disclosure_companies.json` — company_id + inn (SBER/SIBN/ROSN/TATN/MTSS/X5/MGNT/SVCB/LSNG + prefs; HNFG/LEAS пока aliases). Бонды → `bond_issuer` equity/issuer.  
-- Парсер `company.aspx` таблицы оставлен на случай, если антибот ослабнет. Платный REST / Playwright-профиль — не этот слой.  
-Тесты: `tests/test_e_disclosure.py`.
+**e-disclosure ✅ (2026-10-04, CDP 2026-10-04):**  
+- Карточка эмитента: `company.aspx?id=` (Сбер 3043, Роснефть 6505, …) через **CDP attach** к Chrome с `--remote-debugging-port` (не main-профиль с банками). Кэш HTML на `company_id` за poll. Матч = вся таблица этой карточки, **не** `title_matches_ticker`.  
+- Обычный Chrome **без** флага не цепляется. Лаунчер: `scripts/start_chrome_edisc_cdp.cmd` → порт **9222**, user-data-dir `%LOCALAPPDATA%\Portfolio_News\chrome-edisc` (не Default / не банки). Env: `EDISC_CDP_URL`. JS-check в **этом** окне пройти один раз и не закрывать.  
+- Свежий Playwright/новый Chrome всё ещё ловит `xpvnsulc`. CDP down / challenge → зеркало **Азипи** `/?msg_day=` (ИНН/aliases). Остальные источники живы.  
+- Карта: `e_disclosure_companies.json`. Бонды → `bond_issuer`. Тесты: `tests/test_e_disclosure.py` (offline fallback, без живого Chrome).
 
 **Дальше:** UI coverage ленты · добить INN (HNFG/LEAS/девелоперы) · maybe/IR · TG стоп.
 
