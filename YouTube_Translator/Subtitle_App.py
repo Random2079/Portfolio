@@ -2940,6 +2940,8 @@ class SubtitleApp(QMainWindow):
         self._pending_ai_after_subs = False
         # IDEA-022: отдельное overlay-окно (не в stack)
         self._overlay_window = None
+        # Клик по SR в панели при живом Фоне → handoff (не белый shell)
+        self._overlay_handoff_armed = False
         # Авто-плеер после субов: токен сбрасывает уход с главной / новый download
         self._auto_player_token = 0
         self._view_trans_anim = None
@@ -3139,6 +3141,40 @@ class SubtitleApp(QMainWindow):
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 — Qt API
         super().changeEvent(event)
+        # Клик по иконке SR в панели: Windows поднимает hide()'нутый shell → белое окно.
+        # Ctrl+O = сквозь, Ctrl+Shift+O = свернуть Фон — в обоих случаях shell спрятан.
+        et = event.type()
+        if et == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self._handoff_taskbar_to_overlay()
+        elif et == QEvent.Type.WindowStateChange:
+            if self.isVisible() and not self.isMinimized():
+                self._handoff_taskbar_to_overlay()
+
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt API
+        super().showEvent(event)
+        self._handoff_taskbar_to_overlay()
+
+    def _handoff_taskbar_to_overlay(self) -> None:
+        """Панель задач → зелёный SR: при живом Фоне вернуть Фон, shell снова спрятать."""
+        if self._overlay_handoff_armed:
+            return
+        overlay = self._overlay_window
+        if overlay is None:
+            return
+        self._overlay_handoff_armed = True
+        self.hide()
+
+        def _present() -> None:
+            self._overlay_handoff_armed = False
+            ov = self._overlay_window
+            if ov is None:
+                return
+            try:
+                ov.present_visible()
+            except RuntimeError:
+                self._overlay_window = None
+
+        QTimer.singleShot(0, _present)
 
     def moveEvent(self, event) -> None:  # noqa: N802 — Qt API
         super().moveEvent(event)
