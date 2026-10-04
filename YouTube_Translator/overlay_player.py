@@ -4052,8 +4052,21 @@ class OverlayPlayerWindow(QWidget):
         if not self._stage_mode and not self.isFullScreen():
             self._normal_geometry = self.geometry()
 
-    def present_visible(self) -> None:
-        """Кнопка «Фон» / повторный show: fade-in (канон как у SR shell)."""
+    def restore_from_taskbar(self) -> None:
+        """Taskbar / второй ярлык: развернуть и активировать, не снимая сквозь и stage."""
+        if self.isMinimized():
+            self.setWindowState(
+                self.windowState() & ~Qt.WindowState.WindowMinimized
+            )
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def present_visible(self, *, soft: bool = False) -> None:
+        """Кнопка «Фон» / каталог: полный show. soft=True — как restore_from_taskbar."""
+        if soft:
+            self.restore_from_taskbar()
+            return
         from ui_motion import fade_window_opacity
 
         if self._click_through:

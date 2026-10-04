@@ -44,14 +44,16 @@ If python = "" And pythonw = "" Then
   WScript.Quit 1
 End If
 
-' Fail-fast import probe (needs console python + redirect; hidden window)
+' Fail-fast dep probe: import PySide6 only (fast). Full Subtitle_App import is heavy
+' (WebEngine etc.) and slows every cold start; missing Qt still MsgBox + probe log.
 ' Own file: _launch_error.log is held open by a running SR (launch_gui tee)
+' winStyle 0 (SW_HIDE) on cmd probe is intentional — no flash; GUI uses winStyle 1 below
 If python <> "" Then
   On Error Resume Next
   If fso.FileExists(probePath) Then fso.DeleteFile probePath, True
   On Error GoTo 0
   probeRc = sh.Run( _
-    "cmd /c """"" & python & """ -c ""import Subtitle_App"" 1>""" & probePath & """ 2>&1""", _
+    "cmd /c """"" & python & """ -c ""import PySide6"" 1>""" & probePath & """ 2>&1""", _
     0, True)
   If probeRc <> 0 Then
     errText = ReadLogTail(probePath, 1200)

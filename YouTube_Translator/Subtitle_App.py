@@ -415,6 +415,7 @@ def to_yttr_url(youtube_url: str) -> str | None:
 
 
 def write_open_request(url: str) -> None:
+    # Local IPC only (file under project data) — not a network/trust boundary.
     path = open_request_path()
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -424,6 +425,7 @@ def write_open_request(url: str) -> None:
 
 
 def read_open_request(*, consume: bool = True) -> str | None:
+    # Local IPC only (open_request.txt) — second instance → first process.
     path = open_request_path()
     if not os.path.isfile(path):
         return None
@@ -442,6 +444,23 @@ def read_open_request(*, consume: bool = True) -> str | None:
     if url == _ACTIVATE_REQUEST:
         return url
     return parse_launch_youtube_url(url) or (url if get_video_id(url) else None)
+
+
+def second_instance_may_bring_main(
+    *,
+    pending_url: str | None,
+    activate_ok: bool,
+    main_visible: bool,
+) -> bool:
+    """
+    Когда второму процессу можно ShowWindow главное HWND.
+    pending_url / activate через open_request — никогда bring на скрытый shell под Фоном.
+    """
+    if pending_url:
+        return False
+    if activate_ok:
+        return False
+    return bool(main_visible)
 
 
 def register_yttr_protocol() -> tuple[bool, str]:
@@ -2940,8 +2959,12 @@ class SubtitleApp(QMainWindow):
         self._pending_ai_after_subs = False
         # IDEA-022: отдельное overlay-окно (не в stack)
         self._overlay_window = None
+        # True пока shell спрятан под живым Фоном (on_open_overlay → hide)
+        self._shell_hidden_for_overlay = False
         # Клик по SR в панели при живом Фоне → handoff (не белый shell)
         self._overlay_handoff_armed = False
+        # После handoff игнор ActivationChange (monotonic deadline)
+        self._overlay_handoff_ignore_until = 0.0
         # Авто-плеер после субов: токен сбрасывает уход с главной / новый download
         self._auto_player_token = 0
         self._view_trans_anim = None
@@ -3155,8 +3178,12 @@ class SubtitleApp(QMainWindow):
         self._handoff_taskbar_to_overlay()
 
     def _handoff_taskbar_to_overlay(self) -> None:
-        """Панель задач → зелёный SR: при живом Фоне вернуть Фон, shell снова спрятать."""
+        """Панель задач → зелёный SR: shell был спрятан под Фоном → soft restore Фон."""
+        if not self._shell_hidden_for_overlay:
+            return
         if self._overlay_handoff_armed:
+            return
+        if time.monotonic() < self._overlay_handoff_ignore_until:
             return
         overlay = self._overlay_window
         if overlay is None:
@@ -3166,11 +3193,12 @@ class SubtitleApp(QMainWindow):
 
         def _present() -> None:
             self._overlay_handoff_armed = False
+            self._overlay_handoff_ignore_until = time.monotonic() + 0.4
             ov = self._overlay_window
             if ov is None:
                 return
             try:
-                ov.present_visible()
+                ov.restore_from_taskbar()
             except RuntimeError:
                 self._overlay_window = None
 
@@ -4558,6 +4586,15 @@ class SubtitleApp(QMainWindow):
             return
         canon = canonical_youtube_watch_url(vid)
         self.url_input.setText(canon)
+        # URL спросил пользователь — показать shell даже если жив Фон (не грузить в hide)
+        was_hidden = self._shell_hidden_for_overlay or not self.isVisible()
+        self._shell_hidden_for_overlay = False
+        if was_hidden or self.isMinimized() or not self.isVisible():
+            if self.isMinimized():
+                self.showNormal()
+            else:
+                self.show()
+            _force_native_show(self)
         self.raise_()
         self.activateWindow()
         if self._busy:
@@ -4599,11 +4636,11 @@ class SubtitleApp(QMainWindow):
             self.open_external_youtube(url)
 
     def _activate_from_second_launch(self) -> None:
-        """Ярлык при живом SR: открыт Фон — вернуть его (не главное окно поверх музыки)."""
+        """Ярлык при живом SR: открыт Фон — soft restore (не снимать сквозь/stage)."""
         overlay = self._overlay_window
         if overlay is not None:
             try:
-                overlay.present_visible()
+                overlay.restore_from_taskbar()
                 return
             except RuntimeError:
                 self._overlay_window = None
@@ -5067,6 +5104,7 @@ class SubtitleApp(QMainWindow):
             pass
         win.closed.connect(self._on_overlay_closed)
         # Ctrl+Shift+O только прячет Фон — Translator не поднимаем (фокус в Cursor и т.п.)
+        self._shell_hidden_for_overlay = True
         self.hide()
         self._set_status(
             "Статус: overlay «Фон» открыт (← Назад / крестик — сюда; Ctrl+O — сквозь; Ctrl+Shift+O — свернуть в панель)"
@@ -5084,6 +5122,7 @@ class SubtitleApp(QMainWindow):
 
     def _on_overlay_closed(self) -> None:
         self._overlay_window = None
+        self._shell_hidden_for_overlay = False
         from ui_motion import fade_window_opacity
 
         self.setWindowOpacity(0.0)
@@ -5580,18 +5619,6 @@ def _find_sr_hwnd() -> int:
     return _find_window_by_title_pred(_is_main_sr_window_title)
 
 
-def _find_fond_hwnd() -> int:
-    """HWND окна «Фон» overlay — отдельно от gate главного SR."""
-    import ctypes
-
-    user32 = ctypes.windll.user32
-    for title in ("Фон — overlay (IDEA-022)", "Фон — overlay"):
-        hwnd = user32.FindWindowW(None, title)
-        if hwnd:
-            return int(hwnd)
-    return _find_window_by_title_pred(_is_fond_window_title)
-
-
 def _pids_owning_main_sr_windows() -> set[int]:
     """PID процессов, у которых есть top-level окно с title главного SR."""
     if os.name != "nt":
@@ -5680,15 +5707,15 @@ def _kill_orphan_sr_processes() -> int:
                 continue
         return killed
 
-    # без psutil: WMI через PowerShell — python + packed
+    # без psutil: WMI через PowerShell — python + packed (узкий match имени exe)
     import subprocess
 
     ps = (
         "$ids = @(); "
         "Get-CimInstance Win32_Process | Where-Object { "
         "  ($_.Name -match '^(python|pythonw)\\.exe$' -and $_.CommandLine -match 'Subtitle_App\\.py') "
-        "  -or ($_.Name -match 'Subtitle Ripper') "
-        "  -or ($_.CommandLine -and $_.CommandLine -match 'Subtitle Ripper') "
+        "  -or ($_.Name -match '^Subtitle Ripper Pro\\.exe$') "
+        "  -or ($_.CommandLine -and $_.CommandLine -match 'Subtitle Ripper Pro\\.exe') "
         "} | ForEach-Object { "
         "  Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; "
         "  $ids += $_.ProcessId "
@@ -5740,12 +5767,19 @@ def _force_native_show(window: QWidget) -> None:
     window.activateWindow()
 
 
-def _request_activate_from_running(hwnd: int, timeout_s: float = 2.0) -> bool:
-    """
-    Попросить живой SR поднять окно самому (Qt), а не ShowWindow снаружи:
-    главное окно при открытом Фоне спрятано Qt → внешний show = белое окно.
-    True — первый процесс забрал запрос (таймер open_request ~450 мс).
-    """
+def _main_hwnd_looks_visible(hwnd: int) -> bool:
+    """True если главное HWND реально видно (не Qt-hide под Фоном)."""
+    if not hwnd:
+        return False
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    if not user32.IsWindow(hwnd):
+        return False
+    return bool(user32.IsWindowVisible(hwnd) and not user32.IsIconic(hwnd))
+
+
+def _allow_foreground_for_hwnd(hwnd: int) -> None:
     import ctypes
     from ctypes import wintypes
 
@@ -5754,10 +5788,14 @@ def _request_activate_from_running(hwnd: int, timeout_s: float = 2.0) -> bool:
     user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     if pid.value:
         user32.AllowSetForegroundWindow(pid.value)
-    try:
-        write_open_request(_ACTIVATE_REQUEST)
-    except OSError:
-        return False
+
+
+def _wait_open_request_consumed(hwnd: int, timeout_s: float = 2.0) -> bool:
+    """
+    Ждать, пока первый процесс заберёт open_request (таймер ~450 мс).
+    True — файл исчез (забрали). Не пишет activate — URL/токен уже в файле.
+    """
+    _allow_foreground_for_hwnd(hwnd)
     path = open_request_path()
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -5768,16 +5806,32 @@ def _request_activate_from_running(hwnd: int, timeout_s: float = 2.0) -> bool:
         os.remove(path)
     except OSError:
         pass
-    _append_launch_error_log("activate request not consumed (SR hung?)")
     return False
+
+
+def _request_activate_from_running(hwnd: int, timeout_s: float = 2.0) -> bool:
+    """
+    Попросить живой SR поднять окно самому (Qt), а не ShowWindow снаружи:
+    главное окно при открытом Фоне спрятано Qt → внешний show = белое окно.
+    True — первый процесс забрал запрос (таймер open_request ~450 мс).
+    """
+    try:
+        write_open_request(_ACTIVATE_REQUEST)
+    except OSError:
+        return False
+    ok = _wait_open_request_consumed(hwnd, timeout_s=timeout_s)
+    if not ok:
+        _append_launch_error_log("activate request not consumed (SR hung?)")
+    return ok
 
 
 def _ensure_single_instance(pending_url: str | None = None) -> object | None:
     """
     Именованный мьютекс Windows.
-    Второй запуск: пишет pending_url в open_request, поднимает окно и выходит.
+    Второй запуск: URL/activate только через open_request (первый процесс Qt-show).
+    pending_url — никогда _bring_sr_to_front (скрытый shell под Фоном = белое окно).
     Kill orphans — только если мьютекс занят, окна нет и нет живого Subtitle_App.
-    Неудачный bring / нет HWND — всегда MessageBox и/или строка в _launch_error.log.
+    Неудачный handoff / нет HWND — MessageBox и/или строка в _launch_error.log.
     """
     if os.name != "nt":
         return None
@@ -5798,22 +5852,54 @@ def _ensure_single_instance(pending_url: str | None = None) -> object | None:
 
     hwnd = _find_sr_hwnd()
     if hwnd:
-        if not pending_url and _request_activate_from_running(hwnd):
+        if pending_url:
+            # URL уже в open_request — ждём poller; ShowWindow на hide shell запрещён
+            if _wait_open_request_consumed(hwnd):
+                return None
+            try:
+                write_open_request(pending_url)
+            except OSError:
+                pass
+            if _wait_open_request_consumed(hwnd, timeout_s=1.0):
+                return None
+            msg = (
+                "Subtitle Ripper уже запущен, но ссылку не удалось передать.\n"
+                "Alt+Tab или Диспетчер задач.\n"
+                "Второй экземпляр не открываю."
+            )
+            _append_launch_error_log(f"open_request URL not consumed hwnd={hwnd}")
+            user32.MessageBoxW(0, msg, "Уже запущено", 0x40)
             return None
-        if _bring_sr_to_front(hwnd):
+
+        activate_ok = _request_activate_from_running(hwnd)
+        if not activate_ok:
+            # один повтор — poller мог пропустить кадр
+            activate_ok = _request_activate_from_running(hwnd, timeout_s=1.0)
+        main_vis = _main_hwnd_looks_visible(hwnd)
+        if second_instance_may_bring_main(
+            pending_url=None,
+            activate_ok=activate_ok,
+            main_visible=main_vis,
+        ):
+            if _bring_sr_to_front(hwnd):
+                return None
+        elif activate_ok:
             return None
         msg = (
             "Subtitle Ripper уже запущен, но окно не удалось вывести вперёд.\n"
             "Alt+Tab или Диспетчер задач.\n"
             "Второй экземпляр не открываю."
         )
-        _append_launch_error_log(f"bring-to-front failed hwnd={hwnd}")
+        _append_launch_error_log(
+            f"activate/bring failed hwnd={hwnd} activate_ok={activate_ok} visible={main_vis}"
+        )
         user32.MessageBoxW(0, msg, "Уже запущено", 0x40)
         return None
 
     live = _live_sr_pids()
     if live:
         # Окно не нашли, но процесс жив — не kill (это и был «краш» на 2-м ярлыке).
+        # URL уже записан — если poller жив, подхватит без HWND.
         msg = (
             "Subtitle Ripper уже запущен (PID: "
             + ", ".join(str(p) for p in live[:5])
