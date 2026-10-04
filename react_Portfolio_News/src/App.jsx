@@ -304,7 +304,9 @@ export default function App() {
             </p>
             {moexWeekend ? (
               <p className="mkt-note">
-                Биржа выходной · цифры за последнюю сессию MOEX (MSK)
+                {day && day.moex_live
+                  ? "Доп. сессия выходного дня · Δ к закрытию пятницы (MSK)"
+                  : "Биржа выходной · цифры за последнюю сессию MOEX (MSK)"}
               </p>
             ) : null}
             {loading ? (

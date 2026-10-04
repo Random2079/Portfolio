@@ -129,6 +129,36 @@ class ComputeAttributionTests(unittest.TestCase):
         self.assertTrue(is_cash_holding(Holding(ticker="USD")))
         self.assertFalse(is_cash_holding(Holding(ticker="SBER")))
 
+    def test_moex_live_from_session_volume(self):
+        holdings = [
+            Holding(ticker="BSPB", quantity=10, market_value=2530, market_price=253),
+        ]
+        quotes = {
+            "BSPB": DayQuote(
+                ticker="BSPB",
+                last=253.0,
+                prevprice=272.2,
+                changepct=-7.05,
+                valtoday=3.4e8,
+                voltoday=1.3e6,
+            )
+        }
+        attr = compute_day_attribution(holdings, quotes, top_n=1)
+        self.assertTrue(attr.moex_live)
+        self.assertAlmostEqual(attr.top[0].day_pct or 0, -7.05)
+
+    def test_moex_live_false_without_volume(self):
+        holdings = [
+            Holding(ticker="SBER", quantity=1, market_value=100, market_price=100),
+        ]
+        quotes = {
+            "SBER": DayQuote(
+                ticker="SBER", last=100, prevprice=90, changepct=11.11111111111111
+            )
+        }
+        attr = compute_day_attribution(holdings, quotes, top_n=1)
+        self.assertFalse(attr.moex_live)
+
 
 if __name__ == "__main__":
     unittest.main()

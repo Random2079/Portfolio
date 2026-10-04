@@ -45,7 +45,15 @@ class DayCacheTests(unittest.TestCase):
         self.assertEqual(got.day_rub, 12.5)
         self.assertEqual(len(got.top), 2)
         self.assertEqual(got.top[0].ticker, "SBER")
+        self.assertFalse(got.moex_live)
         self.assertGreater(ts, 0)
+
+    def test_moex_live_roundtrip(self):
+        attr = DayAttribution(ok=True, day_rub=1.0, moex_live=True, fetched_at=1.0)
+        with self.Session() as db:
+            save_day_snapshot(db, attr)
+            loaded = load_day_snapshot(db)
+        self.assertTrue(loaded[0].moex_live)
 
 
 if __name__ == "__main__":

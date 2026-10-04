@@ -36,6 +36,8 @@ class DayQuote:
     last: Optional[float] = None
     prevprice: Optional[float] = None
     changepct: Optional[float] = None
+    valtoday: Optional[float] = None
+    voltoday: Optional[float] = None
     error: str = ""
 
 
@@ -62,6 +64,8 @@ class DayAttribution:
     fetched_at: float = 0.0
     source: str = "moex"  # day Δ from MOEX vs BCS holdings
     stale: bool = False  # served from process cache while refresh may run
+    # ISS VALTODAY/VOLTODAY > 0 — live prints (incl. 2026 weekend extra session)
+    moex_live: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -209,6 +213,20 @@ def compute_day_attribution(
             )
         )
 
+    moex_live = False
+    for q in quotes.values():
+        vt = getattr(q, "valtoday", None)
+        vo = getattr(q, "voltoday", None)
+        try:
+            if vt is not None and float(vt) > 0:
+                moex_live = True
+                break
+            if vo is not None and float(vo) > 0:
+                moex_live = True
+                break
+        except (TypeError, ValueError):
+            continue
+
     day_pct_port: Optional[float] = None
     # % of the moving sleeve (stocks/funds), not diluted by skipped bonds
     pct_base_value = covered if covered > 0 else (active_total if active_ok else None)
@@ -248,6 +266,7 @@ def compute_day_attribution(
         top=top,
         fetched_at=time.time(),
         source="moex",
+        moex_live=moex_live,
     )
 
 
@@ -280,6 +299,8 @@ def _quote_from_metric(m: MetricRow) -> DayQuote:
         last=m.last,
         prevprice=m.prevprice,
         changepct=m.changepct,
+        valtoday=m.valtoday,
+        voltoday=m.voltoday,
         error=m.error or "",
     )
 
@@ -463,6 +484,7 @@ def build_day_attribution(
                     fetched_at=_cache.fetched_at,
                     source=_cache.source,
                     stale=True,
+                    moex_live=_cache.moex_live,
                 )
                 holdings_snap = list(holdings)
                 kinds = dict(kind_by_ticker or {})
@@ -497,6 +519,7 @@ def build_day_attribution(
                     fetched_at=_cache.fetched_at,
                     source=_cache.source,
                     stale=True,
+                    moex_live=_cache.moex_live,
                 )
         return DayAttribution(ok=False, error=msg, fetched_at=time.time())
 

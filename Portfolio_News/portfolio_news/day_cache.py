@@ -45,6 +45,7 @@ def _attr_from_payload(data: dict[str, Any], *, updated_at: float) -> DayAttribu
         fetched_at=float(data.get("fetched_at") or updated_at or 0.0),
         source=str(data.get("source") or "moex"),
         stale=bool(data.get("stale")),
+        moex_live=bool(data.get("moex_live")),
     )
 
 
