@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+from urllib.parse import unquote
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -161,15 +162,21 @@ def resolve_cdp_endpoint(
     return None
 
 
+def _url_mentions_company(url: str, company_id: int) -> bool:
+    raw = url or ""
+    decoded = unquote(raw)
+    needle = f"company.aspx?id={int(company_id)}"
+    return needle in raw or needle in decoded
+
+
 def fetch_company_html_cdp(
     company_id: int,
     *,
     browser: Any,
     portal_url: str,
-    timeout_ms: int = 25000,
+    timeout_ms: int = 12000,
 ) -> Optional[str]:
     """Read company.aspx HTML from an already-connected CDP browser. Never closes the browser."""
-    needle = f"company.aspx?id={int(company_id)}"
     contexts = list(getattr(browser, "contexts", None) or [])
     if not contexts:
         log.warning("e-disclosure CDP: no browser contexts")
@@ -180,7 +187,7 @@ def fetch_company_html_cdp(
     try:
         for p in list(context.pages or []):
             url = getattr(p, "url", "") or ""
-            if "e-disclosure.ru" in url and needle in url:
+            if "e-disclosure.ru" in url and _url_mentions_company(url, company_id):
                 page = p
                 break
         if page is None:
@@ -188,7 +195,7 @@ def fetch_company_html_cdp(
             owned = True
             page.goto(portal_url, wait_until="domcontentloaded", timeout=timeout_ms)
             try:
-                page.wait_for_selector("a[href*='event.aspx?EventId=']", timeout=min(8000, timeout_ms))
+                page.wait_for_selector("a[href*='event.aspx?EventId=']", timeout=min(6000, timeout_ms))
             except Exception:  # noqa: BLE001
                 pass
         html = page.content()
@@ -454,13 +461,17 @@ class EDisclosureSource:
                     int(company_id),
                     browser=browser,
                     portal_url=self._portal_company_url(int(company_id)),
-                    timeout_ms=int(self._timeout * 1000),
+                    timeout_ms=int(min(self._timeout, 12) * 1000),
                 )
         if html and company_html_usable(html):
             self._html_by_company[key] = html
             return html
         if html:
             log.info("e-disclosure company %s HTML not usable (JS-check?) — Азипи", company_id)
+            # Challenge on this Chrome: don't open a new tab per ticker this poll.
+            self._cdp_dead = True
+        elif html is None and self._cdp_get_html is None:
+            self._cdp_dead = True
         self._html_by_company[key] = None
         return None
 

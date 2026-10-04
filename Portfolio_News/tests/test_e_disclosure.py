@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from portfolio_news.sources.e_disclosure import (
     EDisclosureSource,
+    _url_mentions_company,
     company_html_usable,
     event_matches_issuer,
     issuer_record,
@@ -79,6 +80,14 @@ class ParseTests(unittest.TestCase):
         self.assertFalse(company_html_usable(_BLOCKED))
         self.assertFalse(company_html_usable(""))
 
+    def test_encoded_challenge_url_still_matches_company_id(self):
+        url = (
+            "https://www.e-disclosure.ru/xpvnsulc/?back_location="
+            "https%3A%2F%2Fwww.e-disclosure.ru%2Fportal%2Fcompany.aspx%3Fid%3D3043"
+        )
+        self.assertTrue(_url_mentions_company(url, 3043))
+        self.assertFalse(_url_mentions_company(url, 6505))
+
 
 class CdpResolveTests(unittest.TestCase):
     def test_resolve_none_when_ports_dead(self):
@@ -127,7 +136,7 @@ class SourceFetchTests(unittest.TestCase):
             calls.append(cid)
             return _COMPANY
 
-        src = EDisclosureSource(lookback_days=1, cdp_get_html=get_html)
+        src = EDisclosureSource(lookback_days=14, cdp_get_html=get_html)
         fake = MagicMock()
         src._session = fake
         rows = src.fetch("SBER", "Сбербанк", "equity")
