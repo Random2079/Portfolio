@@ -17,7 +17,7 @@ YouTube Subtitle Ripper — GUI (CustomTkinter) + yt-dlp.
   2c. overlay_player (IDEA-022)    — фон: каталог mp3/mp4, opacity, click-through
   2d. dist files (IDEA-021 F0)     — список dist/субтитры_* + открыть в проводнике
   3.  SubtitleApp                  — окно, кнопки, поток, буфер
-  4.  __main__                     — GUI или CLI: python Subtitle_App.py URL lang
+  4.  __main__                     — GUI / yttr:// / CLI: --download URL [lang]
 
 Функции: не учить «как внутри». Достаточно docstring «что делает».
 Имена с _ в начале — внутренние хелперы, в UI не зовутся.
@@ -39,6 +39,37 @@ from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import unquote, urlparse, parse_qs
+
+# #region agent log
+_AGENT_DBG_PATH = Path(__file__).resolve().parent / "debug-458393.log"
+
+
+def _agent_dbg(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict | None = None,
+    *,
+    run_id: str = "pre-fix",
+) -> None:
+    try:
+        payload = {
+            "sessionId": "458393",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data or {},
+            "timestamp": int(time.time() * 1000),
+        }
+        with _AGENT_DBG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+# #endregion
 
 from PySide6.QtCore import QByteArray, QEvent, QObject, QSize, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import (
@@ -346,6 +377,127 @@ def webengine_data_root() -> str:
     os.makedirs(root, exist_ok=True)
     _mark_not_content_indexed(root)
     return root
+
+
+# yttr:// — клик по ссылке открывает Translator (протокол Windows)
+_YTTR_SCHEME = "yttr"
+_OPEN_REQUEST_FILE = "open_request.txt"
+_BARE_YT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def open_request_path() -> str:
+    return os.path.join(webengine_data_root(), _OPEN_REQUEST_FILE)
+
+
+def canonical_youtube_watch_url(video_id: str) -> str:
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
+def parse_launch_youtube_url(raw: str) -> str | None:
+    """Достаёт https://youtube.com/watch?v=ID из yttr://… или обычной YT-ссылки."""
+    s = (raw or "").strip().strip('"').strip("'")
+    if not s:
+        return None
+
+    lower = s.lower()
+    if lower.startswith(f"{_YTTR_SCHEME}:"):
+        rest = s[len(_YTTR_SCHEME) + 1 :]
+        if rest.startswith("//"):
+            rest = rest[2:]
+        rest = unquote(rest).strip()
+        if not rest:
+            return None
+        rest_l = rest.lower()
+        if rest_l.startswith("http://") or rest_l.startswith("https://"):
+            vid = get_video_id(rest)
+        elif (
+            rest_l.startswith("www.")
+            or "youtube.com" in rest_l
+            or rest_l.startswith("youtu.be/")
+            or rest_l.startswith("m.youtube.com")
+        ):
+            vid = get_video_id("https://" + rest.lstrip("/"))
+        elif rest_l.startswith("watch?") or rest_l.startswith("v="):
+            vid = get_video_id("https://www.youtube.com/" + rest.lstrip("/"))
+        elif _BARE_YT_ID_RE.fullmatch(rest.strip("/")):
+            vid = rest.strip("/")
+        else:
+            parsed = urlparse("https://dummy/" + rest.lstrip("/"))
+            qs_v = (parse_qs(parsed.query).get("v") or [None])[0]
+            if qs_v and _BARE_YT_ID_RE.fullmatch(qs_v):
+                vid = qs_v
+            else:
+                vid = get_video_id("https://www.youtube.com/" + rest.lstrip("/"))
+        return canonical_youtube_watch_url(vid) if vid else None
+
+    vid = get_video_id(s)
+    return canonical_youtube_watch_url(vid) if vid else None
+
+
+def to_yttr_url(youtube_url: str) -> str | None:
+    """https://…watch?v=ID → yttr://watch?v=ID."""
+    vid = get_video_id(youtube_url)
+    if not vid:
+        return None
+    return f"{_YTTR_SCHEME}://watch?v={vid}"
+
+
+def write_open_request(url: str) -> None:
+    path = open_request_path()
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(url.strip() + "\n")
+        f.write(str(time.time()) + "\n")
+    os.replace(tmp, path)
+
+
+def read_open_request(*, consume: bool = True) -> str | None:
+    path = open_request_path()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            url = (f.readline() or "").strip()
+    except OSError:
+        return None
+    if consume:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    if not url:
+        return None
+    return parse_launch_youtube_url(url) or (url if get_video_id(url) else None)
+
+
+def register_yttr_protocol() -> tuple[bool, str]:
+    """HKCU: yttr:// → этот python + Subtitle_App.py \"%1\"."""
+    if os.name != "nt":
+        return False, "только Windows"
+    try:
+        import winreg
+    except ImportError:
+        return False, "нет winreg"
+
+    exe = os.path.abspath(sys.executable)
+    script = os.path.abspath(__file__)
+    command = f'"{exe}" "{script}" "%1"'
+    try:
+        key = winreg.CreateKey(
+            winreg.HKEY_CURRENT_USER, rf"Software\Classes\{_YTTR_SCHEME}"
+        )
+        winreg.SetValueEx(key, None, 0, winreg.REG_SZ, "URL:YouTube Translator")
+        winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
+        winreg.CloseKey(key)
+        key = winreg.CreateKey(
+            winreg.HKEY_CURRENT_USER,
+            rf"Software\Classes\{_YTTR_SCHEME}\shell\open\command",
+        )
+        winreg.SetValueEx(key, None, 0, winreg.REG_SZ, command)
+        winreg.CloseKey(key)
+    except OSError as exc:
+        return False, str(exc)
+    return True, command
 
 
 def webengine_profile_dir(name: str) -> str:
@@ -2880,6 +3032,46 @@ class SubtitleApp(QMainWindow):
         self._ai_busy_timer.setInterval(400)
         self._ai_busy_timer.timeout.connect(self._refresh_ai_busy_clock)
 
+        # yttr:// от второго запуска пишет open_request.txt — подхватываем тут
+        self._open_req_timer = QTimer(self)
+        self._open_req_timer.setInterval(450)
+        self._open_req_timer.timeout.connect(self._poll_open_request)
+        self._open_req_timer.start()
+
+        # #region agent log
+        try:
+            dv = self.download_view
+            kids = dv.findChildren(QWidget) if dv is not None else []
+            vis_kids = [k.objectName() or type(k).__name__ for k in kids if k.isVisibleTo(dv)][:20]
+            btn = getattr(self, "download_btn", None)
+            _agent_dbg(
+                "B",
+                "SubtitleApp.__init__:end",
+                "init finished",
+                {
+                    "fixed": (self.minimumWidth(), self.minimumHeight(), self.maximumWidth(), self.maximumHeight()),
+                    "size": (self.width(), self.height()),
+                    "stack_count": self.stack.count() if hasattr(self, "stack") else -1,
+                    "stack_idx": self.stack.currentIndex() if hasattr(self, "stack") else -1,
+                    "dv_size": (dv.width(), dv.height()) if dv else None,
+                    "dv_child_n": len(kids),
+                    "dv_vis_sample": vis_kids,
+                    "download_btn": None
+                    if btn is None
+                    else {
+                        "vis": btn.isVisible(),
+                        "size": (btn.width(), btn.height()),
+                        "text": btn.text()[:40],
+                        "opacity_fx": type(btn.graphicsEffect()).__name__
+                        if btn.graphicsEffect()
+                        else None,
+                    },
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — debug only
+            _agent_dbg("B", "SubtitleApp.__init__:end", "init log failed", {"err": repr(exc)})
+        # #endregion
+
     def eventFilter(self, obj, event):  # noqa: N802 — Qt API
         # Space на сфокусированной QPushButton НЕ доходит до keyPressEvent окна —
         # ловим на уровне приложения (installEventFilter на QApplication).
@@ -4381,6 +4573,53 @@ class SubtitleApp(QMainWindow):
         QDesktopServices.openUrl(QUrl(url))
         self.bookmarks_status.setText("Открыто во внешнем браузере")
 
+    def open_external_youtube(self, url: str) -> None:
+        """Открыть ролик из yttr:// / второго запуска: поле URL + Плеер (и без субтитров)."""
+        canon = parse_launch_youtube_url(url) or (url.strip() if get_video_id(url) else "")
+        vid = get_video_id(canon) if canon else None
+        if not vid:
+            self._set_status("Статус: yttr — ссылка не распознана")
+            return
+        canon = canonical_youtube_watch_url(vid)
+        self.url_input.setText(canon)
+        self.raise_()
+        self.activateWindow()
+        if self._busy:
+            self._set_status(f"Статус: занят · ссылка в поле · {vid}")
+            return
+        self._cancel_auto_player()
+        folder_name, id_for_write = resolve_player_target(canon)
+        if folder_name:
+            if self._apply_player_folder_state(folder_name, id_for_write) is None:
+                return
+            video_id = id_for_write or _extract_id_from_folder(folder_name) or vid
+        else:
+            self._current_player_folder = None
+            self._player_http_url = None
+            self._all_marks = []
+            self._last_ai_analysis = None
+            self._player_title_full = f"watch · {vid}"
+            self.player_title.setToolTip(canon)
+            self._refresh_player_title_elide()
+            if hasattr(self, "ai_summary"):
+                self.ai_summary.setHtml(
+                    "<i>Смотришь без субтитров (yttr). "
+                    "📥 / ✨ — скачать субы при желании.</i>"
+                )
+            video_id = vid
+        self._player_pending_video_id = video_id
+        self._player_video_loaded = False
+        self._unload_player_page_only()
+        self._set_player_status("Статус: yttr · загружаю YouTube")
+        animate = self._is_download_view_active()
+        self.show_player_view(animate=animate)
+        QTimer.singleShot(0, self.on_load_player_video)
+
+    def _poll_open_request(self) -> None:
+        url = read_open_request(consume=True)
+        if url:
+            self.open_external_youtube(url)
+
     def on_open_player(self) -> None:
         if self._busy:
             return
@@ -4388,6 +4627,10 @@ class SubtitleApp(QMainWindow):
         url = self.url_input.text().strip()
         folder_name, id_for_write = resolve_player_target(url)
         if not folder_name:
+            # Без dist/ — всё равно открыть watch (музыка / AMV / yttr)
+            if get_video_id(url):
+                self.open_external_youtube(url)
+                return
             self._set_status("Статус: нет папки субтитров — сначала скачай")
             return
 
@@ -5250,17 +5493,70 @@ def _configure_stdio() -> None:
             pass
 
 
-def _find_sr_hwnd() -> int:
-    """HWND главного SR или окна «Фон» (свёрнутое/скрытое тоже считается)."""
+def _is_main_sr_window_title(title: str) -> bool:
+    """True только для главного окна SR (не «Фон» overlay)."""
+    t = (title or "").strip()
+    if not t:
+        return False
+    if t.startswith("Фон — overlay") or t.startswith("Фон - overlay"):
+        return False
+    return t == "Subtitle Ripper Pro" or t.startswith("Subtitle Ripper")
+
+
+def _is_fond_window_title(title: str) -> bool:
+    """True для окна overlay «Фон» (не главный SR)."""
+    t = (title or "").strip()
+    return t.startswith("Фон — overlay") or t.startswith("Фон - overlay")
+
+
+def _cmdline_text(cmdline: list | tuple | str | None) -> str:
+    if cmdline is None:
+        return ""
+    if isinstance(cmdline, str):
+        return cmdline
+    try:
+        return " ".join(str(x) for x in cmdline if x is not None)
+    except TypeError:
+        return str(cmdline)
+
+
+def _process_looks_like_main_sr(name: str, cmdline: list | tuple | str | None) -> bool:
+    """
+    Dev: python(w) + Subtitle_App.py; packed: Subtitle Ripper Pro.exe /
+    cmdline с Subtitle Ripper. Не трогаем чужой python без маркера SR.
+    """
+    n = (name or "").lower().strip()
+    cmd = _cmdline_text(cmdline).lower().replace("\\", "/")
+    if n in ("subtitle ripper pro.exe",) or (
+        n.startswith("subtitle ripper") and n.endswith(".exe")
+    ):
+        return True
+    if "subtitlelauncher" in n and n.endswith(".exe"):
+        return True
+    if "subtitle ripper" in cmd:
+        return True
+    if n in ("python.exe", "pythonw.exe") and "subtitle_app.py" in cmd:
+        return True
+    return False
+
+
+def _append_launch_error_log(message: str) -> None:
+    """Видимый след второго запуска / сбоя bring-to-front → _launch_error.log."""
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_launch_error.log")
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{stamp} [single-instance] {message}\n")
+    except OSError:
+        pass
+
+
+def _find_window_by_title_pred(pred) -> int:
+    """HWND первого top-level окна, чьё title проходит pred(title)."""
     import ctypes
     from ctypes import wintypes
 
     user32 = ctypes.windll.user32
-    for title in ("Subtitle Ripper Pro", "Фон — overlay (IDEA-022)"):
-        hwnd = user32.FindWindowW(None, title)
-        if hwnd:
-            return int(hwnd)
-
     found = ctypes.c_void_p(0)
     EnumProc = ctypes.WINFUNCTYPE(
         ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
@@ -5271,11 +5567,7 @@ def _find_sr_hwnd() -> int:
         buf = ctypes.create_unicode_buffer(512)
         user32.GetWindowTextW(h, buf, 512)
         title = buf.value or ""
-        if (
-            title == "Subtitle Ripper Pro"
-            or title.startswith("Subtitle Ripper")
-            or title.startswith("Фон — overlay")
-        ):
+        if pred(title):
             found.value = h
             return False
         return True
@@ -5284,67 +5576,130 @@ def _find_sr_hwnd() -> int:
     return int(found.value or 0)
 
 
-def _live_sr_pids() -> list[int]:
-    """PID других python* с Subtitle_App.py (кроме текущего)."""
-    me = os.getpid()
-    pids: list[int] = []
-    try:
-        import psutil
-    except ImportError:
-        return pids
+def _find_sr_hwnd() -> int:
+    """HWND главного SR (свёрнутое/скрытое тоже). Фон/overlay не считается."""
+    import ctypes
 
-    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
-        try:
-            pid = proc.info.get("pid")
-            if pid == me:
-                continue
-            name = (proc.info.get("name") or "").lower()
-            if name not in ("python.exe", "pythonw.exe"):
-                continue
-            cmd = " ".join(proc.info.get("cmdline") or []).lower().replace("\\", "/")
-            if "subtitle_app.py" not in cmd:
-                continue
-            pids.append(int(pid))
-        except (psutil.Error, OSError, ProcessLookupError, TypeError, ValueError):
-            continue
+    user32 = ctypes.windll.user32
+    hwnd = user32.FindWindowW(None, "Subtitle Ripper Pro")
+    if hwnd:
+        return int(hwnd)
+    return _find_window_by_title_pred(_is_main_sr_window_title)
+
+
+def _find_fond_hwnd() -> int:
+    """HWND окна «Фон» overlay — отдельно от gate главного SR."""
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    for title in ("Фон — overlay (IDEA-022)", "Фон — overlay"):
+        hwnd = user32.FindWindowW(None, title)
+        if hwnd:
+            return int(hwnd)
+    return _find_window_by_title_pred(_is_fond_window_title)
+
+
+def _pids_owning_main_sr_windows() -> set[int]:
+    """PID процессов, у которых есть top-level окно с title главного SR."""
+    if os.name != "nt":
+        return set()
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    pids: set[int] = set()
+    EnumProc = ctypes.WINFUNCTYPE(
+        ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
+    )
+
+    @EnumProc
+    def _enum(h, _lp):  # type: ignore[misc]
+        buf = ctypes.create_unicode_buffer(512)
+        user32.GetWindowTextW(h, buf, 512)
+        if not _is_main_sr_window_title(buf.value or ""):
+            return True
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+        if pid.value:
+            pids.add(int(pid.value))
+        return True
+
+    user32.EnumWindows(_enum, 0)
     return pids
 
 
-def _kill_orphan_sr_processes() -> int:
-    """Убивает python/pythonw с Subtitle_App.py этого проекта. Возвращает число."""
-    root = os.path.abspath(os.path.dirname(__file__)).lower()
-    killed = 0
+def _live_sr_pids() -> list[int]:
+    """PID других экземпляров SR (dev python + packed exe), кроме текущего."""
+    me = os.getpid()
+    found: set[int] = set()
     try:
         import psutil
     except ImportError:
         psutil = None  # type: ignore[assignment]
 
     if psutil is not None:
+        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                pid = proc.info.get("pid")
+                if pid is None or int(pid) == me:
+                    continue
+                name = proc.info.get("name") or ""
+                if _process_looks_like_main_sr(name, proc.info.get("cmdline")):
+                    found.add(int(pid))
+            except (psutil.Error, OSError, ProcessLookupError, TypeError, ValueError):
+                continue
+
+    for pid in _pids_owning_main_sr_windows():
+        if pid != me:
+            found.add(pid)
+    return sorted(found)
+
+
+def _kill_orphan_sr_processes() -> int:
+    """Убивает залипшие SR (dev Subtitle_App.py / packed exe). Возвращает число."""
+    killed = 0
+    try:
+        import psutil
+    except ImportError:
+        psutil = None  # type: ignore[assignment]
+
+    targets = set(_live_sr_pids())
+    # окно могло не отрисоваться, но процесс ещё держит мьютекс
+    if psutil is not None:
         me = os.getpid()
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
-                if proc.info.get("pid") == me:
+                pid = proc.info.get("pid")
+                if pid is None or int(pid) == me:
                     continue
-                name = (proc.info.get("name") or "").lower()
-                if name not in ("python.exe", "pythonw.exe"):
-                    continue
-                cmd = " ".join(proc.info.get("cmdline") or []).lower()
-                if "subtitle_app.py" not in cmd.replace("\\", "/"):
-                    continue
-                # тот же проект или любой Subtitle_App — для зомби ок
-                proc.kill()
+                if _process_looks_like_main_sr(
+                    proc.info.get("name") or "", proc.info.get("cmdline")
+                ):
+                    targets.add(int(pid))
+            except (psutil.Error, OSError, ProcessLookupError, TypeError, ValueError):
+                continue
+
+        for pid in sorted(targets):
+            try:
+                psutil.Process(pid).kill()
                 killed += 1
             except (psutil.Error, OSError, ProcessLookupError):
                 continue
         return killed
 
-    # без psutil: WMI через PowerShell — один раз
+    # без psutil: WMI через PowerShell — python + packed
     import subprocess
 
     ps = (
-        "Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='pythonw.exe'\" | "
-        "Where-Object { $_.CommandLine -match 'Subtitle_App\\.py' } | "
-        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }"
+        "$ids = @(); "
+        "Get-CimInstance Win32_Process | Where-Object { "
+        "  ($_.Name -match '^(python|pythonw)\\.exe$' -and $_.CommandLine -match 'Subtitle_App\\.py') "
+        "  -or ($_.Name -match 'Subtitle Ripper') "
+        "  -or ($_.CommandLine -and $_.CommandLine -match 'Subtitle Ripper') "
+        "} | ForEach-Object { "
+        "  Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; "
+        "  $ids += $_.ProcessId "
+        "}; $ids -join \"`n\""
     )
     try:
         out = subprocess.check_output(
@@ -5360,20 +5715,29 @@ def _kill_orphan_sr_processes() -> int:
     return killed
 
 
-def _bring_sr_to_front(hwnd: int) -> None:
-    """Показать / развернуть уже запущенный SR."""
+def _bring_sr_to_front(hwnd: int) -> bool:
+    """Показать / развернуть уже запущенный SR. True если окно реально подняли."""
     import ctypes
 
     user32 = ctypes.windll.user32
+    if not hwnd or not user32.IsWindow(hwnd):
+        return False
     user32.ShowWindow(hwnd, 9)  # SW_RESTORE
     user32.SetForegroundWindow(hwnd)
+    if user32.GetForegroundWindow() == hwnd:
+        return True
+    # SetForeground часто блокируется политикой OS — считаем ок, если видно и не iconic
+    if user32.IsWindowVisible(hwnd) and not user32.IsIconic(hwnd):
+        return True
+    return False
 
 
-def _ensure_single_instance() -> object | None:
+def _ensure_single_instance(pending_url: str | None = None) -> object | None:
     """
     Именованный мьютекс Windows.
-    Второй запуск: поднимает окно и выходит — живой процесс НЕ убиваем.
+    Второй запуск: пишет pending_url в open_request, поднимает окно и выходит.
     Kill orphans — только если мьютекс занят, окна нет и нет живого Subtitle_App.
+    Неудачный bring / нет HWND — всегда MessageBox и/или строка в _launch_error.log.
     """
     if os.name != "nt":
         return None
@@ -5385,42 +5749,52 @@ def _ensure_single_instance() -> object | None:
     if kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
         return mutex
 
+    if pending_url:
+        try:
+            write_open_request(pending_url)
+        except OSError:
+            pass
+
     hwnd = _find_sr_hwnd()
     if hwnd:
-        _bring_sr_to_front(hwnd)
+        if _bring_sr_to_front(hwnd):
+            return None
+        msg = (
+            "Subtitle Ripper уже запущен, но окно не удалось вывести вперёд.\n"
+            "Alt+Tab или Диспетчер задач.\n"
+            "Второй экземпляр не открываю."
+        )
+        _append_launch_error_log(f"bring-to-front failed hwnd={hwnd}")
+        user32.MessageBoxW(0, msg, "Уже запущено", 0x40)
         return None
 
     live = _live_sr_pids()
     if live:
         # Окно не нашли, но процесс жив — не kill (это и был «краш» на 2-м ярлыке).
-        user32.MessageBoxW(
-            0,
+        msg = (
             "Subtitle Ripper уже запущен (PID: "
             + ", ".join(str(p) for p in live[:5])
             + ").\n"
-            "Окно не нашлось автоматически — Alt+Tab.\n"
-            "Второй экземпляр не открываю.",
-            "Уже запущено",
-            0x40,
+            "Окно не нашлось автоматически — Alt+Tab / диспетчер.\n"
+            "Второй экземпляр не открываю."
         )
+        _append_launch_error_log("mutex held, no main HWND, live PIDs=" + ",".join(map(str, live[:8])))
+        user32.MessageBoxW(0, msg, "Уже запущено", 0x40)
         return None
 
     # Мьютекс-призрак без процесса — пробуем снять и забрать запуск
     n = _kill_orphan_sr_processes()
-    import time
-
     time.sleep(0.35)
     kernel32.CloseHandle(mutex)
     mutex2 = kernel32.CreateMutexW(None, True, "SubtitleRipperPro_Mutex")
     if kernel32.GetLastError() == 183:
-        user32.MessageBoxW(
-            0,
+        msg = (
             "Не смог снять старый мьютекс (убито попыток: "
             f"{n}).\n"
-            "Диспетчер → pythonw.exe → Снять задачу, потом снова ярлык.",
-            "Уже запущено",
-            0x30,
+            "Диспетчер → Subtitle Ripper Pro / pythonw → Снять задачу, потом снова ярлык."
         )
+        _append_launch_error_log(f"mutex still held after orphan kill n={n}")
+        user32.MessageBoxW(0, msg, "Уже запущено", 0x30)
         return None
     return mutex2
 
@@ -5428,18 +5802,30 @@ def _ensure_single_instance() -> object | None:
 if __name__ == "__main__":
     _configure_stdio()
 
-    if len(sys.argv) > 1 and not str(sys.argv[1]).startswith("-"):
-        video_url = sys.argv[1]
-        lang = (
-            sys.argv[2]
-            if len(sys.argv) > 2 and sys.argv[2] in ("ru", "en")
-            else "ru"
-        )
+    argv = sys.argv[1:]
+    startup_url: str | None = None
+
+    # CLI только явно: python Subtitle_App.py --download URL [ru|en]
+    if argv and argv[0] == "--download":
+        video_url = argv[1] if len(argv) > 1 else ""
+        lang = argv[2] if len(argv) > 2 and argv[2] in ("ru", "en") else "ru"
+        if not video_url:
+            print("usage: Subtitle_App.py --download URL [ru|en]", file=sys.stderr)
+            sys.exit(2)
         sys.exit(0 if download_and_split(video_url, lang) else 1)
 
-    _mutex_handle = _ensure_single_instance()
+    if argv and not str(argv[0]).startswith("-"):
+        startup_url = parse_launch_youtube_url(argv[0])
+
+    _mutex_handle = _ensure_single_instance(startup_url)
     if _mutex_handle is None and os.name == "nt":
         sys.exit(0)
+
+    ok_proto, proto_info = register_yttr_protocol()
+    if ok_proto:
+        print(f"yttr:// registered: {proto_info}", flush=True)
+    else:
+        print(f"yttr:// register skip: {proto_info}", flush=True)
 
     _apply_sr_aumid()
     # Профили/dist вне индекса Search; миграция yt_profile с OneDrive при первом старте
@@ -5451,13 +5837,105 @@ if __name__ == "__main__":
         pass
     app = QApplication(sys.argv)
     app.setWindowIcon(make_app_icon())
+    # #region agent log
+    _agent_dbg(
+        "A",
+        "main:pre_theme",
+        "QApplication created",
+        {"style": app.style().objectName() if app.style() else None},
+    )
+    # #endregion
     configure_qt_theme(app)
-    window = SubtitleApp()
+    # #region agent log
+    ss = app.styleSheet() or ""
+    win_c = app.palette().color(QPalette.Window)
+    _agent_dbg(
+        "A",
+        "main:post_theme",
+        "theme applied",
+        {
+            "style": app.style().objectName() if app.style() else None,
+            "ss_len": len(ss),
+            "ss_head": ss[:80].replace("\n", " "),
+            "palette_window": win_c.name(),
+        },
+    )
+    # #endregion
+    try:
+        window = SubtitleApp()
+    except Exception as exc:  # noqa: BLE001 — debug white-screen
+        # #region agent log
+        _agent_dbg(
+            "D",
+            "main:SubtitleApp",
+            "init exception",
+            {"err": repr(exc)},
+        )
+        # #endregion
+        raise
     app.installEventFilter(window)
     window.show()
     window.raise_()
     window.activateWindow()
     window._ensure_window_on_screen()
     QTimer.singleShot(0, window._ensure_window_on_screen)
+
+    # #region agent log
+    def _agent_dump_ui(tag: str) -> None:
+        try:
+            cw = window.centralWidget()
+            btn = getattr(window, "download_btn", None)
+            kids = cw.findChildren(QWidget) if cw is not None else []
+            painted = []
+            for w in kids[:30]:
+                if isinstance(w, QPushButton) or (hasattr(w, "text") and "Label" in type(w).__name__):
+                    painted.append(
+                        {
+                            "t": type(w).__name__,
+                            "txt": (w.text()[:24] if hasattr(w, "text") else ""),
+                            "vis": w.isVisible(),
+                            "geo": (w.x(), w.y(), w.width(), w.height()),
+                        }
+                    )
+            _agent_dbg(
+                "C",
+                f"main:{tag}",
+                "post-show ui dump",
+                {
+                    "win_vis": window.isVisible(),
+                    "win_opacity": float(window.windowOpacity()),
+                    "win_geo": (
+                        window.x(),
+                        window.y(),
+                        window.width(),
+                        window.height(),
+                    ),
+                    "cw_size": (cw.width(), cw.height()) if cw else None,
+                    "cw_child_n": len(kids),
+                    "stack_idx": window.stack.currentIndex(),
+                    "stack_cur": type(window.stack.currentWidget()).__name__
+                    if window.stack.currentWidget()
+                    else None,
+                    "btn": None
+                    if btn is None
+                    else {
+                        "vis": btn.isVisible(),
+                        "geo": (btn.x(), btn.y(), btn.width(), btn.height()),
+                        "text": btn.text()[:40],
+                    },
+                    "sample": painted[:12],
+                    "ss_len": len(app.styleSheet() or ""),
+                    "palette_window": app.palette().color(QPalette.Window).name(),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            _agent_dbg("C", f"main:{tag}", "dump failed", {"err": repr(exc)})
+
+    QTimer.singleShot(0, lambda: _agent_dump_ui("t0"))
+    QTimer.singleShot(500, lambda: _agent_dump_ui("t500"))
+    # #endregion
+
+    if startup_url:
+        QTimer.singleShot(150, lambda u=startup_url: window.open_external_youtube(u))
     app._sr_mutex_handle = _mutex_handle  # type: ignore[attr-defined]
     sys.exit(app.exec())

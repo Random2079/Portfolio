@@ -1,8 +1,10 @@
-# Запуск
+# Launch
 
-| Файл | Зачем |
-|------|--------|
-| `../launch.vbs` | Основной ярлык (без консоли, `pythonw`) |
-| `run.vbs` | То же из папки `launch/` |
+Canonical repo entry: `wscript launch.vbs` (or `wscript launch\run.vbs` — same thing).
 
-Рабочий каталог = корень проекта (`Subtitle_App.py`).
+- `launch.vbs` probes imports, then starts `pythonw launch_gui.py` with **no** `cmd` window.
+- `launch_gui.py` tees stdout/stderr into `_launch_error.log` so pythonw crashes are not silent.
+
+Desktop may still use `%LocalAppData%\SubtitleRipper\Launcher\SubtitleLauncher.exe` (outside this repo). That path can hide failures; prefer pointing the shortcut at:
+
+`wscript.exe` + arguments: `"C:\Users\Home\OneDrive\Desktop\DS_Projects\YouTube_Translator\launch.vbs"`
