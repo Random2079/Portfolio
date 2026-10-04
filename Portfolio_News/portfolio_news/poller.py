@@ -266,7 +266,14 @@ def poll_once(
             )
         )
         result.tickers += 1
-        query = t.search_query or t.name or t.id
+        from portfolio_news.bond_issuer import news_query_for_ticker
+
+        query = news_query_for_ticker(
+            t.id,
+            kind=t.kind or "",
+            name=t.name or "",
+            search_query=t.search_query or "",
+        )
         for src in sources:
             if should_cancel and should_cancel():
                 cancelled = True

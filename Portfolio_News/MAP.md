@@ -32,7 +32,7 @@
 **Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
 **React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
 Если React «пизда» → снова `/` ванили.  
-**Очередь:** React MVP R0–R4 ✅. UI вкладок ≈ ваниль. Капитал на Дне ✅. **§7N** лента Новостей (этажи + карточки) ✅. Сырой **ИИ-слой** → §7F. **Дешёвые pre-AI фильтры** в `news_noise.py` (паттерн «идея в Профите» / тех.анализ / фьючерсы / near-dup / short-ticker + geo-keep) ✅ — **площадка ≠ все авторы**, см. **§7S**. **§7S Pulse allowlist v1** ✅ + **Pulse news-by-ticker** ✅ (equity `/news/` SSR). **Coverage audit 2026-10-03:** Google RSS был мёртв из‑за `-"#сильный_рост"` в query → ✅ убрали (hashtag spam остаётся в title denylist); CLI `python -m portfolio_news coverage` ✅. В DB ещё нет строк `pulse_news_ticker` до следующего poll. **Privacy** — план §7P, UI позже. Дальше по желанию: §7F / **G** / H / allowlist UI · облиг→эмитент later · re-poll после фикса Google.
+**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG ✅. **bond→issuer** ✅ (poller query по эмитенту). **e-disclosure** — проверен браузером (Сбер id=3043), источник в код ещё не врезан. Дальше: e-disclosure source · UI лента coverage · §7F / G / Privacy по желанию. TG новые каналы — стоп.
 
 ---
 
@@ -341,7 +341,17 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 - Google: минус `#сильный_рост` в RSS-query **ломал ленту (0 entries)** — убран; denylist title остаётся.  
 - После фикса — нужен `once`/`watch` poll, чтобы заполнить `pulse_news_ticker` и оживить Google в DB.
 
-**Дальше:** re-poll (подтянуть TG) · **UI allowlist** · maybe-очередь / IR pack v1.1 · bond→company map · ещё TG-каналы в json · не Telegram-userbot.
+**bond→issuer ✅ (2026-10-04):**  
+`bond_issuer.py` + `bond_issuer.json` — ISIN → issuer aliases (+ optional `equity_ticker`). Poller передаёт в источники **issuer query**, не «Магнит БО-004Р-08». Heuristic fallback по имени BCS. URL в DB глобально уникален → одна новость не дублируется на акцию+облиг (ок).  
+Тесты: `tests/test_bond_issuer.py`.
+
+**e-disclosure (проверка 2026-10-04, код источника ещё нет):**  
+- Браузер: после JS-check главная и `company.aspx?id=3043` (Сбер) открываются **без логина/капчи**; `event.aspx` ссылки парсятся из DOM.  
+- urllib/requests — timeout/403, нестабильно.  
+- Карта id: `sources/e_disclosure_companies.json` (пока SBER=3043, остальное добить).  
+- Следующий слой: источник `e_disclosure` (браузерная сессия / Playwright) по `company_id` holdings+issuer → не в `default_sources` пока не стабилен.
+
+**Дальше:** e-disclosure source · UI coverage ленты · maybe/IR · ещё company_id в json · TG стоп.
 
 ---
 

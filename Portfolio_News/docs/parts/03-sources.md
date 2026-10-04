@@ -14,6 +14,8 @@
 - Pulse allowlist: профили из `pulse_allowlist.json` → `v1` only; mirror `tbank-online.com`; tag `pulse_allowlist`.
 - Pulse news-by-ticker: `/invest/stocks/{TICKER}/news/` → `investSocialNewsByTicker`; tag `pulse_news_ticker`; **equity only**.
 - Telegram allowlist: `t.me/s/{slug}` preview; v1 = Рубиндей · РКИ · Интерфакс.Рынки; `i_moex` rejected; tag `telegram_allowlist`.
+- Bond→issuer: `bond_issuer.py` + json — poll query = issuer aliases (не серия БО).
+- e-disclosure: research only — `e_disclosure_companies.json`; source later (browser session).
 
 ## Не здесь
 

@@ -1,0 +1,110 @@
+{
+  "_comment": "ISIN → issuer for news match (bond→company). equity_ticker optional if in holdings.",
+  "by_isin": {
+    "RU000A107RZ0": {
+      "issuer": "Самолет",
+      "aliases": ["Самолет", "ГК Самолет", "Samolet"],
+      "equity_ticker": null
+    },
+    "RU000A109874": {
+      "issuer": "Самолет",
+      "aliases": ["Самолет", "ГК Самолет", "Samolet"],
+      "equity_ticker": null
+    },
+    "RU000A10CZA1": {
+      "issuer": "Самолет",
+      "aliases": ["Самолет", "ГК Самолет", "Samolet"],
+      "equity_ticker": null
+    },
+    "RU000A107076": {
+      "issuer": "Роделен",
+      "aliases": ["Роделен", "ЛК Роделен"],
+      "equity_ticker": null
+    },
+    "RU000A107SA1": {
+      "issuer": "Роделен",
+      "aliases": ["Роделен", "ЛК Роделен"],
+      "equity_ticker": null
+    },
+    "RU000A107UU5": {
+      "issuer": "Брусника",
+      "aliases": ["Брусника", "Brusnika"],
+      "equity_ticker": null
+    },
+    "RU000A1082Y8": {
+      "issuer": "Синара-Транспортные Машины",
+      "aliases": ["Синара", "Синара-Транспорт", "СТМ"],
+      "equity_ticker": null
+    },
+    "RU000A108C74": {
+      "issuer": "РЕСО-Лизинг",
+      "aliases": ["РЕСО-Лизинг", "РЕСО Лизинг", "RESO"],
+      "equity_ticker": null
+    },
+    "RU000A10AHA3": {
+      "issuer": "ИКС 5",
+      "aliases": ["ИКС 5", "ИКС5", "X5", "X5 Group", "Пятёрочка"],
+      "equity_ticker": "X5"
+    },
+    "RU000A10B0B0": {
+      "issuer": "Группа ЛСР",
+      "aliases": ["ЛСР", "Группа ЛСР", "LSR"],
+      "equity_ticker": null
+    },
+    "RU000A10CKY3": {
+      "issuer": "Группа ЛСР",
+      "aliases": ["ЛСР", "Группа ЛСР", "LSR"],
+      "equity_ticker": null
+    },
+    "RU000A10B1N3": {
+      "issuer": "МТС",
+      "aliases": ["МТС", "Мобильные ТелеСистемы", "MTS"],
+      "equity_ticker": "MTSS"
+    },
+    "RU000A10C618": {
+      "issuer": "Магнит",
+      "aliases": ["Магнит", "Magnit"],
+      "equity_ticker": "MGNT"
+    },
+    "RU000A10C6W2": {
+      "issuer": "Абрау-Дюрсо",
+      "aliases": ["Абрау", "Абрау-Дюрсо", "Abrau"],
+      "equity_ticker": "ABRD"
+    },
+    "RU000A10C758": {
+      "issuer": "ТД РКС",
+      "aliases": ["ТД РКС", "РКС"],
+      "equity_ticker": null
+    },
+    "RU000A10C8C0": {
+      "issuer": "РЖД",
+      "aliases": ["РЖД", "Российские железные дороги", "RZD"],
+      "equity_ticker": null
+    },
+    "RU000A10CC32": {
+      "issuer": "Балтийский лизинг",
+      "aliases": ["Балтийский лизинг", "Балтийский Лизинг"],
+      "equity_ticker": null
+    },
+    "RU000A10DUQ6": {
+      "issuer": "Балтийский лизинг",
+      "aliases": ["Балтийский лизинг", "Балтийский Лизинг"],
+      "equity_ticker": null
+    },
+    "RU000A10CLX3": {
+      "issuer": "Уральская сталь",
+      "aliases": ["Уральская сталь", "Уральская Сталь"],
+      "equity_ticker": null
+    },
+    "RU000A10DZU7": {
+      "issuer": "А101",
+      "aliases": ["А101", "А 101", "A101"],
+      "equity_ticker": null
+    },
+    "RU000A10EF52": {
+      "issuer": "Сбербанк",
+      "aliases": ["Сбербанк", "Сбер", "Sberbank", "SBER"],
+      "equity_ticker": "SBER"
+    }
+  }
+}

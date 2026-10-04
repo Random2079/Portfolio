@@ -1,0 +1,12 @@
+{
+  "_comment": "e-disclosure.ru company.aspx?id=… for holdings issuers (manual map; expand as we poll). Verified 2026-10-04: id=3043 = ПАО Сбербанк, event.aspx links scrapeable in browser after JS check.",
+  "by_equity_ticker": {
+    "SBER": {"company_id": 3043, "name": "ПАО Сбербанк"},
+    "SIBN": {"company_id": null, "name": "ПАО Газпром нефть", "note": "find id"},
+    "ROSN": {"company_id": null, "name": "ПАО НК Роснефть", "note": "find id"},
+    "MTSS": {"company_id": null, "name": "ПАО МТС", "note": "find id"},
+    "X5": {"company_id": null, "name": "X5 / ИКС 5", "note": "find id"},
+    "MGNT": {"company_id": null, "name": "ПАО Магнит", "note": "bonds only in portfolio"}
+  },
+  "portal_company_url": "https://www.e-disclosure.ru/portal/company.aspx?id={company_id}"
+}
