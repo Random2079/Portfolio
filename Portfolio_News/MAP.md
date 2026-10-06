@@ -1,7 +1,7 @@
 # MAP — Portfolio_News (IDEA-003)
 
 **Это главная карта для тебя.** Один файл: что есть, что дальше, как устроено, что нельзя.  
-Обновлено: **2026-10-04**.
+Обновлено: **2026-10-06**.
 
 Остальные `docs/TZ.md`, `docs/parts/*`, `.cursor/WHERE_WE_ARE.md`, `.cursor/plans/*` — техника или **указатели сюда**.  
 Статус / очередь / план следующего слоя **не дублировать** в parts и plans.  
@@ -32,7 +32,7 @@
 **Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
 **React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
 Если React «пизда» → снова `/` ванили.  
-**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG/**e-disclosure** (CDP company.aspx + Азипи) ✅. **bond→issuer** ✅. Дальше: UI лента coverage · добить INN в json · §7F / G / Privacy по желанию. TG новые каналы — стоп.
+**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG/**e-disclosure** (CDP `company.aspx` + Азипи) ✅. **bond→issuer** ✅. KA выходные: баннер «доп. сессия» vs «последняя сессия» (`moex_live`) ✅. Дальше: UI лента coverage · INN хвосты · §7F / G / Privacy по желанию. TG новые каналы — стоп.
 
 ---
 
@@ -88,7 +88,7 @@
 | K9 | ✅ | Toast только по своим + антиспам |
 | **KS** | ✅ | Сверка под карточкой |
 
-**KA / выходные 2026:** календарный сб/вс ≠ «биржа закрыта». С 2026 часто доп. сессия выходного дня (09:50–19:00 MSK, часть следующего торгового дня). `/api/day.moex_live` = ISS VALTODAY/VOL>0; баннер тогда «доп. сессия · Δ к пт», не «цифры за последнюю сессию». Формула Δ не менялась (LASTTOPREVPRICE × MV).
+**KA / выходные 2026:** календарный сб/вс ≠ «биржа закрыта». С 2026 часто доп. сессия выходного дня (09:50–19:00 MSK, часть следующего торгового дня). `/api/day.moex_live` = ISS VALTODAY/VOL>0; баннер тогда «доп. сессия · Δ к пт», не «цифры за последнюю сессию». Формула Δ не менялась (`LASTTOPREVPRICE` × MV). Пример: BSPB −7% в вс — **реальный** ход доп. сессии, не баг; врал только текст баннера.
 
 Отложено отдельно: **IDEA-023** forecast, **IDEA-024** chart sandbox — не трогать без команды.
 
@@ -337,23 +337,25 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 
 Критерий как у пользователя + Investing `чек-поинт.md`: факты/макро по секторам KS, не идеи / таргеты / интрадей. Hard denylist «идея в Профите» остаётся; площадка ≠ все авторы.
 
-**Coverage / poll hygiene (2026-10-03):**  
-- Активные источники в `default_sources()`: `google_news_ru` · `smartlab` · `pulse_allowlist` (2 канала: Interfax, Advokat_Manasyan) · `pulse_news_ticker` (equity) · `telegram_allowlist` (Рубиндей · РКИ · ifax_go) · `e_disclosure` (CDP `company.aspx` + Азипи fallback).  
-- Аудит CLI: `python -m portfolio_news coverage --window 7d` (BCS scope; `--all-tickers` для offline).  
-- Google: минус `#сильный_рост` в RSS-query **ломал ленту (0 entries)** — убран; denylist title остаётся.  
-- После фикса — нужен `once`/`watch` poll, чтобы заполнить `pulse_news_ticker` и оживить Google в DB.
+**Coverage / poll hygiene:**  
+- Активные источники в `default_sources()`: `google_news_ru` · `smartlab` · `pulse_allowlist` · `pulse_news_ticker` · `telegram_allowlist` · `e_disclosure`.  
+- Аудит: `python -m portfolio_news coverage --window 7d` (BCS; `--all-tickers` offline). Окно = `published_at` (fallback `created_at`), TZ Екатеринбург.  
+- **ZERO ≠ «источник сломан».** Coverage считает только новости **внутри окна**. `once` может найти и положить события старше 7д — в DB они есть, в `7d` ZERO останется (пример: TATN тишина на ЦРКИ). Сначала `once`, потом coverage.  
+- Google: минус `#сильный_рост` в RSS-query ломал ленту — убран; denylist title остаётся.
 
 **bond→issuer ✅ (2026-10-04):**  
-`bond_issuer.py` + `bond_issuer.json` — ISIN → issuer aliases (+ optional `equity_ticker`). Poller передаёт в источники **issuer query**, не «Магнит БО-004Р-08». Heuristic fallback по имени BCS. URL в DB глобально уникален → одна новость не дублируется на акцию+облиг (ок).  
-Тесты: `tests/test_bond_issuer.py`.
+`bond_issuer.py` + json — ISIN → issuer aliases (+ optional `equity_ticker`). Poller → **issuer query**, не серия БО. URL в DB глобально уникален. Тесты: `tests/test_bond_issuer.py`.
 
-**e-disclosure ✅ (2026-10-04, CDP 2026-10-04):**  
-- Карточка эмитента: `company.aspx?id=` (Сбер 3043, Роснефть 6505, …) через **CDP attach** к Chrome с `--remote-debugging-port` (не main-профиль с банками). Кэш HTML на `company_id` за poll. Матч = вся таблица этой карточки, **не** `title_matches_ticker`.  
-- Обычный Chrome **без** флага не цепляется. Лаунчер: `scripts/start_chrome_edisc_cdp.cmd` → порт **9222**, user-data-dir `%LOCALAPPDATA%\Portfolio_News\chrome-edisc` (не Default / не банки). Env: `EDISC_CDP_URL`. JS-check в **этом** окне пройти один раз и не закрывать.  
-- Свежий Playwright/новый Chrome всё ещё ловит `xpvnsulc`. CDP down / challenge → зеркало **Азипи** `/?msg_day=` (ИНН/aliases). Остальные источники живы.  
-- Карта: `e_disclosure_companies.json`. Бонды → `bond_issuer`. Тесты: `tests/test_e_disclosure.py` (offline fallback, без живого Chrome).
+**e-disclosure ✅ (Азипи 2026-10-04 · CDP 2026-10-04/05):**  
 
-**Дальше:** UI coverage ленты · добить INN (HNFG/LEAS/девелоперы) · maybe/IR · TG стоп.
+*Зачем два пути.* Interfax `e-disclosure.ru` режет antibot (`xpvnsulc`) для requests / Playwright / даже нового Chrome+CDP. Живой Cursor-браузер и **уже прошедший JS-check** Chrome — ок.  
+*Основной путь (полные карточки):* CDP attach → `company.aspx?id=` по карте. Матч = вся таблица событий этой компании (**не** `title_matches_ticker` — заголовки типовые). Кэш HTML на `company_id` за poll.  
+*Как поднять Chrome:* `scripts/start_chrome_edisc_cdp.cmd` → порт **9222**, профиль `%LOCALAPPDATA%\Portfolio_News\chrome-edisc` (**не** Default / не банки). Обычный открытый Chrome без `--remote-debugging-port` **не цепляется**. Env: `EDISC_CDP_URL`. JS-check в **этом** окне один раз, окно не закрывать.  
+*Fallback:* Азипи `/?msg_day=` (~30 сообщений/день, матч по ИНН/aliases). Тихие эмитенты часто **не** в топе дня → дыры, пока нет CDP. CDP down / challenge → Азипи; остальные источники живы.  
+*Что закрывает CDP (проверено):* ROSN · TATN/TATNP · SVCB · HNFG · LEAS · LSNGP · MTSS · X5 · MGNT · SBER/SIBN — fetch с карточки работает. ZERO в `coverage 7d` у части из них = нет **свежих** фактов в окне, не «не нашли». GOLD / часть мелких бондов — нет `company_id` или не equity-карта.  
+*Карта:* `e_disclosure_companies.json` (prefs → issuer). Бонды → `bond_issuer`. Тесты: `tests/test_e_disclosure.py` (offline, без живого Chrome).
+
+**Дальше:** UI coverage ленты · INN для HNFG/LEAS/девелоперов (company_id уже есть) · maybe/IR · TG стоп.
 
 ---
 
