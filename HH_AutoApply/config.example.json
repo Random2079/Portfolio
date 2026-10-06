@@ -1,0 +1,36 @@
+{
+  "daily_limit": 40,
+  "timezone": "Asia/Yekaterinburg",
+  "search": {
+    "mode": "web",
+    "text": "Python",
+    "experience": ["noExperience", "between1And3"],
+    "area_surgut_id": "97",
+    "per_page": 50,
+    "max_pages": 5,
+    "require_junior_keywords": false,
+    "junior_keywords": ["junior", "джун", "стажёр", "стажер", "intern", "trainee", "начинающ", "младш"]
+  },
+  "min_score": 1,
+  "profile_tags": [
+    "Python",
+    "FastAPI",
+    "SQLite",
+    "SQLAlchemy",
+    "PySide6",
+    "PyQt",
+    "REST",
+    "API",
+    "Git"
+  ],
+  "cover_template": "Здравствуйте! Откликаюсь на «{title}» ({company}).\nПишу на Python: FastAPI, SQLite, локальные сервисы и интеграции API.\nГотов к удалёнке или работе в Сургуте.",
+  "playwright": {
+    "headless": false,
+    "storage_state": "data/storage_state.json",
+    "slow_mo_ms": 100
+  },
+  "resume_bump": {
+    "cooldown_hours": 4
+  },
+  "user_agent": "HH-AutoApply/0.1 (personal)"
+}

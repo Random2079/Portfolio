@@ -325,11 +325,11 @@
 
 - Дата: 2026-09-21
 
-- Статус: в работе — слой A (search/score/cover); B Playwright следующий
+- Статус: в работе — A/B ✅; слой UI+stats+resume bump (2026-10-06)
 
-- Описание: Поиск Python-разработчик (junior/стажёр, удалёнка или Сургут) → score → cover → Playwright-отклик, лимит **40/день**, стоп на капче. Логин руками → storage_state. Без обхода капчи и накрутки резюме.
+- Описание: Поиск Python-разработчик (junior/стажёр, удалёнка или Сургут) → score → cover → Playwright-отклик, лимит **40/день**, стоп на капче. Логин руками → storage_state. Без обхода капчи. **Поднятие резюме разрешено** (по кнопке/CLI, идемпотентно: already_raised_skip). UI-отчёт по apply_state/apply_log.
 
-- Следующие шаги: смоук `python -m hh_auto search` → слой B. Карта: [`HH_AutoApply/MAP.md`](HH_AutoApply/MAP.md).
+- Следующие шаги: смоук `python -m hh_auto ui` + `raise-resume`. Карта: [`HH_AutoApply/MAP.md`](HH_AutoApply/MAP.md).
 
 
 

@@ -1,0 +1,15 @@
+# HH_AutoApply — local only
+data/storage_state.json
+data/*.html
+.env
+.venv/
+__pycache__/
+*.pyc
+_pyc_dump/
+_recovered/
+_tools/
+_probe.txt
+_pyc_probe.txt
+_find_src.txt
+pytest_out.txt
+*.log
