@@ -17,10 +17,13 @@
 - разбор бумаги: карточка + график + **сверка/факты**  
 - не советник, не торговый бот, не «купи/продай»
 
-**Запуск утро:** `python -m portfolio_news serve` →  
+**Запуск утро (без `cd` в корень):** `.\serve.cmd` →  
+из любой подпапки `react_Portfolio_News/` / `Portfolio_News/` / `DS_Projects/` (скрипт сам ищет пакет вверх).  
+В `docs/backend` тоже лежит stub → `.\serve.cmd`.  
+Эквивалент: `npm run serve` (из react-дерева) или `python -m portfolio_news serve` уже **из** `Portfolio_News/`.  
 - React: http://127.0.0.1:8765/app/ (нужен `npm run build` в `react_Portfolio_News`)  
 - Ваниль-бэкап: http://127.0.0.1:8765/  
-**Одна команда из React-папки:** `.\start.cmd` → sync docs + build + тот же `serve` (`npm.cmd`, без блокировки `npm.ps1`).  
+**Сборка + serve:** `.\start.cmd` в React → sync docs + build + тот же `serve`.  
 После правок API — **перезапустить serve**. После правок React — `npm run build`, потом refresh (перезапуск serve только если dist не было).
 
 **Репо:** `Portfolio_News/` · React UI: sibling `react_Portfolio_News/` · IDEA-003
