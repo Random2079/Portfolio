@@ -1,7 +1,7 @@
 # MAP — Portfolio_News (IDEA-003)
 
 **Это главная карта для тебя.** Один файл: что есть, что дальше, как устроено, что нельзя.  
-Обновлено: **2026-10-06**.
+Обновлено: **2026-10-07**.
 
 Остальные `docs/TZ.md`, `docs/parts/*`, `.cursor/WHERE_WE_ARE.md`, `.cursor/plans/*` — техника или **указатели сюда**.  
 Статус / очередь / план следующего слоя **не дублировать** в parts и plans.  
@@ -35,7 +35,7 @@
 **Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
 **React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
 Если React «пизда» → снова `/` ванили.  
-**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG/**e-disclosure** (CDP `company.aspx` + Азипи) ✅. **bond→issuer** ✅. KA выходные: баннер «доп. сессия» vs «последняя сессия» (`moex_live`) ✅. Дальше: UI лента coverage · INN хвосты · §7F / G / Privacy по желанию. TG новые каналы — стоп.
+**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG/**e-disclosure** (CDP `company.aspx` + Азипи) ✅. **bond→issuer** ✅. KA выходные: баннер «доп. сессия» vs «последняя сессия» (`moex_live`) ✅. **React polish 2026-10-07:** календарь scale (сетка/чипы/бары/итоги) ✅ · дальше сделки cashflow-фильтры + линк в календарь · notify poll/AI v1. TG новые каналы — стоп. · UI лента coverage · INN хвосты · §7F / G / Privacy по желанию.
 
 ---
 
@@ -453,6 +453,9 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 | **R3** | ✅ | Новости (+ ИИ-бейджи F-A: classify / hide noise) |
 | **R4** | ✅ | Сделки / календарь |
 | **UI Day** | ✅ | Вкладка «День» ≈ ваниль по плотности/иерархии (не полный редизайн) |
+| **UI Cal scale** | ✅ | Крупнее дни/чипы/шрифты + выше бары и «в месяц/день» (`App.css` `.cal-*`) |
+| **UI Ops cashflow** | 🟡 | Фильтры див/купон/погаш. в Сделках + CTA → Календарь |
+| **UI News notify** | ⬜ | In-tab strip + toast при готовом poll/AI |
 
 ### Не в React-MVP
 
