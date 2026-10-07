@@ -231,8 +231,23 @@ export default function App() {
         </div>
       ) : null}
 
-      {tab === "news" ? <NewsFeed onOpenReview={selectTicker} /> : null}
-      {tab === "ops" ? <OpsPanel /> : null}
+      <div
+        className={"tab-pane" + (tab === "news" ? "" : " off")}
+        aria-hidden={tab !== "news"}
+      >
+        <NewsFeed
+          active={tab === "news"}
+          onOpenReview={selectTicker}
+        />
+      </div>
+      {tab === "ops" ? (
+        <OpsPanel
+          onOpenCalendar={() => {
+            setTab("calendar");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        />
+      ) : null}
       {tab === "calendar" ? <CalendarPanel /> : null}
 
       {tab === "home" ? (

@@ -26,6 +26,29 @@ function writeNotify(mode) {
   }
 }
 
+/** Browser/OS toast when user left the News tab during a long job. */
+function notifyAway(title, body) {
+  try {
+    if (typeof Notification === "undefined") return;
+    const show = () => {
+      try {
+        new Notification(title, { body, silent: false });
+      } catch {
+        /* ignore */
+      }
+    };
+    if (Notification.permission === "granted") {
+      show();
+    } else if (Notification.permission !== "denied") {
+      Notification.requestPermission().then((p) => {
+        if (p === "granted") show();
+      });
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function safeHref(url) {
   const href = String(url || "");
   return href.startsWith("http://") || href.startsWith("https://") ? href : "";
@@ -207,7 +230,7 @@ function Floor({ title, hint, cards, empty, onOpenReview }) {
 /**
  * §7N news floors: urgent / facts by ticker cards; noise hidden; raw ≠ urgent.
  */
-export default function NewsFeed({ onOpenReview }) {
+export default function NewsFeed({ onOpenReview, active = true }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -220,6 +243,19 @@ export default function NewsFeed({ onOpenReview }) {
   const [statusText, setStatusText] = useState("");
   const [statusErr, setStatusErr] = useState(false);
   const pollTimer = useRef(null);
+  const activeRef = useRef(active);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  const finishAway = useCallback((title, body, isErr = false) => {
+    if (!activeRef.current) {
+      notifyAway(title, body);
+    }
+    setStatusText(body);
+    setStatusErr(!!isErr);
+  }, []);
 
   const loadNews = useCallback(async () => {
     setLoading(true);
@@ -307,13 +343,14 @@ export default function NewsFeed({ onOpenReview }) {
       }
       setPollBusy(false);
       if (st.error) {
-        setStatus(String(st.error), true);
+        const msg = String(st.error);
+        finishAway("Новости: ошибка", msg, true);
       } else {
-        setStatus(
+        const msg =
           "Готово · +" +
-            (st.inserted || 0) +
-            (st.skipped ? " · пропуск " + st.skipped : "")
-        );
+          (st.inserted || 0) +
+          (st.skipped ? " · пропуск " + st.skipped : "");
+        finishAway("Новости готовы", msg, false);
       }
       await loadNews();
     } catch (e) {
@@ -322,9 +359,9 @@ export default function NewsFeed({ onOpenReview }) {
         clearInterval(pollTimer.current);
         pollTimer.current = null;
       }
-      setStatus(String(e.message || e), true);
+      finishAway("Новости: ошибка", String(e.message || e), true);
     }
-  }, [loadNews]);
+  }, [loadNews, finishAway]);
 
   const startPoll = async () => {
     if (pollBusy) return;
@@ -359,14 +396,14 @@ export default function NewsFeed({ onOpenReview }) {
         today_only: true,
         limit: 30,
       });
-      setStatus(
+      const msg =
         "ИИ: помечено " +
-          (data.classified || 0) +
-          (data.skipped ? " · пропуск " + data.skipped : "")
-      );
+        (data.classified || 0) +
+        (data.skipped ? " · пропуск " + data.skipped : "");
+      finishAway("ИИ готов", msg, false);
       await loadNews();
     } catch (e) {
-      setStatus("ИИ: " + String(e.message || e), true);
+      finishAway("ИИ: ошибка", "ИИ: " + String(e.message || e), true);
     } finally {
       setAiBusy(false);
       await loadAiStatus(true);
@@ -389,9 +426,22 @@ export default function NewsFeed({ onOpenReview }) {
         <h2>Новости</h2>
         <p className="lead">
           Срочно и факты — карточки по бумагам. Шум скрыт. Клик → разбор на
-          Дне.
+          Дне. Прогон можно запустить и уйти на другие вкладки.
         </p>
       </div>
+
+      {statusText ? (
+        <div
+          className={
+            "job-banner" +
+            (statusErr ? " err" : "") +
+            (pollBusy || aiBusy ? " busy" : "")
+          }
+          aria-live="polite"
+        >
+          {statusText}
+        </div>
+      ) : null}
 
       <div className="feed-toolbar">
         <label className="notify-label">
@@ -400,7 +450,6 @@ export default function NewsFeed({ onOpenReview }) {
             value={notify}
             onChange={(e) => onNotify(e.target.value)}
             aria-label="Режим уведомлений"
-            disabled={pollBusy}
           >
             <option value="digest">digest (один)</option>
             <option value="off">off</option>
@@ -424,7 +473,7 @@ export default function NewsFeed({ onOpenReview }) {
           type="button"
           className="feed-refresh"
           onClick={loadNews}
-          disabled={loading || pollBusy}
+          disabled={loading}
           title="Перечитать ленту из БД — без нового опроса источников"
         >
           Обновить ленту

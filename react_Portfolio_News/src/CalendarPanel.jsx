@@ -639,7 +639,7 @@ export default function CalendarPanel() {
                       </span>
                     ) : null}
                   </div>
-                  {c.evs.slice(0, 3).map((ev, i) => {
+                  {c.evs.slice(0, 4).map((ev, i) => {
                     const kind = payKindKey(ev.kind);
                     const st = payEventStatus(ev, today);
                     return (
@@ -660,8 +660,8 @@ export default function CalendarPanel() {
                       </div>
                     );
                   })}
-                  {c.evs.length > 3 ? (
-                    <div className="cal-more">+ ещё {c.evs.length - 3}</div>
+                  {c.evs.length > 4 ? (
+                    <div className="cal-more">+ ещё {c.evs.length - 4}</div>
                   ) : null}
                 </div>
               )
