@@ -1,4 +1,4 @@
-.shell {
+﻿.shell {
   max-width: 1100px;
   margin: 0 auto;
   padding: 28px 20px 96px;
@@ -1846,7 +1846,7 @@
 
 .cal-top {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 2.4fr;
+  grid-template-columns: minmax(160px, 0.85fr) 3fr;
   gap: 14px;
   align-items: stretch;
   margin-bottom: 16px;
@@ -1855,16 +1855,16 @@
 .cal-sum {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
-  padding: 22px 18px;
+  padding: 14px;
   border-radius: 12px;
   border: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.18);
 }
 
 .cal-sum-k {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1873,26 +1873,25 @@
 
 .cal-sum-v {
   font-family: var(--display);
-  font-size: 2.55rem;
+  font-size: 1.55rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
 }
 
 .cal-sum-rows {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   margin-top: auto;
-  font-size: 1.15rem;
+  font-size: 0.85rem;
 }
 
 .cal-sum-rows > div {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  padding-top: 8px;
+  padding-top: 6px;
   border-top: 1px dashed var(--line);
 }
 
@@ -1902,8 +1901,7 @@
 
 .cal-sum-rows b {
   color: var(--ink);
-  font-weight: 700;
-  font-size: 1.25rem;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1911,8 +1909,8 @@
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  min-height: 280px;
-  padding: 18px 12px 8px;
+  min-height: 360px;
+  padding: 16px 12px 8px;
   border-radius: 12px;
   border: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.14);
@@ -1921,15 +1919,15 @@
 
 .cal-bar-col {
   flex: 1 1 0;
-  min-width: 42px;
-  max-width: 80px;
+  min-width: 40px;
+  max-width: 72px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
   height: 100%;
-  min-height: 248px;
+  min-height: 320px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1948,8 +1946,8 @@
 }
 
 .cal-bar-stack {
-  width: 82%;
-  max-width: 48px;
+  width: 78%;
+  max-width: 44px;
   min-height: 2px;
   display: flex;
   flex-direction: column-reverse;
@@ -2001,7 +1999,7 @@
 }
 
 .cal-bar-lbl {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 650;
   text-transform: lowercase;
   white-space: nowrap;
@@ -2032,45 +2030,45 @@
 .cal-month {
   font-weight: 700;
   text-transform: capitalize;
-  min-width: 10rem;
-  font-size: 1.1rem;
+  min-width: 9rem;
+  font-size: 0.95rem;
 }
 
 .cal-badge {
   margin-left: auto;
-  font-size: 0.92rem;
+  font-size: 0.8rem;
   font-weight: 700;
   color: var(--up);
   background: rgba(61, 186, 154, 0.12);
   border: 1px solid rgba(61, 186, 154, 0.28);
   border-radius: 999px;
-  padding: 5px 12px;
+  padding: 3px 10px;
   font-variant-numeric: tabular-nums;
 }
 
 .cal-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 14px 16px;
+  gap: 10px 12px;
 }
 
 .cal-wd {
   background: transparent;
   color: var(--muted);
-  font-size: 0.88rem;
+  font-size: 0.72rem;
   font-weight: 700;
-  padding: 0.25rem 0 0.5rem;
+  padding: 0.15rem 0 0.3rem;
   text-align: left;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .cal-day {
-  min-height: 228px;
-  padding: 0.35rem 0.22rem;
+  min-height: 138px;
+  padding: 0.2rem 0.12rem;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.5rem;
   border: 0;
   background: transparent;
 }
@@ -2083,8 +2081,8 @@
   color: var(--accent);
   box-shadow: inset 0 0 0 1.5px rgba(61, 186, 154, 0.55);
   border-radius: 999px;
-  width: 1.55rem;
-  height: 1.55rem;
+  width: 1.35rem;
+  height: 1.35rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2093,15 +2091,15 @@
 .cal-day-top {
   display: flex;
   align-items: baseline;
-  gap: 0.35rem;
-  font-size: 1.05rem;
+  gap: 0.25rem;
+  font-size: 0.84rem;
   color: var(--muted);
 }
 
 .cal-num {
   font-weight: 700;
   color: var(--ink);
-  font-size: 1.2rem;
+  font-size: 0.92rem;
 }
 
 .cal-day-sum {
@@ -2109,30 +2107,30 @@
   color: var(--up);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  font-size: 1.05rem;
+  font-size: 0.8rem;
   white-space: nowrap;
 }
 
 .cal-ev {
   border: 0;
-  border-radius: 12px;
+  border-radius: 14px;
   background: rgba(232, 236, 242, 0.1);
-  padding: 0.75rem 0.8rem;
-  font-size: 1.05rem;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.84rem;
   line-height: 1.35;
   display: flex;
   flex-direction: row;
   align-items: flex-start;
-  gap: 0.55rem;
-  min-height: 3.55rem;
+  gap: 0.45rem;
+  min-height: 2.8rem;
 }
 
 .cal-dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
-  margin-top: 0.4rem;
+  margin-top: 0.32rem;
   background: var(--accent);
 }
 
@@ -2145,7 +2143,6 @@
 .cal-ev-t {
   display: block;
   font-weight: 700;
-  font-size: 1.05rem;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2154,11 +2151,11 @@
 
 .cal-ev-v {
   display: block;
-  margin-top: 0.2rem;
-  font-size: 0.98rem;
+  margin-top: 0.12rem;
+  font-size: 0.78rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .cal-ev.coupon .cal-dot {
@@ -2184,9 +2181,8 @@
 }
 
 .cal-more {
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   color: var(--muted);
-  font-weight: 600;
 }
 
 .cal-list {
@@ -2238,95 +2234,73 @@
   color: var(--down);
 }
 
-/* Compact only on phone-narrow panels — mid widths keep desktop scale. */
-@container cal (max-width: 480px) {
+@container cal (max-width: 920px) {
   .cal-top {
     grid-template-columns: 1fr;
   }
 
-  .cal-sum-v {
-    font-size: 2rem;
-  }
-
-  .cal-sum-rows {
-    font-size: 1.05rem;
-  }
-
-  .cal-sum-rows b {
-    font-size: 1.12rem;
-  }
-
   .cal-bars {
-    min-height: 200px;
+    min-height: 300px;
   }
 
   .cal-bar-col {
-    min-height: 170px;
-    min-width: 32px;
-  }
-
-  .cal-bar-stack {
-    max-width: 34px;
-  }
-
-  .cal-bar-lbl {
-    font-size: 11px;
+    min-height: 260px;
   }
 
   .cal-grid {
-    gap: 10px 11px;
+    gap: 6px 7px;
   }
 
   .cal-wd {
-    font-size: 0.75rem;
+    font-size: 0.62rem;
     letter-spacing: 0.02em;
-    padding-bottom: 0.15rem;
+    padding-bottom: 0.12rem;
   }
 
   .cal-day {
-    min-height: 180px;
-    gap: 0.45rem;
-    padding: 0.2rem 0.12rem;
+    min-height: 0;
+    gap: 0.22rem;
+    padding: 0.05rem 0;
   }
 
   .cal-day-top {
     flex-direction: column;
     align-items: flex-start;
     gap: 0;
-    font-size: 0.9rem;
+    font-size: 0.7rem;
   }
 
   .cal-num {
-    font-size: 1rem;
+    font-size: 0.78rem;
   }
 
   .cal-day-sum {
     margin-left: 0;
-    font-size: 0.88rem;
+    font-size: 0.62rem;
   }
 
   .cal-ev {
-    padding: 0.55rem 0.58rem;
-    min-height: 2.85rem;
-    font-size: 0.92rem;
-    gap: 0.4rem;
-    border-radius: 10px;
+    padding: 0.28rem 0.34rem;
+    min-height: 0;
+    font-size: 0.7rem;
+    gap: 0.28rem;
+    border-radius: 8px;
     align-items: center;
   }
 
   .cal-dot {
-    width: 10px;
-    height: 10px;
+    width: 7px;
+    height: 7px;
     margin-top: 0;
   }
 
   .cal-ev-t {
-    font-size: 0.92rem;
+    font-size: 0.7rem;
   }
 
   .cal-ev-v {
-    margin-top: 0.08rem;
-    font-size: 0.85rem;
+    margin-top: 0.04rem;
+    font-size: 0.66rem;
   }
 }
 
@@ -2343,10 +2317,10 @@
   }
 
   .cal-bars {
-    min-height: 140px;
+    min-height: 240px;
   }
 
   .cal-bar-col {
-    min-height: 120px;
+    min-height: 210px;
   }
 }

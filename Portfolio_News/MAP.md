@@ -35,7 +35,7 @@
 **Терминал жить (ваниль):** K0–K9 + KA/KB + KS + F-A/F-B ✅ — **заморожен как бэкап** на `/`, не пилим фичи/KV сюда.  
 **React:** sibling `react_Portfolio_News/` → после `npm run build` отдаётся **тем же** `serve` на `/app/` (Vite для утра не нужен).  
 Если React «пизда» → снова `/` ванили.  
-**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG/**e-disclosure** (CDP `company.aspx` + Азипи) ✅. **bond→issuer** ✅. KA выходные: баннер «доп. сессия» vs «последняя сессия» (`moex_live`) ✅. **React polish 2026-10-07:** календарь крупнее (сетка/бары; compact ≤480px) ✅ · Сделки↔Выплаты (купон/див/погашение из календаря + линк) ✅ · Новости: sticky job-banner + Notification если ушёл с вкладки ✅. Дальше: UI лента coverage · INN хвосты · §7F / G / Privacy. TG стоп.
+**Очередь:** React MVP R0–R4 ✅. Источники: Google/SmartLab/Pulse/TG/**e-disclosure** (CDP `company.aspx` + Азипи) ✅. **bond→issuer** ✅. KA выходные: баннер «доп. сессия» vs «последняя сессия» (`moex_live`) ✅. **React polish 2026-10-07:** календарь — сетка как была, увеличены только месячные бары (~360px) ✅ · Сделки↔Выплаты ✅ · Новости job-banner + Notification ✅. Дальше: UI лента coverage · INN хвосты · §7F / G / Privacy. TG стоп.
 
 ---
 
