@@ -267,6 +267,14 @@ def soften_symbols(text: str) -> str:
     )
 
     text = text.replace("—", ", ").replace("–", ", ").replace("−", ", ")
+    # 21% / оставшиеся % — иначе Tera скипнет «%» (нет в словаре) и слово «теряется».
+    text = re.sub(r"(\d+(?:[.,]\d+)?)\s*%", r"\1 процентов", text)
+    text = re.sub(r"%+", " процентов ", text)
+    # $60 / 60$ → доллары (иначе «$» тоже часто молчит).
+    text = re.sub(r"\$\s*(\d+(?:[.,]\d+)?)", r"\1 долларов", text)
+    text = re.sub(r"(\d+(?:[.,]\d+)?)\s*\$", r"\1 долларов", text)
+    text = text.replace("≠", " не равно ")
+    text = text.replace("≈", " примерно ")
     # «A / B» → «или»; путь docs/parts → пробел (не «дакс или партс»).
     text = re.sub(r"\s+/\s+", " или ", text)
     text = re.sub(r"(?<=[\w.])/(?=[\w.])", " ", text)

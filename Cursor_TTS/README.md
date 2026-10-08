@@ -65,6 +65,7 @@ Cursor user hook (~/.cursor/hooks/…)
 | Текст | `text_prep.py` |
 | Хоткеи | `hotkey_tts.ahk` |
 
+Статус и очередь: [`MAP.md`](MAP.md).  
 Контракты Stop / warmup / Авто: [`docs/TZ.md`](docs/TZ.md).
 
 ## Движки
