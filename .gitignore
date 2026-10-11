@@ -48,3 +48,6 @@ DAY_LOG/
 # Portfolio News: живые данные портфеля и локальный мусор
 Portfolio_News/_api_dump/
 Portfolio_News/pytest_out.txt
+
+# Personal Cursor rules — never publish
+.cursor/rules/medication-reminders.mdc
