@@ -23,6 +23,18 @@ from typing import Any, Callable, Optional
 import requests
 
 from portfolio_news.bond_issuer import resolve_bond_issuer
+from portfolio_news.poll_stats import (
+    NO_ISSUER_MAP,
+    NO_MATCHING_EVENTS,
+    OUTPUT_LIMIT,
+    diag_drop,
+    diag_error,
+    diag_feed_total,
+    diag_limit,
+    diag_passed,
+    diag_raw_seen,
+    diag_skip,
+)
 from portfolio_news.sources.base import RawNews
 
 log = logging.getLogger(__name__)
@@ -501,7 +513,13 @@ class EDisclosureSource:
 
     def _to_raw(self, events: list[DisclosureEvent]) -> list[RawNews]:
         out: list[RawNews] = []
+        out_cap = 12
+        diag_feed_total(len(events))
         for ev in events:
+            diag_raw_seen(1)
+            if len(out) >= out_cap:
+                diag_drop(OUTPUT_LIMIT)
+                continue
             out.append(
                 RawNews(
                     title=ev.title[:512],
@@ -510,13 +528,14 @@ class EDisclosureSource:
                     published_at=ev.published_at,
                 )
             )
-            if len(out) >= 12:
-                break
+            diag_passed(1)
+        diag_limit(out_cap, hit=len(out) >= out_cap)
         return out
 
     def fetch(self, ticker_id: str, search_query: str, kind: str) -> list[RawNews]:
         rec = issuer_record(ticker_id, search_query=search_query, kind=kind, cfg=self._cfg())
         if not rec:
+            diag_error(NO_ISSUER_MAP, "no company_id/inn/aliases in map")
             return []
         cid = rec.get("company_id")
         if cid not in (None, "", 0):
@@ -532,6 +551,12 @@ class EDisclosureSource:
             events = self._ensure_events()
         except Exception as exc:  # noqa: BLE001
             log.warning("e-disclosure azipi load failed: %s", exc)
+            diag_error("exception", str(exc))
             return []
         matched = [ev for ev in events if event_matches_issuer(ev, rec)]
+        if not matched:
+            # Day feed loaded OK; issuer simply has no rows in lookback window.
+            diag_skip(NO_MATCHING_EVENTS, "azipi lookback had no issuer rows")
+            diag_feed_total(len(events))
+            return []
         return self._to_raw(matched)

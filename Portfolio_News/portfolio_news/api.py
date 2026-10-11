@@ -481,6 +481,58 @@ def list_tickers(db: Session = Depends(get_db)):
     return list(rows)
 
 
+def _news_recency_key(row: NewsItem) -> tuple:
+    """Sort key for feed freshness: published_at, else created_at; id tie-break.
+
+    Higher tuple sorts first when ``reverse=True``.
+    """
+    primary = row.published_at if row.published_at is not None else row.created_at
+    if primary is None:
+        primary = datetime.min
+    nid = int(row.id) if row.id is not None else 0
+    return (primary, nid)
+
+
+def fair_round_robin_news(rows: list[NewsItem], limit: int) -> list[NewsItem]:
+    """Pick up to ``limit`` items fairly across tickers (round-robin).
+
+    Each pass takes the next most-recent item per ticker (already sorted by
+    ``_news_recency_key``). Ticker order follows the freshness of each ticker's
+    newest remaining item at the start. No global pre-limit — callers must pass
+    the full candidate set for the scope.
+    """
+    if limit <= 0 or not rows:
+        return []
+    by_tid: dict[str, list[NewsItem]] = {}
+    for r in rows:
+        tid = (r.ticker_id or "").strip().upper() or "?"
+        by_tid.setdefault(tid, []).append(r)
+    for items in by_tid.values():
+        items.sort(key=_news_recency_key, reverse=True)
+    order = sorted(
+        by_tid.keys(),
+        key=lambda t: _news_recency_key(by_tid[t][0]),
+        reverse=True,
+    )
+    cursors = {t: 0 for t in order}
+    out: list[NewsItem] = []
+    while len(out) < limit:
+        progressed = False
+        for tid in order:
+            i = cursors[tid]
+            bucket = by_tid[tid]
+            if i >= len(bucket):
+                continue
+            out.append(bucket[i])
+            cursors[tid] = i + 1
+            progressed = True
+            if len(out) >= limit:
+                break
+        if not progressed:
+            break
+    return out
+
+
 @app.get("/api/news", response_model=list[NewsOut])
 def list_news(
     ticker: Optional[str] = Query(None),
@@ -489,35 +541,25 @@ def list_news(
     ai: Optional[str] = Query(None, description="hide_noise = drop label=noise"),
     db: Session = Depends(get_db),
 ):
-    """K5: default feed = news for BCS holdings only (not full tickers DB)."""
+    """K5: default feed = news for BCS holdings only (not full tickers DB).
+
+    Fair round-robin across tickers (published_at, else created_at) so a bulk
+    poll cannot fill ``limit`` with one ticker's inserts.
+    """
     from portfolio_news.bcs_scope import resolve_bcs_scope
 
-    q = select(NewsItem).order_by(desc(NewsItem.created_at)).limit(limit)
+    # No SQL LIMIT here — a global LIMIT before RR re-hides other tickers.
+    q = select(NewsItem)
     if ticker:
-        q = (
-            select(NewsItem)
-            .where(NewsItem.ticker_id == ticker)
-            .order_by(desc(NewsItem.created_at))
-            .limit(limit)
-        )
+        q = select(NewsItem).where(NewsItem.ticker_id == ticker)
     elif focus:
         focus_ids = list_focus_tickers(db)
         if focus_ids:
-            q = (
-                select(NewsItem)
-                .where(NewsItem.ticker_id.in_(focus_ids))
-                .order_by(desc(NewsItem.created_at))
-                .limit(limit)
-            )
+            q = select(NewsItem).where(NewsItem.ticker_id.in_(focus_ids))
     else:
         scope_ids, _err = resolve_bcs_scope(db)
         if scope_ids:
-            q = (
-                select(NewsItem)
-                .where(NewsItem.ticker_id.in_(scope_ids))
-                .order_by(desc(NewsItem.created_at))
-                .limit(limit)
-            )
+            q = select(NewsItem).where(NewsItem.ticker_id.in_(scope_ids))
     rows = list(db.scalars(q).all())
     from portfolio_news.sources.news_noise import (
         is_noise_title,
@@ -525,8 +567,9 @@ def list_news(
         remember_title_fingerprint,
     )
 
+    # Newest-first so near-dup keeps the freshest copy of a story.
+    rows.sort(key=_news_recency_key, reverse=True)
     rows = [r for r in rows if not is_noise_title(r.title or "")]
-    # Near-dups (same story, different site tail) — keep newest, skip rest.
     seen_fps: set[str] = set()
     deduped: list[NewsItem] = []
     for r in rows:
@@ -534,7 +577,7 @@ def list_news(
             continue
         remember_title_fingerprint(r.title or "", seen_fps)
         deduped.append(r)
-    rows = deduped
+    rows = fair_round_robin_news(deduped, limit)
     ai_map = _news_ai_map(db, [r.id for r in rows])
     hide_noise = (ai or "").strip().lower() == "hide_noise"
     out: list[NewsOut] = []

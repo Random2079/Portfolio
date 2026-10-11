@@ -19,6 +19,24 @@ from typing import Any, Optional
 
 import requests
 
+from portfolio_news.poll_stats import (
+    IS_NOISE_TITLE,
+    KIND_SKIPPED,
+    OUTPUT_LIMIT,
+    PULSE_BROAD_DIGEST,
+    PULSE_DROP_NICK,
+    PULSE_NO_POST_ID,
+    PULSE_STATUS,
+    PULSE_TARGET_TITLE,
+    PULSE_TICKER_NOT_IN_INSTRUMENTS,
+    diag_drop,
+    diag_error,
+    diag_feed_total,
+    diag_limit,
+    diag_passed,
+    diag_raw_seen,
+    diag_skip,
+)
 from portfolio_news.sources.base import RawNews
 from portfolio_news.sources.news_noise import is_noise_title, title_matches_ticker
 from portfolio_news.sources.pulse_allowlist import (
@@ -170,6 +188,38 @@ def _nickname_of(item: dict[str, Any]) -> str:
     return str(owner.get("nickname") or "").strip()
 
 
+def item_reject_reason(
+    item: dict[str, Any],
+    ticker_id: str,
+    search_query: str = "",
+    *,
+    drop_nicks: set[str] | None = None,
+) -> str | None:
+    """Primary drop reason, or None if the item should become RawNews."""
+    tid = (ticker_id or "").strip().upper()
+    if not tid:
+        return PULSE_TICKER_NOT_IN_INSTRUMENTS
+    if (item.get("status") or "published").strip().lower() not in ("", "published"):
+        return PULSE_STATUS
+    title = _title_of(item)
+    if not title or is_noise_title(title):
+        return IS_NOISE_TITLE
+    if _TARGET_TITLE.search(title):
+        return PULSE_TARGET_TITLE
+    nick = _nickname_of(item)
+    if drop_nicks and nick in drop_nicks:
+        return PULSE_DROP_NICK
+    inst = _instrument_tickers(item)
+    if tid not in inst:
+        return PULSE_TICKER_NOT_IN_INSTRUMENTS
+    # Broad multi-tag digest without issuer/ticker prose → skip.
+    if len(inst) > _MAX_BROAD_INSTRUMENTS and not title_matches_ticker(
+        title, tid, search_query
+    ):
+        return PULSE_BROAD_DIGEST
+    return None
+
+
 def item_kept(
     item: dict[str, Any],
     ticker_id: str,
@@ -178,28 +228,12 @@ def item_kept(
     drop_nicks: set[str] | None = None,
 ) -> bool:
     """Whether a news-by-ticker item should become RawNews."""
-    tid = (ticker_id or "").strip().upper()
-    if not tid:
-        return False
-    if (item.get("status") or "published").strip().lower() not in ("", "published"):
-        return False
-    title = _title_of(item)
-    if not title or is_noise_title(title):
-        return False
-    if _TARGET_TITLE.search(title):
-        return False
-    nick = _nickname_of(item)
-    if drop_nicks and nick in drop_nicks:
-        return False
-    inst = _instrument_tickers(item)
-    if tid not in inst:
-        return False
-    # Broad multi-tag digest without issuer/ticker prose → skip.
-    if len(inst) > _MAX_BROAD_INSTRUMENTS and not title_matches_ticker(
-        title, tid, search_query
-    ):
-        return False
-    return True
+    return (
+        item_reject_reason(
+            item, ticker_id, search_query, drop_nicks=drop_nicks
+        )
+        is None
+    )
 
 
 def fetch_ticker_news_html(
@@ -208,18 +242,18 @@ def fetch_ticker_news_html(
     base: str | None = None,
     timeout: float = 35.0,
     session: requests.Session | None = None,
-) -> str:
+) -> tuple[str, str | None]:
+    """Return ``(html, error)``. ``error`` set on HTTP failure; empty page → ``("", None)``."""
     url = news_page_url(ticker_id, base=base)
     sess = session or requests
     try:
         resp = sess.get(url, headers=_HEADERS, timeout=timeout)
         resp.raise_for_status()
         resp.encoding = resp.apparent_encoding or "utf-8"
-        return resp.text
+        return resp.text, None
     except requests.RequestException as exc:
         log.warning("pulse news ticker fetch failed %s: %s", ticker_id, exc)
-        return ""
-
+        return "", str(exc)
 
 class PulseNewsTickerSource:
     """NewsSource: Pulse stock-news tab SSR per equity ticker."""
@@ -256,45 +290,63 @@ class PulseNewsTickerSource:
             self._session = requests.Session()
         return self._session
 
-    def _items_for(self, ticker_id: str) -> list[dict[str, Any]]:
+    def _items_for(self, ticker_id: str) -> tuple[list[dict[str, Any]], str | None]:
         tid = (ticker_id or "").strip().upper()
         if not tid:
-            return []
+            return [], None
         if tid in self._cache:
-            return self._cache[tid]
-        html = fetch_ticker_news_html(
+            return self._cache[tid], None
+        html, err = fetch_ticker_news_html(
             tid,
             base=self._base(),
             timeout=self._timeout,
             session=self._ensure_session(),
         )
+        if err:
+            self._cache[tid] = []
+            return [], err
         items = extract_news_items_from_html(html, tid) if html else []
         log.info("pulse news ticker: %s → %s items", tid, len(items))
         self._cache[tid] = items
-        return items
+        return items, None
 
     def fetch(self, ticker_id: str, search_query: str, kind: str) -> list[RawNews]:
         k = (kind or "equity").strip().lower()
         if k not in ("equity", "stock", "share", "shares"):
+            diag_skip(KIND_SKIPPED, f"kind={kind!r}")
             return []
         tid = (ticker_id or "").strip().upper()
         if not tid or tid.startswith("RU000"):
+            diag_skip(KIND_SKIPPED, "bond_or_empty_ticker")
             return []
         try:
-            items = self._items_for(tid)
+            items, err = self._items_for(tid)
         except Exception as exc:  # noqa: BLE001
             log.warning("pulse news ticker load failed %s: %s", tid, exc)
+            diag_error("exception", str(exc))
             return []
+        if err:
+            diag_error("http", err)
+            return []
+        diag_feed_total(len(items))
         drop = self._drop()
         base = self._base()
         out: list[RawNews] = []
+        out_cap = 10
         for item in items:
-            if not item_kept(item, tid, search_query, drop_nicks=drop):
+            diag_raw_seen(1)
+            reason = item_reject_reason(item, tid, search_query, drop_nicks=drop)
+            if reason is not None:
+                diag_drop(reason)
                 continue
             title = _title_of(item)[:512]
             nick = _nickname_of(item) or "pulse"
             post_id = str(item.get("id") or "").strip()
             if not post_id:
+                diag_drop(PULSE_NO_POST_ID)
+                continue
+            if len(out) >= out_cap:
+                diag_drop(OUTPUT_LIMIT)
                 continue
             out.append(
                 RawNews(
@@ -304,6 +356,6 @@ class PulseNewsTickerSource:
                     published_at=_parse_inserted(item.get("inserted")),
                 )
             )
-            if len(out) >= 10:
-                break
+            diag_passed(1)
+        diag_limit(out_cap, hit=len(out) >= out_cap)
         return out

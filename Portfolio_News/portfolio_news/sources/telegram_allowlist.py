@@ -13,6 +13,17 @@ from typing import Any, Optional
 
 import requests
 
+from portfolio_news.poll_stats import (
+    IS_NOISE_TITLE,
+    OUTPUT_LIMIT,
+    TITLE_MATCHES_TICKER,
+    diag_drop,
+    diag_error,
+    diag_feed_total,
+    diag_limit,
+    diag_passed,
+    diag_raw_seen,
+)
 from portfolio_news.sources.base import RawNews
 from portfolio_news.sources.news_noise import is_noise_title, title_matches_ticker
 
@@ -213,12 +224,21 @@ class TelegramAllowlistSource:
             posts = self._ensure_posts()
         except Exception as exc:  # noqa: BLE001
             log.warning("telegram allowlist load failed: %s", exc)
+            diag_error("exception", str(exc))
             return []
+        diag_feed_total(len(posts))
         out: list[RawNews] = []
+        out_cap = 12
         for post in posts:
+            diag_raw_seen(1)
             if is_noise_title(post.title):
+                diag_drop(IS_NOISE_TITLE)
                 continue
             if not post_matches_ticker(post, ticker_id, search_query):
+                diag_drop(TITLE_MATCHES_TICKER)
+                continue
+            if len(out) >= out_cap:
+                diag_drop(OUTPUT_LIMIT)
                 continue
             out.append(
                 RawNews(
@@ -228,6 +248,6 @@ class TelegramAllowlistSource:
                     published_at=post.published_at,
                 )
             )
-            if len(out) >= 12:
-                break
+            diag_passed(1)
+        diag_limit(out_cap, hit=len(out) >= out_cap)
         return out

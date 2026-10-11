@@ -8,6 +8,17 @@ from urllib.parse import quote_plus
 import feedparser
 import requests
 
+from portfolio_news.poll_stats import (
+    EMPTY_TITLE_OR_LINK,
+    IS_NOISE_TITLE,
+    TITLE_MATCHES_TICKER,
+    diag_drop,
+    diag_error,
+    diag_feed_total,
+    diag_limit,
+    diag_passed,
+    diag_raw_seen,
+)
 from portfolio_news.sources.base import RawNews
 from portfolio_news.sources.news_noise import (
     google_query_exclusions,
@@ -19,6 +30,8 @@ _HEADERS = {
     "User-Agent": "PortfolioNews/0.1 (+local; personal monitor)",
     "Accept": "application/rss+xml, application/xml, text/xml, */*",
 }
+
+_OUT_CAP = 15
 
 
 def _parse_date(entry) -> Optional[datetime]:
@@ -66,19 +79,28 @@ class GoogleNewsRuSource:
         try:
             resp = requests.get(url, headers=_HEADERS, timeout=20)
             resp.raise_for_status()
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            diag_error("http", str(exc))
             return []
         feed = feedparser.parse(resp.content)
+        entries = list(feed.entries)
+        diag_feed_total(len(entries))
+        considered = entries[:_OUT_CAP]
+        diag_limit(_OUT_CAP, hit=len(entries) >= _OUT_CAP)
         out: list[RawNews] = []
-        for entry in feed.entries[:15]:
+        for entry in considered:
+            diag_raw_seen(1)
             link = (entry.get("link") or "").strip()
             title = (entry.get("title") or "").strip()
             if not link or not title:
+                diag_drop(EMPTY_TITLE_OR_LINK)
                 continue
             if is_noise_title(title):
+                diag_drop(IS_NOISE_TITLE)
                 continue
             # Short tickers (≤2): require issuer/name tokens, not bare letter match.
             if not title_matches_ticker(title, ticker_id, search_query):
+                diag_drop(TITLE_MATCHES_TICKER)
                 continue
             out.append(
                 RawNews(
@@ -88,4 +110,5 @@ class GoogleNewsRuSource:
                     published_at=_parse_date(entry),
                 )
             )
+            diag_passed(1)
         return out

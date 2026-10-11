@@ -12,6 +12,16 @@ from sqlalchemy.orm import Session
 from portfolio_news.db import NewsItem, Ticker
 from portfolio_news.focus import list_focus_tickers, notify_allowed
 from portfolio_news.notify_toast import notify_toast
+from portfolio_news.poll_stats import (
+    INTEGRITY_ERROR,
+    IS_NOISE_TITLE,
+    NEAR_DUPLICATE,
+    URL_DUPLICATE,
+    PollDiagnostics,
+    bind_diagnostics,
+    diag_drop,
+    diag_inserted,
+)
 from portfolio_news.sources import default_sources
 from portfolio_news.sources.base import NewsSource, RawNews
 
@@ -70,14 +80,17 @@ class PollResult:
     new_titles: list[str] = field(default_factory=list)
 
 
-def _insert_if_new(session: Session, ticker_id: str, item: RawNews) -> NewsItem | None:
+def _insert_if_new(
+    session: Session, ticker_id: str, item: RawNews
+) -> tuple[NewsItem | None, str]:
+    """Insert or return ``(None, reason)`` with a single primary drop reason."""
     from portfolio_news.sources.news_noise import is_noise_title, title_fingerprint
 
     if is_noise_title(item.title or ""):
-        return None
+        return None, IS_NOISE_TITLE
     exists = session.scalar(select(NewsItem.id).where(NewsItem.url == item.url).limit(1))
     if exists is not None:
-        return None
+        return None, URL_DUPLICATE
     # Near-dup: same story + different site/Profit suffix — skip without AI.
     fp = title_fingerprint(item.title or "")
     if fp:
@@ -89,7 +102,7 @@ def _insert_if_new(session: Session, ticker_id: str, item: RawNews) -> NewsItem 
         ).all()
         for old_title in recent:
             if title_fingerprint(old_title or "") == fp:
-                return None
+                return None, NEAR_DUPLICATE
     row = NewsItem(
         ticker_id=ticker_id,
         title=item.title,
@@ -103,9 +116,9 @@ def _insert_if_new(session: Session, ticker_id: str, item: RawNews) -> NewsItem 
         session.commit()
     except IntegrityError:
         session.rollback()
-        return None
+        return None, INTEGRITY_ERROR
     session.refresh(row)
-    return row
+    return row, "inserted"
 
 
 def select_tickers(
@@ -202,6 +215,7 @@ def poll_once(
                 "scope": "bcs",
                 "scope_error": scope_error,
                 "scope_ids": [],
+                "diagnostics": PollDiagnostics().to_dict(),
             }
         if ticker_id:
             eff, terr = filter_ticker_id_to_scope(ticker_id, scope_ids)
@@ -224,6 +238,7 @@ def poll_once(
                     "scope": "bcs",
                     "scope_error": terr,
                     "scope_ids": scope_ids,
+                    "diagnostics": PollDiagnostics().to_dict(),
                 }
             ticker_id = eff
 
@@ -244,6 +259,7 @@ def poll_once(
     result = PollResult(sources=[s.name for s in sources])
     digest_titles: list[str] = []
     cancelled = False
+    diagnostics = PollDiagnostics()
 
     def emit(progress: PollProgress) -> None:
         if on_progress:
@@ -252,65 +268,82 @@ def poll_once(
     total = len(tickers)
     emit(PollProgress(running=True, current=0, total=total, ticker_id="", inserted=0))
 
-    for idx, t in enumerate(tickers, start=1):
-        if should_cancel and should_cancel():
-            cancelled = True
-            break
-        emit(
-            PollProgress(
-                running=True,
-                current=idx,
-                total=total,
-                ticker_id=t.id,
-                inserted=result.inserted,
-            )
-        )
-        result.tickers += 1
-        from portfolio_news.bond_issuer import news_query_for_ticker
-
-        query = news_query_for_ticker(
-            t.id,
-            kind=t.kind or "",
-            name=t.name or "",
-            search_query=t.search_query or "",
-        )
-        for src in sources:
+    with bind_diagnostics(diagnostics):
+        for idx, t in enumerate(tickers, start=1):
             if should_cancel and should_cancel():
                 cancelled = True
                 break
-            try:
-                items = src.fetch(t.id, query, t.kind)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("source %s failed for %s: %s", src.name, t.id, exc)
-                continue
-            for raw in items:
-                row = _insert_if_new(session, t.id, raw)
-                if row is None:
+            emit(
+                PollProgress(
+                    running=True,
+                    current=idx,
+                    total=total,
+                    ticker_id=t.id,
+                    inserted=result.inserted,
+                )
+            )
+            result.tickers += 1
+            from portfolio_news.bond_issuer import news_query_for_ticker
+
+            query = news_query_for_ticker(
+                t.id,
+                kind=t.kind or "",
+                name=t.name or "",
+                search_query=t.search_query or "",
+            )
+            for src in sources:
+                if should_cancel and should_cancel():
+                    cancelled = True
+                    break
+                call = diagnostics.begin_call(src.name, t.id)
+                try:
+                    items = src.fetch(t.id, query, t.kind)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("source %s failed for %s: %s", src.name, t.id, exc)
+                    call.ok = False
+                    call.error_kind = "exception"
+                    call.error = str(exc)[:500]
+                    call.returned = 0
+                    call.passed = 0
+                    diagnostics.end_call()
                     continue
-                result.inserted += 1
-                # K9: today-only toast; KB: optional Focus filter. DB insert always ok.
-                focus_ok = (not notify_focus_only) or notify_allowed(t.id, focus_ids)
-                today_ok = news_is_today_for_toast(raw.published_at)
-                toast_ok = bool(focus_ok and today_ok and mode != "off")
-                if toast_ok:
-                    digest_titles.append(f"{t.id}: {raw.title}")
-                if mode == "each" and toast_ok:
-                    notify_toast(
-                        title=f"{t.id} · {raw.source}",
-                        message=raw.title,
-                        url=raw.url,
+                # Layer 1: fetch() return count only (source filters stay opaque).
+                n_ret = len(items)
+                call.returned = n_ret
+                call.passed = n_ret
+                for raw in items:
+                    row, reason = _insert_if_new(session, t.id, raw)
+                    if row is None:
+                        diag_drop(reason)
+                        continue
+                    diag_inserted(1)
+                    result.inserted += 1
+                    # K9: today-only toast; KB: optional Focus filter. DB insert always ok.
+                    focus_ok = (not notify_focus_only) or notify_allowed(
+                        t.id, focus_ids
                     )
-                    row.notified = 1
-                    session.commit()
-                    result.notified += 1
-                elif mode == "digest" and toast_ok:
-                    row.notified = 1
-                    session.commit()
-                else:
-                    # Hold / not today / off: keep in DB, no toast
-                    session.commit()
-        if cancelled:
-            break
+                    today_ok = news_is_today_for_toast(raw.published_at)
+                    toast_ok = bool(focus_ok and today_ok and mode != "off")
+                    if toast_ok:
+                        digest_titles.append(f"{t.id}: {raw.title}")
+                    if mode == "each" and toast_ok:
+                        notify_toast(
+                            title=f"{t.id} · {raw.source}",
+                            message=raw.title,
+                            url=raw.url,
+                        )
+                        row.notified = 1
+                        session.commit()
+                        result.notified += 1
+                    elif mode == "digest" and toast_ok:
+                        row.notified = 1
+                        session.commit()
+                    else:
+                        # Hold / not today / off: keep in DB, no toast
+                        session.commit()
+                diagnostics.end_call()
+            if cancelled:
+                break
 
     if not cancelled and mode == "digest" and digest_titles:
         preview = " · ".join(digest_titles[:2])
@@ -345,4 +378,5 @@ def poll_once(
         "scope": "bcs" if bcs_only or scope_ids is not None else "all",
         "scope_error": scope_error,
         "scope_ids": list(scope_ids) if scope_ids is not None else [],
+        "diagnostics": diagnostics.to_dict(),
     }

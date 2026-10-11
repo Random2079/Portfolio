@@ -344,7 +344,9 @@ Child-apps на CDN: `pulse-news-by-ticker`, `pulse-posts-by-ticker`, …
 - Активные источники в `default_sources()`: `google_news_ru` · `smartlab` · `pulse_allowlist` · `pulse_news_ticker` · `telegram_allowlist` · `e_disclosure`.  
 - Аудит: `python -m portfolio_news coverage --window 7d` (BCS; `--all-tickers` offline). Окно = `published_at` (fallback `created_at`), TZ Екатеринбург.  
 - **ZERO ≠ «источник сломан».** Coverage считает только новости **внутри окна**. `once` может найти и положить события старше 7д — в DB они есть, в `7d` ZERO останется (пример: TATN тишина на ЦРКИ). Сначала `once`, потом coverage.  
-- Google: минус `#сильный_рост` в RSS-query ломал ленту — убран; denylist title остаётся.
+- Google: минус `#сильный_рост` в RSS-query ломал ленту — убран; denylist title остаётся.  
+- **GET `/api/news` fair feed ✅:** candidates в BCS scope **без** глобального SQL `LIMIT` → noise/near-dup → **round-robin по тикерам** (`published_at`, иначе `created_at`, tie `id`) → общий `limit`. Иначе last poll забивал окно `created_at` (YDEX/SBER/…). Тесты: `tests/test_news_fair_feed.py`.  
+- **Poll diagnostics (WIP):** слой 1 ✅ — `poll_stats` + `poller` (`diagnostics` в результате `poll_once`: returned / empty-ok vs error / insert / noise / url·near-dup). Хуки в sources частично. Дальше: `/api/poll/status` + React «Диагностика последнего опроса». Тесты: `tests/test_poll_diagnostics.py`.
 
 **bond→issuer ✅ (2026-10-04):**  
 `bond_issuer.py` + json — ISIN → issuer aliases (+ optional `equity_ticker`). Poller → **issuer query**, не серия БО. URL в DB глобально уникален. Тесты: `tests/test_bond_issuer.py`.
