@@ -13,3 +13,5 @@ _pyc_probe.txt
 _find_src.txt
 pytest_out.txt
 *.log
+_launch_error.log
+_launch_probe.log

@@ -7,6 +7,9 @@
 
 ## Запуск
 
+**Как приложение (рекомендуется):** двойной клик `launch.vbs`  
+(тот же приём, что YouTube_Translator — не exe, код правишь без пересборки).
+
 ```bash
 pip install -r requirements.txt
 python -m playwright install chromium
@@ -15,7 +18,7 @@ python -m hh_auto search
 python -m hh_auto apply --dry-run --limit 5
 python -m hh_auto stats
 python -m hh_auto raise-resume   # raised | already_raised_skip | captcha | error
-python -m hh_auto ui             # окно отчётности
+python -m hh_auto ui             # то же окно, что launch.vbs
 ```
 
 ## Пакет
