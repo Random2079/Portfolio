@@ -48,8 +48,9 @@ def main() -> int:
     if str(_ROOT) not in sys.path:
         sys.path.insert(0, str(_ROOT))
     try:
-        from hh_auto.ui import run_ui
+        from hh_auto.ui import _UI_FILE, _code_stamp, run_ui
 
+        print(f"launch_gui: live ui → {_UI_FILE} @ {_code_stamp()}", flush=True)
         return int(run_ui(None))
     except SystemExit as e:
         code = e.code

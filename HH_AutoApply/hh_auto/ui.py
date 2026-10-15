@@ -4,10 +4,22 @@ from __future__ import annotations
 
 import threading
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
 
 from hh_auto import load_config
 from hh_auto.stats import format_stats_text, load_report
+
+# D2: метка живого кода — ярлык/pythonw всегда тянет этот файл с диска
+_UI_FILE = Path(__file__).resolve()
+
+
+def _code_stamp() -> str:
+    try:
+        mtime = datetime.fromtimestamp(_UI_FILE.stat().st_mtime)
+        return mtime.strftime("%Y-%m-%d %H:%M")
+    except OSError:
+        return "?"
 
 
 def run_ui(config_path: Path | None = None) -> int:
@@ -29,9 +41,10 @@ def run_ui(config_path: Path | None = None) -> int:
     header = ctk.CTkLabel(app, text="📍 HH AutoApply", font=ctk.CTkFont(size=20, weight="bold"))
     header.pack(padx=16, pady=(14, 4), anchor="w")
 
+    stamp = _code_stamp()
     sub = ctk.CTkLabel(
         app,
-        text="🎯 отклики · лимит дня · поднятие резюме",
+        text=f"🎯 отклики · лимит · резюме · 📖 код ui.py @ {stamp}",
         font=ctk.CTkFont(size=13),
         text_color=("gray30", "gray70"),
     )

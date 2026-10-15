@@ -23,7 +23,7 @@
     "API",
     "Git"
   ],
-  "cover_template": "Здравствуйте! Откликаюсь на «{title}» ({company}).\nПишу на Python: FastAPI, SQLite, локальные сервисы и интеграции API.\nГотов к удалёнке или работе в Сургуте.",
+  "cover_template": "<<< ЗАГОТОВКА СОПРОВОДИТЕЛЬНОГО — замени этот текст своим. Плейсхолдеры: {title} {company} >>>\n\nЗдравствуйте! Откликаюсь на «{title}» ({company}).\n\n[сюда твой текст — скинь в чат, вставим в config.json]\n\nГотов к удалёнке или работе в Сургуте.",
   "playwright": {
     "headless": false,
     "storage_state": "data/storage_state.json",

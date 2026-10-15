@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from hh_auto import DATA, ensure_data_dir, load_config
+from hh_auto.cover import render_cover
 from hh_auto.limits import can_apply, load_state, record_apply, save_state
 
 CAPTCHA_HINTS = ("showcaptcha", "я не робот", "подтвердите, что вы не робот", "are you a robot")
@@ -207,7 +208,9 @@ def apply_one(
     if _visible_captcha(page):
         result["status"] = "captcha"
         return result
-    _fill_cover_if_present(page, cover)
+    filled = _fill_cover_if_present(page, cover)
+    result["cover_filled"] = filled
+    result["cover_len"] = len(cover)
     _confirm_if_present(page)
     page.wait_for_timeout(800)
     if _visible_captcha(page):
@@ -239,6 +242,11 @@ def cmd_apply(
     pw_cfg = cfg.get("playwright") or {}
     headless = bool(pw_cfg.get("headless"))
     slow = int(pw_cfg.get("slow_mo_ms") or 0)
+    cover_template = (
+        cfg.get("cover_template")
+        or "Здравствуйте! Откликаюсь на «{title}» ({company}).\n"
+        "<<< ЗАГОТОВКА: замени cover_template в config.json своим текстом. >>>"
+    )
 
     mode = "DRY-RUN" if dry_run else "LIVE"
     print(f"{mode} · кандидатов {len(vacancies)} · лимит сегодня {daily}")
@@ -270,6 +278,10 @@ def cmd_apply(
             print(
                 f"  → [{v.get('score')}] {v.get('title')} — {v.get('company')}"
             )
+            # Сопроводительное: из ranked.cover или свежий render из cover_template
+            if not (v.get("cover") or "").strip():
+                v = dict(v)
+                v["cover"] = render_cover(cover_template, v)
             try:
                 row = apply_one(page, v, dry_run=dry_run)
             except Exception as e:
