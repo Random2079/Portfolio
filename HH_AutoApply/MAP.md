@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| 📍 **Где мы** | **D2** ярлык=живой код ✅ · заготовка cover ✅ |
-| 🎯 **Фокус** | **D3** кастом UI из config (тема/шрифт) |
-| 📁 **Код** | `launch.vbs` · `launch_gui.py` · `ui.py` · `apply.py` · `config*.json` |
+| 📍 **Где мы** | **D3** UI из `config.ui` ✅ |
+| 🎯 **Фокус** | **D4** headless фон (не дёргать глаз) |
+| 📁 **Код** | `hh_auto/ui.py` · `config*.json` · дальше `apply.py` / playwright |
 
 ---
 
@@ -14,47 +14,41 @@
 
 | Источник | Роль |
 |---|---|
-| `data/apply_state.json` | **день**: `date` / `count` / `applied_ids` → лимит 40/день |
-| `data/apply_log.jsonl` | **лента**: статусы + `cover_filled` при live |
-| `data/resume_state.json` | последнее поднятие резюме (cooldown) |
-| `config.json` → `cover_template` | текст письма; `{title}` `{company}` |
-| `data/storage_state.json` | 🔒 логин Playwright — **не в git** |
+| `data/apply_state.json` | **день**: лимит 40 |
+| `data/apply_log.jsonl` | лента статусов |
+| `config.json` → `cover_template` | сопроводительное |
+| `config.json` → `ui` | тема / шрифт / размер окна |
+| `data/storage_state.json` | 🔒 не в git |
 
 ---
 
-## Очередь (по пунктам)
+## Очередь
 
 | # | Что | Статус |
 |---|-----|--------|
-| A–C1 | search/apply/UI/launch.vbs | ✅ |
-| **D1** | кнопка Отмена + textbox read-only | ✅ |
-| **D2** | ярлык → живой `.py` (stamp в UI / лог) + cover-заготовка | ✅ |
-| **D3** | кастом UI из config (тема/шрифт — что можно) | ⬜ дальше |
-| **D4** | headless фон (не дёргать глаз) | ⬜ |
-| **D5** | отчёт «как работаю с агентом» | ✅ уже в чате |
-| — | финальный текст cover в config (+ лёгкий кивок TTS/Portfolio) | ✅ |
+| A–D2 | ядро + UI + ярлык + cover | ✅ |
+| **D3** | **кастом UI из config** (`appearance_mode`, theme, font, geometry) | ✅ |
+| **D4** | headless фон | ⬜ дальше |
 | — | обход капчи | 🚫 |
 
-📖 **Ярлык (D2):** `launch.vbs` → `pythonw launch_gui.py` → импорт `hh_auto.ui` с диска. Не exe. В окне строка `код ui.py @ <mtime>` — поменял ui.py → новый stamp без пересборки ярлыка.
+📖 **Почему слой быстрый:** HH — тонкий tool (~сотни строк), не YT/TTS на десятки kLOC. Скорость ≠ «халтура», просто меньше графа связей.
 
-📖 **Cover:** при apply, если в ranked нет `cover` — рендер из `cover_template`. Live: `_fill_cover_if_present` + в лог `cover_filled` / `cover_len`. Текст-заготовка в config — заменишь, когда кинешь.
+📖 **`config.ui` (D3):**  
+`appearance_mode`: dark|light|system · `color_theme`: blue|green|dark-blue · `font_family` / `font_size` (10–22) · `geometry` · `window_title`. Мусорные значения → дефолты.
 
 ---
 
-## Смоук D2
+## Смоук D3
 
 ```text
+# в config.json → ui.font_size: 16, color_theme: "green"
 wscript //nologo launch.vbs
-# в шапке UI: «код ui.py @ …» — запомни
-# поправь пробел в hh_auto/ui.py, сохрани, закрой UI, снова ярлык
-# stamp должен обновиться → принцип ок
+# шрифт/тема подхватились → ок
 ```
 
 ---
 
 ## 🚫 Запреты
 
-- Капчу не обходить
-- `storage_state` / секреты не в git
-- Пуш только по просьбе
-- Не склеивать D3+D4 в один заход
+- Капчу не обходить · секреты не в git · пуш по просьбе
+- D4 отдельно, не клеить с D3

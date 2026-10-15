@@ -5,6 +5,7 @@ from hh_auto.cover import render_cover
 from hh_auto.limits import can_apply, record_apply, refresh_day
 from hh_auto.score import keywords_table, rank_vacancies, score_vacancy
 from hh_auto.stats import load_report
+from hh_auto.ui import _ui_opts
 
 
 class TestCaptcha(unittest.TestCase):
@@ -86,6 +87,17 @@ class TestStats(unittest.TestCase):
         self.assertIn("remaining", report)
         self.assertEqual(report["daily_limit"], 40)
         self.assertGreaterEqual(report["remaining"], 0)
+
+
+class TestUiOpts(unittest.TestCase):
+    def test_defaults_and_clamp(self):
+        opts = _ui_opts({})
+        self.assertEqual(opts["appearance_mode"], "dark")
+        self.assertEqual(opts["color_theme"], "dark-blue")
+        bad = _ui_opts({"ui": {"appearance_mode": "neon", "color_theme": "pink", "font_size": 99}})
+        self.assertEqual(bad["appearance_mode"], "dark")
+        self.assertEqual(bad["color_theme"], "dark-blue")
+        self.assertEqual(bad["font_size"], 22)
 
 
 if __name__ == "__main__":

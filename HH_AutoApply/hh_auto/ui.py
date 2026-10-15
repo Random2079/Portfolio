@@ -6,12 +6,16 @@ import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from hh_auto import load_config
 from hh_auto.stats import format_stats_text, load_report
 
 # D2: метка живого кода — ярлык/pythonw всегда тянет этот файл с диска
 _UI_FILE = Path(__file__).resolve()
+
+_THEMES = frozenset({"blue", "green", "dark-blue"})
+_MODES = frozenset({"dark", "light", "system"})
 
 
 def _code_stamp() -> str:
@@ -22,6 +26,32 @@ def _code_stamp() -> str:
         return "?"
 
 
+def _ui_opts(cfg: dict[str, Any]) -> dict[str, Any]:
+    raw = cfg.get("ui") or {}
+    mode = str(raw.get("appearance_mode") or "dark").lower()
+    theme = str(raw.get("color_theme") or "dark-blue").lower()
+    if mode not in _MODES:
+        mode = "dark"
+    if theme not in _THEMES:
+        theme = "dark-blue"
+    geo = str(raw.get("geometry") or "720x560")
+    font_family = str(raw.get("font_family") or "Consolas")
+    try:
+        font_size = int(raw.get("font_size") or 13)
+    except (TypeError, ValueError):
+        font_size = 13
+    font_size = max(10, min(22, font_size))
+    title = str(raw.get("window_title") or "HH AutoApply — отчёт")
+    return {
+        "appearance_mode": mode,
+        "color_theme": theme,
+        "geometry": geo,
+        "font_family": font_family,
+        "font_size": font_size,
+        "window_title": title,
+    }
+
+
 def run_ui(config_path: Path | None = None) -> int:
     try:
         import customtkinter as ctk
@@ -30,32 +60,37 @@ def run_ui(config_path: Path | None = None) -> int:
         return 1
 
     cfg = load_config(config_path)
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("dark-blue")
+    opts = _ui_opts(cfg)
+    ctk.set_appearance_mode(opts["appearance_mode"])
+    ctk.set_default_color_theme(opts["color_theme"])
 
     app = ctk.CTk()
-    app.title("HH AutoApply — отчёт")
-    app.geometry("720x560")
+    app.title(opts["window_title"])
+    app.geometry(opts["geometry"])
     app.minsize(560, 420)
 
-    header = ctk.CTkLabel(app, text="📍 HH AutoApply", font=ctk.CTkFont(size=20, weight="bold"))
+    mono = ctk.CTkFont(family=opts["font_family"], size=opts["font_size"])
+    title_font = ctk.CTkFont(size=max(16, opts["font_size"] + 7), weight="bold")
+    sub_font = ctk.CTkFont(size=max(11, opts["font_size"]))
+
+    header = ctk.CTkLabel(app, text="📍 HH AutoApply", font=title_font)
     header.pack(padx=16, pady=(14, 4), anchor="w")
 
     stamp = _code_stamp()
     sub = ctk.CTkLabel(
         app,
         text=f"🎯 отклики · лимит · резюме · 📖 код ui.py @ {stamp}",
-        font=ctk.CTkFont(size=13),
+        font=sub_font,
         text_color=("gray30", "gray70"),
     )
     sub.pack(padx=16, pady=(0, 8), anchor="w")
 
     status_var = tk.StringVar(value="🟡 готово")
-    status_lbl = ctk.CTkLabel(app, textvariable=status_var, anchor="w")
+    status_lbl = ctk.CTkLabel(app, textvariable=status_var, anchor="w", font=sub_font)
     status_lbl.pack(padx=16, pady=(0, 6), fill="x")
 
-    # Только просмотр отчёта — не редактор (раньше CTkTextbox был editable по умолчанию)
-    text = ctk.CTkTextbox(app, font=ctk.CTkFont(family="Consolas", size=13), state="disabled")
+    # Только просмотр отчёта — не редактор
+    text = ctk.CTkTextbox(app, font=mono, state="disabled")
     text.pack(padx=16, pady=8, fill="both", expand=True)
 
     btn_row = ctk.CTkFrame(app, fg_color="transparent")

@@ -32,5 +32,13 @@
   "resume_bump": {
     "cooldown_hours": 4
   },
+  "ui": {
+    "appearance_mode": "dark",
+    "color_theme": "dark-blue",
+    "geometry": "720x560",
+    "font_family": "Consolas",
+    "font_size": 13,
+    "window_title": "HH AutoApply — отчёт"
+  },
   "user_agent": "HH-AutoApply/0.1 (personal)"
 }
