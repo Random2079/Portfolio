@@ -222,6 +222,7 @@ def cmd_apply(
     dry_run: bool,
     limit: int | None,
     ranked_path: Path | None,
+    cancel_event: Any | None = None,
 ) -> int:
     from playwright.sync_api import sync_playwright
 
@@ -242,6 +243,9 @@ def cmd_apply(
     mode = "DRY-RUN" if dry_run else "LIVE"
     print(f"{mode} · кандидатов {len(vacancies)} · лимит сегодня {daily}")
 
+    def _cancelled() -> bool:
+        return bool(cancel_event is not None and cancel_event.is_set())
+
     applied_now = 0
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless, slow_mo=slow)
@@ -249,6 +253,9 @@ def cmd_apply(
         page = context.new_page()
 
         for v in vacancies:
+            if _cancelled():
+                print("⏸ отмена — стоп по кнопке")
+                break
             vid = str(
                 v.get("id")
                 or _vacancy_id_from_url(v.get("url") or "")
@@ -302,5 +309,8 @@ def cmd_apply(
         context.storage_state(path=str(state_file))
         browser.close()
 
+    if _cancelled():
+        print(f"⏸ Отменено. Обработано: {applied_now}. Лог: {_log_path()}")
+        return 3
     print(f"Готово. Обработано в этом запуске: {applied_now}. Лог: {_log_path()}")
     return 0

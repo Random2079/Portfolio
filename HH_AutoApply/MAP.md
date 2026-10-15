@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| 📍 **Где мы** | UI ✅ · **ярлык `launch.vbs`** как у YT (без exe) |
-| 🎯 **Фокус** | смоук двойной клик / headless apply в фоне |
-| 📁 **Код** | `launch.vbs` · `launch_gui.py` · `hh_auto/ui.py` · `stats.py` |
+| 📍 **Где мы** | **D1** кнопка Отмена + textbox read-only ✅ |
+| 🎯 **Фокус** | **D2** ярлык: принцип «код → без rebuild» (smoke) |
+| 📁 **Код** | `hh_auto/ui.py` · `apply.py` · `launch.vbs` |
 
 ---
 
@@ -21,38 +21,34 @@
 
 ---
 
-## Очередь
+## Очередь (по пунктам чата)
 
 | # | Что | Статус |
 |---|-----|--------|
-| A | search / score / cover | ✅ |
-| B | Playwright login + apply | ✅ |
-| **C** | **UI отчётность + raise resume** | ✅ |
-| **C1** | **ярлык launch.vbs** (как YouTube_Translator) | ✅ |
-| — | headless apply из UI (не дёргать Chromium) | ⬜ дальше |
+| A–C1 | search/apply/UI/launch.vbs | ✅ |
+| **D1** | **кнопка Отмена** + поле отчёта **не редактор** | ✅ |
+| **D2** | ярлык: код меняется → ярлык тянет новый код (без exe) | ⬜ дальше |
+| **D3** | кастом UI из config (тема/шрифт — что можно) | ⬜ |
+| **D4** | фон: headless / не дёргать глаз; реф YT WebEngine-вкладки | ⬜ |
+| **D5** | отчёт «как работаю с агентом / что улучшилось» | ⬜ после D2–D4 |
 | — | авто-цикл по расписанию | ⬜ не сейчас |
 | — | обход капчи | 🚫 |
 
+📖 **Про «txt» в UI:** это не файл и не фича — `CTkTextbox` по умолчанию editable. С D1 — `state=disabled`, только показ статистики. Редактировать смысл нет.
+
+📖 **Ярлык:** `launch.vbs` → `pythonw launch_gui.py` → живой Python. Не pyinstaller. Иконка ярлыка может меняться — ок; принцип: правки `.py` подхватываются без пересборки.
+
 ---
 
-## Смоук
+## Смоук D1
 
 ```text
 cd HH_AutoApply
-pip install -r requirements.txt
-python -m playwright install chromium
-# ярлык (без консоли, как YT):
-wscript //nologo launch.vbs
-# или CLI:
 python -m hh_auto ui
-python -m hh_auto stats
-python -m hh_auto raise-resume
+# или: wscript //nologo launch.vbs
+# Dry-run×5 → Отмена → статус «⏸ apply отменён» / «отмена…»
+# поле отчёта не должно давать печатать
 ```
-
-Ярлык на рабочий стол → ПКМ на `launch.vbs` → «Создать ярлык» / перетащить. Код меняешь — пересобирать ничего не надо.
-
-Ожидание `raise-resume`: `raised` | `already_raised_skip` | `captcha` | `error`.
-Повтор без `--force` → skip по cooldown (не спам).
 
 ---
 
@@ -61,4 +57,5 @@ python -m hh_auto raise-resume
 - Капчу не обходить — стоп + видно в UI/логе
 - `storage_state.json` / токены / живой `config.json` с секретами — не коммитить
 - Пуш только по просьбе
+- Не склеивать D2+D3+D4 в один заход
 - Не production-антибот / полный редизайн hh
