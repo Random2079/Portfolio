@@ -4,6 +4,7 @@ from hh_auto.apply import page_looks_like_captcha
 from hh_auto.cover import render_cover
 from hh_auto.limits import can_apply, record_apply, refresh_day
 from hh_auto.score import keywords_table, rank_vacancies, score_vacancy
+from hh_auto import playwright_headless
 from hh_auto.stats import load_report
 from hh_auto.ui import _ui_opts
 
@@ -98,6 +99,14 @@ class TestUiOpts(unittest.TestCase):
         self.assertEqual(bad["appearance_mode"], "dark")
         self.assertEqual(bad["color_theme"], "dark-blue")
         self.assertEqual(bad["font_size"], 22)
+
+
+class TestHeadless(unittest.TestCase):
+    def test_default_true(self):
+        self.assertTrue(playwright_headless({}))
+        self.assertTrue(playwright_headless({"playwright": {}}))
+        self.assertFalse(playwright_headless({"playwright": {"headless": False}}))
+        self.assertTrue(playwright_headless({"playwright": {"headless": True}}))
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from hh_auto import DATA, ensure_data_dir, load_config
+from hh_auto import DATA, ensure_data_dir, load_config, playwright_headless
 from hh_auto.cover import render_cover
 from hh_auto.limits import can_apply, load_state, record_apply, save_state
 
@@ -92,14 +92,14 @@ def cmd_login(cfg: dict[str, Any]) -> int:
     pw_cfg = cfg.get("playwright") or {}
     state_file = _state_path(cfg)
     ensure_data_dir()
-    headless = bool(pw_cfg.get("headless"))
+    # login всегда с окном — иначе не залогиниться руками
     slow = int(pw_cfg.get("slow_mo_ms") or 0)
 
     print("Откроется Chromium → зайди в hh.ru (логин).")
     print("Когда профиль открыт — вернись в терминал и нажми Enter.")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless, slow_mo=slow)
+        browser = p.chromium.launch(headless=False, slow_mo=slow)
         context = browser.new_context()
         page = context.new_page()
         page.goto("https://hh.ru/applicant/resumes", wait_until="domcontentloaded")
@@ -240,7 +240,7 @@ def cmd_apply(
     tz = cfg.get("timezone") or "Asia/Yekaterinburg"
     st = load_state(_apply_state_path())
     pw_cfg = cfg.get("playwright") or {}
-    headless = bool(pw_cfg.get("headless"))
+    headless = playwright_headless(cfg)
     slow = int(pw_cfg.get("slow_mo_ms") or 0)
     cover_template = (
         cfg.get("cover_template")
@@ -249,7 +249,8 @@ def cmd_apply(
     )
 
     mode = "DRY-RUN" if dry_run else "LIVE"
-    print(f"{mode} · кандидатов {len(vacancies)} · лимит сегодня {daily}")
+    eye = "фон(headless)" if headless else "окно Chromium"
+    print(f"{mode} · кандидатов {len(vacancies)} · лимит сегодня {daily} · {eye}")
 
     def _cancelled() -> bool:
         return bool(cancel_event is not None and cancel_event.is_set())

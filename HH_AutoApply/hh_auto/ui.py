@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from hh_auto import load_config
+from hh_auto import load_config, playwright_headless, save_config
 from hh_auto.stats import format_stats_text, load_report
 
 # D2: метка живого кода — ярлык/pythonw всегда тянет этот файл с диска
@@ -77,17 +77,46 @@ def run_ui(config_path: Path | None = None) -> int:
     header.pack(padx=16, pady=(14, 4), anchor="w")
 
     stamp = _code_stamp()
+    headless_on = playwright_headless(cfg)
     sub = ctk.CTkLabel(
         app,
         text=f"🎯 отклики · лимит · резюме · 📖 код ui.py @ {stamp}",
         font=sub_font,
         text_color=("gray30", "gray70"),
     )
-    sub.pack(padx=16, pady=(0, 8), anchor="w")
+    sub.pack(padx=16, pady=(0, 4), anchor="w")
 
     status_var = tk.StringVar(value="🟡 готово")
     status_lbl = ctk.CTkLabel(app, textvariable=status_var, anchor="w", font=sub_font)
-    status_lbl.pack(padx=16, pady=(0, 6), fill="x")
+    status_lbl.pack(padx=16, pady=(0, 4), fill="x")
+
+    mode_row = ctk.CTkFrame(app, fg_color="transparent")
+    mode_row.pack(padx=16, pady=(0, 6), fill="x")
+    headless_var = tk.BooleanVar(value=headless_on)
+    mode_hint = tk.StringVar(
+        value="🙈 браузер в фоне (headless)" if headless_on else "👀 окно Chromium видно"
+    )
+
+    def on_headless_toggle() -> None:
+        on = bool(headless_var.get())
+        cfg.setdefault("playwright", {})["headless"] = on
+        try:
+            save_config(cfg)
+            mode_hint.set("🙈 браузер в фоне (headless)" if on else "👀 окно Chromium видно")
+            status_var.set("✅ headless → config.json" if on else "✅ окно Chromium → config.json")
+        except Exception as e:
+            status_var.set(f"❌ не сохранил config: {e}")
+
+    ctk.CTkSwitch(
+        mode_row,
+        text="фон без окна",
+        variable=headless_var,
+        command=on_headless_toggle,
+        font=sub_font,
+    ).pack(side="left")
+    ctk.CTkLabel(mode_row, textvariable=mode_hint, font=sub_font, text_color=("gray30", "gray70")).pack(
+        side="left", padx=(12, 0)
+    )
 
     # Только просмотр отчёта — не редактор
     text = ctk.CTkTextbox(app, font=mono, state="disabled")

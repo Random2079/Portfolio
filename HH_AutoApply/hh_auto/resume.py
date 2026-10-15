@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any
 
-from hh_auto import ensure_data_dir, load_config
+from hh_auto import ensure_data_dir, load_config, playwright_headless
 from hh_auto.apply import _append_log, _state_path, _visible_captcha, page_looks_like_captcha
 from hh_auto.limits import _OFFSETS, _today
 from hh_auto.stats import load_resume_state, save_resume_state
@@ -101,7 +101,7 @@ def raise_resume(cfg: dict[str, Any] | None = None, *, force: bool = False) -> d
         return result
 
     pw_cfg = cfg.get("playwright") or {}
-    headless = bool(pw_cfg.get("headless"))
+    headless = playwright_headless(cfg)
     slow = int(pw_cfg.get("slow_mo_ms") or 0)
 
     from playwright.sync_api import sync_playwright

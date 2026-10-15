@@ -272,9 +272,12 @@ def fetch_vacancies_web(config: dict[str, Any]) -> list[dict[str, Any]]:
         "стажер",
     ]
     pw_cfg = config.get("playwright") or {}
-    headless = bool(pw_cfg.get("headless", True))
+    from hh_auto import playwright_headless
+
     if "search_headless" in pw_cfg:
         headless = bool(pw_cfg["search_headless"])
+    else:
+        headless = playwright_headless(config)
     slow = int(pw_cfg.get("slow_mo_ms") or 0)
     state = _storage_state_path(config)
     by_id: dict[str, dict[str, Any]] = {}

@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| 📍 **Где мы** | **D3** UI из `config.ui` ✅ |
-| 🎯 **Фокус** | **D4** headless фон (не дёргать глаз) |
-| 📁 **Код** | `hh_auto/ui.py` · `config*.json` · дальше `apply.py` / playwright |
+| 📍 **Где мы** | **D4** headless фон ✅ |
+| 🎯 **Фокус** | смоук dry-run / raise без окна Chromium |
+| 📁 **Код** | `playwright_headless` · `ui` switch · `config.playwright.headless` |
 
 ---
 
@@ -14,10 +14,11 @@
 
 | Источник | Роль |
 |---|---|
-| `data/apply_state.json` | **день**: лимит 40 |
-| `data/apply_log.jsonl` | лента статусов |
-| `config.json` → `cover_template` | сопроводительное |
-| `config.json` → `ui` | тема / шрифт / размер окна |
+| `data/apply_state.json` | день / лимит 40 |
+| `data/apply_log.jsonl` | лента |
+| `config.cover_template` | сопроводительное |
+| `config.ui` | тема / шрифт |
+| `config.playwright.headless` | **true** = браузер без окна (apply/search/resume) |
 | `data/storage_state.json` | 🔒 не в git |
 
 ---
@@ -26,24 +27,23 @@
 
 | # | Что | Статус |
 |---|-----|--------|
-| A–D2 | ядро + UI + ярлык + cover | ✅ |
-| **D3** | **кастом UI из config** (`appearance_mode`, theme, font, geometry) | ✅ |
-| **D4** | headless фон | ⬜ дальше |
+| A–D3 | ядро + UI + ярлык + cover + ui-config | ✅ |
+| **D4** | **headless фон** (не дёргать глаз) | ✅ 🟡 смоук |
 | — | обход капчи | 🚫 |
 
-📖 **Почему слой быстрый:** HH — тонкий tool (~сотни строк), не YT/TTS на десятки kLOC. Скорость ≠ «халтура», просто меньше графа связей.
-
-📖 **`config.ui` (D3):**  
-`appearance_mode`: dark|light|system · `color_theme`: blue|green|dark-blue · `font_family` / `font_size` (10–22) · `geometry` · `window_title`. Мусорные значения → дефолты.
+📖 **D4:** apply / resume / search → `headless: true` по умолчанию. В UI переключатель «фон без окна» пишет в `config.json`.  
+**login** (`python -m hh_auto login`) всегда **с окном** — иначе руками не войти.
 
 ---
 
-## Смоук D3
+## Смоук D4
 
 ```text
-# в config.json → ui.font_size: 16, color_theme: "green"
+# config: playwright.headless = true (или галка в UI)
 wscript //nologo launch.vbs
-# шрифт/тема подхватились → ок
+# Dry-run×5 / Поднять резюме → окно Chromium НЕ должно вылезать
+# только tool-UI; в статусе/консоли: «фон(headless)»
+# login по-прежнему: python -m hh_auto login → окно видно
 ```
 
 ---
@@ -51,4 +51,3 @@ wscript //nologo launch.vbs
 ## 🚫 Запреты
 
 - Капчу не обходить · секреты не в git · пуш по просьбе
-- D4 отдельно, не клеить с D3
