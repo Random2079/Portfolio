@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| 📍 **Где мы** | **D4** headless фон ✅ |
-| 🎯 **Фокус** | смоук dry-run / raise без окна Chromium |
-| 📁 **Код** | `playwright_headless` · `ui` switch · `config.playwright.headless` |
+| 📍 **Где мы** | UI кнопки: **Поиск / LIVE / Резюме / Отмена** ✅ · лог сброшен |
+| 🎯 **Фокус** | смоук: Поиск → Отклики LIVE (headless) |
+| 📁 **Код** | `hh_auto/ui.py` · `stats.archive_and_clear_log` |
 
 ---
 
@@ -14,11 +14,10 @@
 
 | Источник | Роль |
 |---|---|
-| `data/apply_state.json` | день / лимит **100** (`config.daily_limit`) |
-| `data/apply_log.jsonl` | лента |
-| `config.cover_template` | сопроводительное |
-| `config.ui` | тема / шрифт |
-| `config.playwright.headless` | **true** = браузер без окна (apply/search/resume) |
+| `config.daily_limit` | **100**/день |
+| `data/apply_state.json` | счётчик дня |
+| `data/apply_log.jsonl` | лента (можно сбросить кнопкой) |
+| `config.playwright.headless` | фон без окна |
 | `data/storage_state.json` | 🔒 не в git |
 
 ---
@@ -27,23 +26,21 @@
 
 | # | Что | Статус |
 |---|-----|--------|
-| A–D3 | ядро + UI + ярлык + cover + ui-config | ✅ |
-| **D4** | **headless фон** (не дёргать глаз) | ✅ 🟡 смоук |
+| A–D4 | ядро + headless + cover | ✅ |
+| **D4b** | UI: LIVE-кнопки, убран dry-run, сброс лога | ✅ |
 | — | обход капчи | 🚫 |
 
-📖 **D4:** apply / resume / search → `headless: true` по умолчанию. В UI переключатель «фон без окна» пишет в `config.json`.  
-**login** (`python -m hh_auto login`) всегда **с окном** — иначе руками не войти.
+📖 **Кнопки:** 🔍 Поиск · 📨 Отклики LIVE (поле «за раз») · 📄 Резюме↑ · ⏸ Отмена · 🔄 Статистика · 🗑 Сброс лога.  
+Dry-run из UI убран (CLI `apply --dry-run` жив).
 
 ---
 
-## Смоук D4
+## Смоук
 
 ```text
-# config: playwright.headless = true (или галка в UI)
 wscript //nologo launch.vbs
-# Dry-run×5 / Поднять резюме → окно Chromium НЕ должно вылезать
-# только tool-UI; в статусе/консоли: «фон(headless)»
-# login по-прежнему: python -m hh_auto login → окно видно
+# Поиск → Отклики LIVE (20) → Chromium не вылезает · счётчик растёт
+# Сброс лога → лента пустая, архив в data/apply_log_archive_*.jsonl
 ```
 
 ---

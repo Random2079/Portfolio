@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import threading
 import tkinter as tk
 from datetime import datetime
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from hh_auto import load_config, playwright_headless, save_config
-from hh_auto.stats import format_stats_text, load_report
+from hh_auto.stats import archive_and_clear_log, format_stats_text, load_report
 
 # D2: метка живого кода — ярлык/pythonw всегда тянет этот файл с диска
 _UI_FILE = Path(__file__).resolve()
@@ -67,7 +68,7 @@ def run_ui(config_path: Path | None = None) -> int:
     app = ctk.CTk()
     app.title(opts["window_title"])
     app.geometry(opts["geometry"])
-    app.minsize(560, 420)
+    app.minsize(640, 460)
 
     mono = ctk.CTkFont(family=opts["font_family"], size=opts["font_size"])
     title_font = ctk.CTkFont(size=max(16, opts["font_size"] + 7), weight="bold")
@@ -80,7 +81,7 @@ def run_ui(config_path: Path | None = None) -> int:
     headless_on = playwright_headless(cfg)
     sub = ctk.CTkLabel(
         app,
-        text=f"🎯 отклики · лимит · резюме · 📖 код ui.py @ {stamp}",
+        text=f"🎯 кнопки · лимит {cfg.get('daily_limit', 100)}/день · 📖 ui.py @ {stamp}",
         font=sub_font,
         text_color=("gray30", "gray70"),
     )
@@ -91,10 +92,10 @@ def run_ui(config_path: Path | None = None) -> int:
     status_lbl.pack(padx=16, pady=(0, 4), fill="x")
 
     mode_row = ctk.CTkFrame(app, fg_color="transparent")
-    mode_row.pack(padx=16, pady=(0, 6), fill="x")
+    mode_row.pack(padx=16, pady=(0, 4), fill="x")
     headless_var = tk.BooleanVar(value=headless_on)
     mode_hint = tk.StringVar(
-        value="🙈 браузер в фоне (headless)" if headless_on else "👀 окно Chromium видно"
+        value="🙈 браузер в фоне" if headless_on else "👀 окно Chromium"
     )
 
     def on_headless_toggle() -> None:
@@ -102,10 +103,10 @@ def run_ui(config_path: Path | None = None) -> int:
         cfg.setdefault("playwright", {})["headless"] = on
         try:
             save_config(cfg)
-            mode_hint.set("🙈 браузер в фоне (headless)" if on else "👀 окно Chromium видно")
-            status_var.set("✅ headless → config.json" if on else "✅ окно Chromium → config.json")
+            mode_hint.set("🙈 браузер в фоне" if on else "👀 окно Chromium")
+            status_var.set("✅ режим браузера сохранён")
         except Exception as e:
-            status_var.set(f"❌ не сохранил config: {e}")
+            status_var.set(f"❌ config: {e}")
 
     ctk.CTkSwitch(
         mode_row,
@@ -118,12 +119,26 @@ def run_ui(config_path: Path | None = None) -> int:
         side="left", padx=(12, 0)
     )
 
-    # Только просмотр отчёта — не редактор
+    batch_row = ctk.CTkFrame(app, fg_color="transparent")
+    batch_row.pack(padx=16, pady=(0, 6), fill="x")
+    ctk.CTkLabel(batch_row, text="за раз:", font=sub_font).pack(side="left")
+    limit_entry = ctk.CTkEntry(batch_row, width=56, font=sub_font)
+    limit_entry.insert(0, "20")
+    limit_entry.pack(side="left", padx=(8, 0))
+    ctk.CTkLabel(
+        batch_row,
+        text="(LIVE откликов за один запуск)",
+        font=sub_font,
+        text_color=("gray40", "gray60"),
+    ).pack(side="left", padx=(10, 0))
+
     text = ctk.CTkTextbox(app, font=mono, state="disabled")
     text.pack(padx=16, pady=8, fill="both", expand=True)
 
     btn_row = ctk.CTkFrame(app, fg_color="transparent")
-    btn_row.pack(padx=16, pady=(0, 14), fill="x")
+    btn_row.pack(padx=16, pady=(0, 8), fill="x")
+    btn_row2 = ctk.CTkFrame(app, fg_color="transparent")
+    btn_row2.pack(padx=16, pady=(0, 14), fill="x")
 
     cancel_event = threading.Event()
     busy_lock = threading.Lock()
@@ -154,7 +169,7 @@ def run_ui(config_path: Path | None = None) -> int:
     def _begin_job(label: str) -> bool:
         with busy_lock:
             if job_running["v"]:
-                status_var.set("⏸ уже идёт задача — сначала Отмена или дождись")
+                status_var.set("⏸ уже идёт задача — Отмена или подожди")
                 return False
             job_running["v"] = True
             cancel_event.clear()
@@ -170,7 +185,70 @@ def run_ui(config_path: Path | None = None) -> int:
             status_var.set("📖 нечего отменять")
             return
         cancel_event.set()
-        status_var.set("⏸ отмена… дождусь конца текущего шага")
+        status_var.set("⏸ отмена…")
+
+    def _batch_limit() -> int:
+        try:
+            n = int(limit_entry.get().strip())
+        except ValueError:
+            n = 20
+        return max(1, min(n, int(cfg.get("daily_limit") or 100)))
+
+    def do_search() -> None:
+        if not _begin_job("🟡 поиск вакансий…"):
+            return
+
+        def worker() -> None:
+            try:
+                from hh_auto.__main__ import cmd_search
+
+                code = cmd_search(argparse.Namespace(config=None))
+                app.after(
+                    0,
+                    lambda: status_var.set(
+                        f"{'✅' if code == 0 else '❌'} поиск exit={code} · список обновлён"
+                    ),
+                )
+                app.after(0, refresh_stats)
+            except Exception as e:
+                app.after(0, lambda: status_var.set(f"❌ search: {e}"))
+            finally:
+                _end_job()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def do_apply_live() -> None:
+        lim = _batch_limit()
+        if not _begin_job(f"🟡 LIVE отклики ×{lim}…"):
+            return
+
+        def worker() -> None:
+            try:
+                from hh_auto.apply import cmd_apply
+
+                code = cmd_apply(
+                    cfg,
+                    dry_run=False,
+                    limit=lim,
+                    ranked_path=None,
+                    cancel_event=cancel_event,
+                )
+                if code == 3:
+                    msg = "⏸ LIVE отменён"
+                elif code == 2:
+                    msg = "❌ LIVE стоп: капча"
+                elif code == 1:
+                    msg = "❌ LIVE: нет login/storage — python -m hh_auto login"
+                else:
+                    msg = f"✅ LIVE готово exit={code}"
+                app.after(0, lambda: status_var.set(msg))
+                app.after(0, refresh_stats)
+            except Exception as e:
+                app.after(0, lambda: status_var.set(f"❌ apply: {e}"))
+            finally:
+                _end_job()
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def do_raise() -> None:
         if not _begin_job("🟡 поднимаю резюме…"):
@@ -184,10 +262,6 @@ def run_ui(config_path: Path | None = None) -> int:
                 from hh_auto.resume import raise_resume
 
                 result = raise_resume(cfg)
-                if cancel_event.is_set():
-                    app.after(0, lambda: status_var.set("⏸ отменено (после клика могло успеть)"))
-                    app.after(0, refresh_stats)
-                    return
                 st = result["status"]
                 icon = {
                     "raised": "✅",
@@ -195,7 +269,10 @@ def run_ui(config_path: Path | None = None) -> int:
                     "captcha": "❌",
                     "error": "❌",
                 }.get(st, "🧩")
-                app.after(0, lambda: status_var.set(f"{icon} resume: {st} — {result.get('detail') or ''}"))
+                app.after(
+                    0,
+                    lambda: status_var.set(f"{icon} resume: {st} — {result.get('detail') or ''}"),
+                )
                 app.after(0, refresh_stats)
             except Exception as e:
                 app.after(0, lambda: status_var.set(f"❌ resume: {e}"))
@@ -204,37 +281,27 @@ def run_ui(config_path: Path | None = None) -> int:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def do_apply_dry() -> None:
-        if not _begin_job("🟡 apply --dry-run…"):
-            return
+    def do_clear_log() -> None:
+        try:
+            dest = archive_and_clear_log()
+            if dest:
+                status_var.set(f"🗑 лог сброшен → {dest.name}")
+            else:
+                status_var.set("🗑 лог уже пуст")
+            refresh_stats()
+        except Exception as e:
+            status_var.set(f"❌ сброс лога: {e}")
 
-        def worker() -> None:
-            try:
-                from hh_auto.apply import cmd_apply
-
-                code = cmd_apply(
-                    cfg,
-                    dry_run=True,
-                    limit=5,
-                    ranked_path=None,
-                    cancel_event=cancel_event,
-                )
-                if code == 3:
-                    msg = "⏸ apply отменён"
-                else:
-                    msg = f"{'✅' if code == 0 else '❌'} apply dry-run exit={code}"
-                app.after(0, lambda: status_var.set(msg))
-                app.after(0, refresh_stats)
-            except Exception as e:
-                app.after(0, lambda: status_var.set(f"❌ apply: {e}"))
-            finally:
-                _end_job()
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    ctk.CTkButton(btn_row, text="🔄 Обновить", width=110, command=refresh_stats).pack(side="left", padx=(0, 8))
-    ctk.CTkButton(btn_row, text="📄 Поднять резюме", width=150, command=do_raise).pack(side="left", padx=(0, 8))
-    ctk.CTkButton(btn_row, text="🧪 Dry-run×5", width=120, command=do_apply_dry).pack(side="left", padx=(0, 8))
+    ctk.CTkButton(btn_row, text="🔍 Поиск", width=100, command=do_search).pack(side="left", padx=(0, 8))
+    ctk.CTkButton(
+        btn_row,
+        text="📨 Отклики LIVE",
+        width=140,
+        fg_color=("#2B6B3F", "#1E4D2E"),
+        hover_color=("#34824C", "#266038"),
+        command=do_apply_live,
+    ).pack(side="left", padx=(0, 8))
+    ctk.CTkButton(btn_row, text="📄 Резюме↑", width=110, command=do_raise).pack(side="left", padx=(0, 8))
     ctk.CTkButton(
         btn_row,
         text="⏸ Отмена",
@@ -243,7 +310,13 @@ def run_ui(config_path: Path | None = None) -> int:
         hover_color=("#A04545", "#7A3333"),
         command=request_cancel,
     ).pack(side="left", padx=(0, 8))
-    ctk.CTkLabel(btn_row, text="📖 CLI жив", text_color=("gray40", "gray60")).pack(side="right")
+
+    ctk.CTkButton(btn_row2, text="🔄 Статистика", width=120, command=refresh_stats).pack(
+        side="left", padx=(0, 8)
+    )
+    ctk.CTkButton(btn_row2, text="🗑 Сброс лога", width=120, command=do_clear_log).pack(
+        side="left", padx=(0, 8)
+    )
 
     refresh_stats()
     app.mainloop()

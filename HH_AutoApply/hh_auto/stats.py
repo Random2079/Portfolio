@@ -49,6 +49,20 @@ def _parse_ts(ts: str, tz) -> datetime | None:
         return None
 
 
+def archive_and_clear_log(path: Path | None = None) -> Path | None:
+    """Старый лог → apply_log_archive_*.jsonl, текущий обнулить. State/лимит не трогает."""
+    ensure_data_dir()
+    p = path or APPLY_LOG
+    if not p.exists() or p.stat().st_size == 0:
+        p.write_text("", encoding="utf-8")
+        return None
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = p.parent / f"apply_log_archive_{stamp}.jsonl"
+    p.replace(dest)
+    p.write_text("", encoding="utf-8")
+    return dest
+
+
 def read_log(path: Path | None = None) -> list[dict[str, Any]]:
     p = path or APPLY_LOG
     if not p.exists():
