@@ -14,7 +14,7 @@
 
 | Источник | Роль |
 |---|---|
-| `data/apply_state.json` | день / лимит 40 |
+| `data/apply_state.json` | день / лимит **100** (`config.daily_limit`) |
 | `data/apply_log.jsonl` | лента |
 | `config.cover_template` | сопроводительное |
 | `config.ui` | тема / шрифт |

@@ -236,7 +236,7 @@ def cmd_apply(
         return 1
 
     vacancies = load_ranked(ranked_path)
-    daily = int(limit if limit is not None else (cfg.get("daily_limit") or 40))
+    daily = int(limit if limit is not None else (cfg.get("daily_limit") or 100))
     tz = cfg.get("timezone") or "Asia/Yekaterinburg"
     st = load_state(_apply_state_path())
     pw_cfg = cfg.get("playwright") or {}

@@ -85,7 +85,7 @@ def load_report(cfg: dict[str, Any] | None = None, recent_n: int = 15) -> dict[s
     """Канон дня: apply_state.count после refresh_day. Лог — статусы и лента."""
     cfg = cfg or load_config()
     tz, tz_name = _tz(cfg)
-    daily_limit = int(cfg.get("daily_limit") or 40)
+    daily_limit = int(cfg.get("daily_limit") or 100)
 
     state = refresh_day(load_state(APPLY_STATE), tz_name)
     today_iso = _today(tz_name).isoformat()
