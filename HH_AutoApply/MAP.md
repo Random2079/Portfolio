@@ -15,7 +15,7 @@
 | Источник | Роль |
 |---|---|
 | `config.daily_limit` | HH **100**/день |
-| `config.kwork.*` | Kwork лимит **15**/день, тик **3**, интервал **60** мин |
+| `config.kwork.*` | Kwork лимит **5**/день, тик **1**, интервал **60** мин (коннекты биржи ~25 — не жечь) |
 | `data/apply_state.json` | HH счётчик дня |
 | `data/kwork_apply_state.json` | Kwork счётчик / applied_ids |
 | `data/kwork_apply_log.jsonl` | лента заявок (buyer / title / url / cover) |

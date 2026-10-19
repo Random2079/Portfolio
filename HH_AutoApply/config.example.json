@@ -50,8 +50,8 @@
   "kwork": {
     "enabled": true,
     "interval_minutes": 60,
-    "daily_limit": 15,
-    "per_tick_limit": 3,
+    "daily_limit": 5,
+    "per_tick_limit": 1,
     "min_score": 1,
     "keywords": [
       "python",
