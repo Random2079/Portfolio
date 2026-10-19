@@ -40,5 +40,36 @@
     "font_size": 13,
     "window_title": "HH AutoApply — отчёт"
   },
-  "user_agent": "HH-AutoApply/0.1 (personal)"
+  "user_agent": "HH-AutoApply/0.1 (personal)",
+  "telegram": {
+    "channels": ["job_python", "young_june"],
+    "min_score": 1,
+    "yj_categories": ["python", "backend", "data"],
+    "resolve_limit": 20
+  },
+  "kwork": {
+    "enabled": true,
+    "interval_minutes": 60,
+    "daily_limit": 15,
+    "per_tick_limit": 3,
+    "min_score": 1,
+    "keywords": [
+      "python",
+      "playwright",
+      "бот",
+      "парс",
+      "автоматиз",
+      "fastapi",
+      "скрипт",
+      "selenium",
+      "парсинг"
+    ],
+    "search_queries": ["python", "playwright", "парсинг", "бот"],
+    "price_default_rub": 35000,
+    "price_min_rub": 5000,
+    "price_max_rub": 120000,
+    "storage_state": "data/kwork_storage_state.json",
+    "deepseek_model": "deepseek-chat",
+    "bio": "Пишу на Python: автоматизация, Playwright, парсинг, боты, небольшие сервисы (FastAPI/SQLite). Довожу до рабочего результата. Портфолио: https://github.com/Random2079/Portfolio"
+  }
 }

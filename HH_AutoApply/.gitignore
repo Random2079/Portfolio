@@ -1,5 +1,10 @@
 # HH_AutoApply — local only
 data/storage_state.json
+data/kwork_storage_state.json
+data/kwork_apply_state.json
+data/kwork_apply_log.jsonl
+data/kwork_apply_log_archive_*.jsonl
+data/kwork_ai_usage.jsonl
 data/*.html
 .env
 .venv/
